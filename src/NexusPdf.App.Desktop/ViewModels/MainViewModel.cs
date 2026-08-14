@@ -672,6 +672,17 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void ShowBatch() => BatchDialog.Run(OwnerWindow, _services);
 
+    [RelayCommand]
+    private void CompareDocuments() =>
+        CompareDialog.Run(OwnerWindow, _services.Engine, ActiveDocument?.FilePath);
+
+    [RelayCommand]
+    private async Task ShowProperties()
+    {
+        if (ActiveDocument is { } doc)
+            await DocPropertiesDialog.ShowAsync(OwnerWindow, doc);
+    }
+
     /// <summary>Цель записи не должна быть открыта ни в одной вкладке НИ ОДНОГО окна приложения.</summary>
     private bool RejectIfTargetOpenAnywhere(string targetPath)
     {

@@ -221,6 +221,45 @@ public static class Program
                 return 0;
             }
 
+            case "compare":
+            {
+                if (positional.Count != 2)
+                    throw new UsageException("compare: нужны <первый.pdf> и <второй.pdf>.");
+                CompareSession session;
+                try
+                {
+                    session = await CompareSession.OpenAsync(engine,
+                        positional[0], NullIfEmpty(Get(options, "password-a", "")),
+                        positional[1], NullIfEmpty(Get(options, "password-b", "")),
+                        ct);
+                }
+                catch (PdfPasswordRequiredException)
+                {
+                    throw new InvalidOperationException(
+                        "Один из файлов защищён паролем: укажите --password-a / --password-b.");
+                }
+                await using (session)
+                {
+                    var summary = await session.AnalyzeAsync(null, ct);
+                    foreach (var page in summary.Pages)
+                    {
+                        var status = page switch
+                        {
+                            { OnlyInFirst: true } => "только в первом файле",
+                            { OnlyInSecond: true } => "только во втором файле",
+                            { SizeMismatch: true } => $"размер страницы отличается (визуально {page.DiffPercent:0.##}%)",
+                            { IsDifferent: true } => $"отличия {page.DiffPercent:0.##}%",
+                            _ => "одинаковые",
+                        };
+                        Console.WriteLine($"Страница {page.PageIndex + 1}: {status}");
+                    }
+                    Console.WriteLine(summary.DifferentPages == 0
+                        ? "Итог: документы визуально идентичны."
+                        : $"Итог: отличаются {summary.DifferentPages} из {summary.Pages.Count} страниц.");
+                    return summary.DifferentPages == 0 ? 0 : 3;
+                }
+            }
+
             default:
                 throw new UsageException($"Неизвестная команда «{verb}».");
         }
@@ -303,6 +342,8 @@ public static class Program
     private static string Get(Dictionary<string, string> options, string name, string fallback) =>
         options.TryGetValue(name, out var value) ? value : fallback;
 
+    private static string? NullIfEmpty(string value) => value.Length > 0 ? value : null;
+
     private static double ParseDouble(Dictionary<string, string> options, string name, double fallback)
     {
         if (!options.TryGetValue(name, out var raw))
@@ -384,6 +425,9 @@ NexusPdfCli — консольные операции NexusPDF (локально
   ocr           <вход.pdf> <выход.pdf> [--password X]
       Распознавание сканов (rus+eng): невидимый текстовый слой.
       Формы AcroForm в копии становятся статикой (выводится предупреждение).
+  compare       <первый.pdf> <второй.pdf> [--password-a X] [--password-b Y]
+      Визуальное постраничное сравнение. Код возврата 0 — идентичны,
+      3 — есть отличия (постраничный отчёт в stdout).
 
 Общее: --force — перезаписать существующие файлы результата (в том числе
 картинки страниц у export-images). merge и from-images переносят страницы

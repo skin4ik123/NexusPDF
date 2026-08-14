@@ -86,6 +86,17 @@ public sealed record PdfAnnotationInfo(
     string Author,
     string Value = "");
 
+/// <summary>Метаданные документа: версия PDF и строки словаря /Info (пустые, если не заданы).</summary>
+public sealed record PdfDocumentMetadata(
+    string PdfVersion,
+    string Title,
+    string Author,
+    string Subject,
+    string Creator,
+    string Producer,
+    string CreationDate,
+    string ModDate);
+
 /// <summary>Страница будущего PDF из изображения: растр BGRA32 и итоговый размер страницы в пунктах.</summary>
 public sealed record ImagePageSpec(
     byte[] Bgra,

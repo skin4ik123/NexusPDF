@@ -124,6 +124,45 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
         }
     }
 
+    public Task<PdfDocumentMetadata> GetMetadataAsync(CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() =>
+            {
+                var version = 0;
+                var versionText = fpdfview.FPDF_GetFileVersion(NativeDoc, ref version) != 0 && version > 0
+                    ? $"{version / 10}.{version % 10}"
+                    : "";
+                return new PdfDocumentMetadata(
+                    versionText,
+                    GetMetaText("Title"), GetMetaText("Author"), GetMetaText("Subject"),
+                    GetMetaText("Creator"), GetMetaText("Producer"),
+                    GetMetaText("CreationDate"), GetMetaText("ModDate"));
+            }, ct);
+        }
+    }
+
+    private string GetMetaText(string tag)
+    {
+        // Два вызова: длина в байтах UTF-16LE (включая NUL), затем данные.
+        var length = fpdf_doc.FPDF_GetMetaText(NativeDoc, tag, IntPtr.Zero, 0);
+        if (length <= 2)
+            return "";
+        var buffer = System.Runtime.InteropServices.Marshal.AllocHGlobal((int)length);
+        try
+        {
+            fpdf_doc.FPDF_GetMetaText(NativeDoc, tag, buffer, length);
+            return System.Runtime.InteropServices.Marshal
+                .PtrToStringUni(buffer, (int)(length / 2) - 1) ?? "";
+        }
+        finally
+        {
+            System.Runtime.InteropServices.Marshal.FreeHGlobal(buffer);
+        }
+    }
+
     // ----- Формы -----
 
     public Task<int> GetFormTypeAsync(CancellationToken ct)
