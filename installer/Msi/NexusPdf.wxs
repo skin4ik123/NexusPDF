@@ -17,7 +17,7 @@
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="NexusPDF"
            Manufacturer="NexusPDF"
-           Version="0.8.0"
+           Version="0.9.0"
            UpgradeCode="7C6E2B7A-9A1E-4F2B-B4B0-3E62D8C5A101"
            Language="1049"
            Scope="perUserOrMachine">
@@ -41,6 +41,7 @@
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder"/>
     <StandardDirectory Id="DesktopFolder"/>
+    <StandardDirectory Id="SendToFolder"/>
 
     <!-- Все файлы publish-каталога (включая tools\qpdf и THIRD_PARTY_NOTICES) -->
     <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
@@ -60,6 +61,16 @@
                   Target="[INSTALLFOLDER]NexusPdf.exe" WorkingDirectory="INSTALLFOLDER"
                   Icon="AppIco"/>
         <RegistryValue Root="HKMU" Key="Software\NexusPDF" Name="desktopShortcut"
+                       Type="integer" Value="1" KeyPath="yes"/>
+      </Component>
+      <!-- «Отправить → NexusPDF» в Проводнике: выделенные PDF открываются
+           вкладками. Работает на всех версиях Windows, в отличие от
+           HKCU-пунктов контекстного меню, игнорируемых Win11 24H2+. -->
+      <Component Id="SendToShortcut" Directory="SendToFolder">
+        <Shortcut Id="AppSendToShortcut" Name="NexusPDF"
+                  Target="[INSTALLFOLDER]NexusPdf.exe" WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIco"/>
+        <RegistryValue Root="HKMU" Key="Software\NexusPDF" Name="sendToShortcut"
                        Type="integer" Value="1" KeyPath="yes"/>
       </Component>
     </ComponentGroup>

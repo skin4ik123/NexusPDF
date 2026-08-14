@@ -218,6 +218,11 @@
                         Command="{Binding CreateFromImagesCommand}" Click="OnMenuItem"/>
                 <Button Style="{StaticResource LinkButton}" Content="{l:Loc MergeMenu}"
                         Command="{Binding MergePdfsCommand}" Click="OnMenuItem"/>
+                <Button Style="{StaticResource LinkButton}" Content="{l:Loc CompareMenu}"
+                        Command="{Binding CompareDocumentsCommand}" Click="OnMenuItem"/>
+                <Button Style="{StaticResource LinkButton}" Content="{l:Loc PropsMenu}"
+                        Command="{Binding ShowPropertiesCommand}" IsEnabled="{Binding HasDocuments}"
+                        Click="OnMenuItem"/>
                 <StackPanel Visibility="{Binding HasPdfTools, Converter={StaticResource BoolToVis}}">
                   <Button Style="{StaticResource LinkButton}" Content="{l:Loc BatchMenu}"
                           Command="{Binding ShowBatchCommand}" Click="OnMenuItem"/>

@@ -37,6 +37,9 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     /// <summary>Извлекает весь текст страницы (UTF-16, в порядке текстовых объектов).</summary>
     Task<string> GetPageTextAsync(int pageIndex, CancellationToken ct);
 
+    /// <summary>Метаданные документа: версия PDF и словарь /Info.</summary>
+    Task<PdfDocumentMetadata> GetMetadataAsync(CancellationToken ct);
+
     /// <summary>Прямоугольники, покрывающие диапазон символов страницы (для подсветки найденного).</summary>
     Task<IReadOnlyList<PdfTextRect>> GetTextRectsAsync(int pageIndex, int startCharIndex, int charCount, CancellationToken ct);
 
