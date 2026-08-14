@@ -61,7 +61,7 @@ public sealed class OpenedDocument : IAsyncDisposable
 
     public IReadOnlyList<ComposedPage> BuildComposition() =>
         Session.Model.Pages
-            .Select(p => new ComposedPage(Handles[p.SourceId], p.SourcePageIndex, p.RotationOffset))
+            .Select(p => new ComposedPage(Handles[p.SourceId], p.SourcePageIndex, p.RotationOffset, p.OverlayList))
             .ToList();
 
     /// <summary>

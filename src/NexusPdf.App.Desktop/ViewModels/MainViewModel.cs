@@ -270,6 +270,84 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    // ----- Оформление: колонтитулы, водяной знак, текст, изображения, подпись -----
+
+    [RelayCommand]
+    private void ShowHeaderFooter()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        var options = HeaderFooterDialog.Show(OwnerWindow, doc.PageCount);
+        if (options == null) return;
+        doc.Document.Session.Apply(PageDecorator.BuildHeaderFooter(doc.Document, options));
+        doc.StatusText = Loc.Get("DecorApplied");
+    }
+
+    [RelayCommand]
+    private void ShowWatermark()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        var options = WatermarkDialog.Show(OwnerWindow, doc.PageCount);
+        if (options == null) return;
+        doc.Document.Session.Apply(PageDecorator.BuildWatermark(doc.Document, options));
+        doc.StatusText = Loc.Get("DecorApplied");
+    }
+
+    [RelayCommand]
+    private void AddTextOverlay()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        var result = AddTextDialog.Show(OwnerWindow);
+        if (result == null) return;
+        doc.BeginPlacement((_, xPt, yPt) =>
+            new NexusPdf.Pdf.Abstractions.TextOverlay(
+                result.Text, xPt, yPt, result.FontSizePt, result.ColorArgb, 0));
+    }
+
+    [RelayCommand]
+    private void InsertImageOverlay()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        var dialog = new OpenFileDialog { Filter = Loc.Get("ImageFilter") };
+        if (dialog.ShowDialog(OwnerWindow) != true) return;
+
+        LoadedImage image;
+        try
+        {
+            image = ImageLoader.FromFile(dialog.FileName);
+        }
+        catch (Exception ex)
+        {
+            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"),
+                Loc.F("ErrorOpenFile", Path.GetFileName(dialog.FileName)), ex.ToString());
+            return;
+        }
+
+        var widthPercent = ImagePlaceDialog.Show(OwnerWindow, ImageLoader.Preview(image));
+        if (widthPercent == null) return;
+        BeginImagePlacement(doc, image, widthPercent.Value);
+    }
+
+    [RelayCommand]
+    private void InsertSignature()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        var pick = SignatureLibraryDialog.Show(OwnerWindow, _services.Signatures);
+        if (pick == null) return;
+        BeginImagePlacement(doc, pick.Image, pick.WidthPercent);
+    }
+
+    private static void BeginImagePlacement(DocumentViewModel doc, LoadedImage image, double widthPercent)
+    {
+        doc.BeginPlacement((page, xPt, yPt) =>
+        {
+            var widthPt = page.SizePt.WidthPoints * widthPercent / 100.0;
+            var heightPt = widthPt * image.Aspect;
+            return new NexusPdf.Pdf.Abstractions.ImageOverlay(
+                image.Bgra, image.PixelWidth, image.PixelHeight,
+                xPt - widthPt / 2, yPt - heightPt / 2, widthPt, heightPt);
+        });
+    }
+
     // ----- Печать и инструменты qpdf -----
 
     [RelayCommand]

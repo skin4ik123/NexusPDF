@@ -21,10 +21,52 @@ public partial class DocumentView : UserControl
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
         if (_vm != null)
+        {
             _vm.ScrollToPageRequested -= OnScrollToPage;
+            _vm.PropertyChanged -= OnVmPropertyChanged;
+        }
         _vm = e.NewValue as DocumentViewModel;
         if (_vm != null)
+        {
             _vm.ScrollToPageRequested += OnScrollToPage;
+            _vm.PropertyChanged += OnVmPropertyChanged;
+            UpdatePlacementCursor();
+        }
+    }
+
+    private void OnVmPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(DocumentViewModel.PendingOverlay))
+            UpdatePlacementCursor();
+    }
+
+    private void UpdatePlacementCursor() =>
+        PagesList.Cursor = _vm?.PendingOverlay != null ? Cursors.Cross : null;
+
+    private void OnPagesPreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_vm?.PendingOverlay == null) return;
+        if (e.OriginalSource is not DependencyObject source) return;
+
+        // Ищем контейнер страницы (Border с DataContext = PageViewModel) вверх по дереву.
+        FrameworkElement? pageElement = null;
+        for (DependencyObject? node = source; node != null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is FrameworkElement { DataContext: PageViewModel } fe && fe is Border)
+            {
+                pageElement = fe;
+                break;
+            }
+            if (node is ListBox)
+                break;
+        }
+        if (pageElement?.DataContext is not PageViewModel page) return;
+
+        var position = e.GetPosition(pageElement);
+        var scale = page.DisplayScale;
+        if (scale <= 0) return;
+        _vm.PlacePendingOverlay(page, position.X / scale, position.Y / scale);
+        e.Handled = true;
     }
 
     private void HookScroller()

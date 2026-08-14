@@ -1,15 +1,31 @@
+using NexusPdf.Pdf.Abstractions;
+
 namespace NexusPdf.Domain;
 
 /// <summary>
-/// Логическая страница документа: ссылка на страницу физического источника
-/// плюс добавочный поворот. Все структурные операции (перестановка, удаление,
-/// поворот) выполняются над списком таких ссылок и не трогают исходный файл
-/// до момента сохранения.
+/// Логическая страница документа: ссылка на страницу физического источника,
+/// добавочный поворот и наложенный новый контент (текст, изображения).
+/// Все операции выполняются над списком таких ссылок и не трогают исходный
+/// файл до момента сохранения.
 /// </summary>
-public sealed record PageRef(Guid SourceId, int SourcePageIndex, int RotationOffset)
+public sealed record PageRef(
+    Guid SourceId,
+    int SourcePageIndex,
+    int RotationOffset,
+    IReadOnlyList<PageOverlay>? Overlays = null)
 {
     public static int NormalizeQuarterTurns(int quarterTurns) => ((quarterTurns % 4) + 4) % 4;
 
+    public IReadOnlyList<PageOverlay> OverlayList => Overlays ?? Array.Empty<PageOverlay>();
+
     public PageRef Rotated(int quarterTurns) =>
         this with { RotationOffset = NormalizeQuarterTurns(RotationOffset + quarterTurns) };
+
+    public PageRef WithOverlay(PageOverlay overlay)
+    {
+        var list = new List<PageOverlay>(OverlayList) { overlay };
+        return this with { Overlays = list };
+    }
+
+    public PageRef WithoutOverlays() => this with { Overlays = null };
 }

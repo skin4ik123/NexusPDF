@@ -133,6 +133,24 @@
                 <Button Style="{StaticResource LinkButton}" Content="English"
                         Command="{Binding SetLanguageCommand}" CommandParameter="en" Click="OnMenuItem"/>
                 <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
+                <TextBlock Text="{l:Loc DecorSection}" Foreground="{DynamicResource TextSecondary}"
+                           FontSize="11" Margin="6,4"/>
+                <Button Style="{StaticResource LinkButton}" Content="{l:Loc HeaderFooterMenu}"
+                        Command="{Binding ShowHeaderFooterCommand}" IsEnabled="{Binding HasDocuments}"
+                        Click="OnMenuItem"/>
+                <Button Style="{StaticResource LinkButton}" Content="{l:Loc WatermarkMenu}"
+                        Command="{Binding ShowWatermarkCommand}" IsEnabled="{Binding HasDocuments}"
+                        Click="OnMenuItem"/>
+                <Button Style="{StaticResource LinkButton}" Content="{l:Loc AddTextMenu}"
+                        Command="{Binding AddTextOverlayCommand}" IsEnabled="{Binding HasDocuments}"
+                        Click="OnMenuItem"/>
+                <Button Style="{StaticResource LinkButton}" Content="{l:Loc InsertImageMenu}"
+                        Command="{Binding InsertImageOverlayCommand}" IsEnabled="{Binding HasDocuments}"
+                        Click="OnMenuItem"/>
+                <Button Style="{StaticResource LinkButton}" Content="{l:Loc InsertSignatureMenu}"
+                        Command="{Binding InsertSignatureCommand}" IsEnabled="{Binding HasDocuments}"
+                        Click="OnMenuItem"/>
+                <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
                 <StackPanel Visibility="{Binding HasPdfTools, Converter={StaticResource BoolToVis}}">
                   <TextBlock Text="{l:Loc ToolsSection}" Foreground="{DynamicResource TextSecondary}"
                              FontSize="11" Margin="6,4"/>

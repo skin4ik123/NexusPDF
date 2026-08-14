@@ -11,7 +11,38 @@ public sealed record RenderedPageImage(int PixelWidth, int PixelHeight, int Stri
 /// <summary>Прямоугольник текста в координатах страницы PDF (начало координат — левый нижний угол, Top &gt; Bottom).</summary>
 public sealed record PdfTextRect(double Left, double Top, double Right, double Bottom);
 
-/// <summary>Одна страница будущего документа: источник, номер страницы в источнике и добавочный поворот (в четвертях оборота по часовой).</summary>
-public sealed record ComposedPage(IPdfDocumentHandle Source, int SourcePageIndex, int ExtraQuarterTurns);
+/// <summary>
+/// Накладываемый на страницу новый контент. Координаты — в пунктах PDF от
+/// ЛЕВОГО ВЕРХНЕГО угла страницы в её ОТОБРАЖАЕМОЙ ориентации (с учётом
+/// /Rotate и добавочного поворота); движок сам переводит их в систему
+/// координат содержимого при сохранении.
+/// </summary>
+public abstract record PageOverlay;
+
+/// <summary>Новый текстовый блок. Позиция — верхний левый угол первой строки; поворот — против часовой, в отображаемых координатах.</summary>
+public sealed record TextOverlay(
+    string Text,
+    double XPt,
+    double YPt,
+    double FontSizePt,
+    uint ColorArgb,
+    double RotationDegrees) : PageOverlay;
+
+/// <summary>Новое изображение (BGRA32, построчно сверху вниз), вписанное в прямоугольник отображаемой страницы.</summary>
+public sealed record ImageOverlay(
+    byte[] Bgra,
+    int PixelWidth,
+    int PixelHeight,
+    double XPt,
+    double YPt,
+    double WidthPt,
+    double HeightPt) : PageOverlay;
+
+/// <summary>Одна страница будущего документа: источник, номер страницы в источнике, добавочный поворот (в четвертях оборота по часовой) и накладываемый контент.</summary>
+public sealed record ComposedPage(
+    IPdfDocumentHandle Source,
+    int SourcePageIndex,
+    int ExtraQuarterTurns,
+    IReadOnlyList<PageOverlay>? Overlays = null);
 
 public sealed record PdfValidationResult(bool IsValid, int PageCount, IReadOnlyList<string> Problems);

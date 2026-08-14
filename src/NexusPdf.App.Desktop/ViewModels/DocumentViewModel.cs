@@ -183,6 +183,36 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         ScrollToPageRequested?.Invoke(this, index);
     }
 
+    // ----- Размещение нового контента кликом -----
+
+    /// <summary>Фабрика оверлея: страница + точка клика (в пунктах от левого верхнего угла).</summary>
+    public sealed record PendingPlacement(Func<PageViewModel, double, double, Pdf.Abstractions.PageOverlay> Factory);
+
+    [ObservableProperty]
+    private PendingPlacement? _pendingOverlay;
+
+    public void BeginPlacement(Func<PageViewModel, double, double, Pdf.Abstractions.PageOverlay> factory)
+    {
+        PendingOverlay = new PendingPlacement(factory);
+        StatusText = Loc.Get("PlaceHint");
+    }
+
+    public void CancelPlacement()
+    {
+        if (PendingOverlay == null) return;
+        PendingOverlay = null;
+        StatusText = Loc.Get("Ready");
+    }
+
+    public void PlacePendingOverlay(PageViewModel page, double xPt, double yPt)
+    {
+        if (PendingOverlay is not { } pending) return;
+        var overlay = pending.Factory(page, xPt, yPt);
+        PendingOverlay = null;
+        StatusText = Loc.Get("Ready");
+        Document.Session.Apply(new AddOverlayOperation(page.LogicalIndex, overlay));
+    }
+
     // ----- Операции систематизации -----
 
     private static int[] ToIndices(IList? selection) =>

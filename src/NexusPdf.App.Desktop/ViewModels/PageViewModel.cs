@@ -27,6 +27,7 @@ public sealed partial class PageViewModel : ObservableObject
         LogicalIndex = logicalIndex;
         PageRef = pageRef;
         SizePt = sizePt;
+        BuildOverlayPreviews();
     }
 
     public int LogicalIndex { get; }
@@ -37,6 +38,20 @@ public sealed partial class PageViewModel : ObservableObject
 
     public double WidthDiu => SizePt.WidthPoints * PtToDiu * _owner.Zoom;
     public double HeightDiu => SizePt.HeightPoints * PtToDiu * _owner.Zoom;
+
+    /// <summary>Масштаб пункты → DIU при текущем зуме (для слоя предпросмотра оверлеев).</summary>
+    public double DisplayScale => PtToDiu * _owner.Zoom;
+
+    public IReadOnlyList<OverlayPreview> OverlayPreviews { get; private set; } = Array.Empty<OverlayPreview>();
+
+    private void BuildOverlayPreviews()
+    {
+        OverlayPreviews = PageRef.OverlayList
+            .Select(OverlayPreview.From)
+            .Where(p => p != null)
+            .Cast<OverlayPreview>()
+            .ToList();
+    }
 
     public string SizeText => Localization.Loc.F("PageSize",
         Math.Round(SizePt.WidthPoints / 72.0 * 25.4), Math.Round(SizePt.HeightPoints / 72.0 * 25.4));
@@ -58,6 +73,7 @@ public sealed partial class PageViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(WidthDiu));
         OnPropertyChanged(nameof(HeightDiu));
+        OnPropertyChanged(nameof(DisplayScale));
     }
 
     /// <summary>Запрос полноразмерного растра под текущую ширину в устройственных пикселях.</summary>

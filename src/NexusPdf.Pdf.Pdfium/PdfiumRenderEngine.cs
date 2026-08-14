@@ -132,7 +132,42 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
                 }
             }
 
-            SaveDocument(newDoc, targetPath);
+            // Наложенный контент (новый текст, изображения) запекается после
+            // установки поворотов: координаты оверлеев заданы в итоговой
+            // отображаемой ориентации.
+            FpdfFontT? overlayFont = null;
+            try
+            {
+                for (var k = 0; k < pages.Count; k++)
+                {
+                    var overlays = pages[k].Overlays;
+                    if (overlays == null || overlays.Count == 0) continue;
+
+                    if (overlayFont == null && overlays.Any(o => o is TextOverlay))
+                    {
+                        overlayFont = PdfiumOverlayWriter.LoadOverlayFont(newDoc);
+                    }
+
+                    var page = fpdfview.FPDF_LoadPage(newDoc, k);
+                    if (page == null || page.__Instance == IntPtr.Zero)
+                        throw new PdfEngineException($"Не удалось открыть страницу {k + 1} нового документа.");
+                    try
+                    {
+                        PdfiumOverlayWriter.ApplyOverlays(newDoc, page, overlayFont, overlays);
+                    }
+                    finally
+                    {
+                        fpdfview.FPDF_ClosePage(page);
+                    }
+                }
+
+                SaveDocument(newDoc, targetPath);
+            }
+            finally
+            {
+                if (overlayFont != null)
+                    fpdf_edit.FPDFFontClose(overlayFont);
+            }
         }
         finally
         {
