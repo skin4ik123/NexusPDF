@@ -88,7 +88,8 @@
                PreviewMouseWheel="OnPagesMouseWheel"
                PreviewMouseLeftButtonDown="OnPagesPreviewMouseDown"
                PreviewMouseMove="OnPagesPreviewMouseMove"
-               PreviewMouseLeftButtonUp="OnPagesPreviewMouseUp">
+               PreviewMouseLeftButtonUp="OnPagesPreviewMouseUp"
+               LostMouseCapture="OnPagesLostCapture">
         <ListBox.ItemTemplate>
           <DataTemplate>
             <Border Margin="0,12" Background="{DynamicResource PageBg}"
@@ -152,7 +153,11 @@
                           </TextBlock.RenderTransform>
                         </TextBlock>
                         <Image Source="{Binding Image}" Width="{Binding WidthPt}" Height="{Binding HeightPt}"
-                               Stretch="Fill"/>
+                               Stretch="Fill" RenderTransformOrigin="0.5,0.5">
+                          <Image.RenderTransform>
+                            <RotateTransform Angle="{Binding ImageAngleDeg}"/>
+                          </Image.RenderTransform>
+                        </Image>
                         <Border Width="20" Height="20" CornerRadius="4" Background="#F5C518"
                                 BorderBrush="#B78F00" BorderThickness="1"
                                 Visibility="{Binding IsNote, Converter={StaticResource BoolToVis}}"

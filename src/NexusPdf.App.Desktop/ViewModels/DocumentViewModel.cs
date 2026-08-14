@@ -238,9 +238,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     // ----- Панель комментариев -----
 
+    /// <summary>Строка панели: для черновика хранится ссылка на сам оверлей —
+    /// индексы устаревают между изменением сессии и асинхронным обновлением панели.</summary>
     public sealed record CommentItem(
         int PageNumber, string TypeLabel, string Author, string Text,
-        bool IsDraft, int PageIndex, int OverlayIndex);
+        bool IsDraft, NexusPdf.Pdf.Abstractions.PageOverlay? Draft);
 
     public ObservableCollection<CommentItem> Comments { get; } = new();
 
@@ -258,8 +260,23 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     [RelayCommand]
     private void DeleteDraftComment(CommentItem? item)
     {
-        if (item is not { IsDraft: true }) return;
-        Document.Session.Apply(new RemoveOverlayAtOperation(item.PageIndex, item.OverlayIndex));
+        if (item is not { IsDraft: true, Draft: { } draft }) return;
+        // Актуальные индексы резолвятся по ссылке в момент клика: панель могла
+        // ещё не обновиться после предыдущего изменения сессии.
+        var pages = Document.Session.Model.Pages;
+        for (var i = 0; i < pages.Count; i++)
+        {
+            var list = pages[i].OverlayList;
+            for (var k = 0; k < list.Count; k++)
+            {
+                if (ReferenceEquals(list[k], draft))
+                {
+                    Document.Session.Apply(new RemoveOverlayAtOperation(i, k));
+                    return;
+                }
+            }
+        }
+        // Оверлея уже нет (Undo/устаревшая строка) — клик молча игнорируется.
     }
 
     [RelayCommand]
@@ -269,16 +286,22 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             GoToPage(item.PageNumber);
     }
 
+    private int _commentsRefreshVersion;
+
     public async Task RefreshCommentsAsync()
     {
+        // Перекрывающиеся обновления (быстрые правки подряд) не должны давать
+        // «победу» устаревшего снимка: публикует результат только последний запуск.
+        var version = ++_commentsRefreshVersion;
+
         var items = new List<CommentItem>();
         var pages = Document.Session.Model.Pages.ToArray();
         for (var i = 0; i < pages.Length; i++)
         {
             // Черновики этой сессии (ещё не сохранены).
-            for (var k = 0; k < pages[i].OverlayList.Count; k++)
+            foreach (var overlay in pages[i].OverlayList)
             {
-                var (label, author, text) = pages[i].OverlayList[k] switch
+                var (label, author, text) = overlay switch
                 {
                     NexusPdf.Pdf.Abstractions.NoteAnnotationDraft n => (Loc.Get("AnnotNote"), n.Author, n.Contents),
                     NexusPdf.Pdf.Abstractions.ShapeAnnotationDraft s => (
@@ -288,7 +311,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
                     _ => ("", "", ""),
                 };
                 if (label.Length > 0)
-                    items.Add(new CommentItem(i + 1, label, author, text, true, i, k));
+                    items.Add(new CommentItem(i + 1, label, author, text, true, overlay));
             }
 
             // Существующие аннотации файла (только чтение).
@@ -307,15 +330,20 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
                         _ => Loc.Get("AnnotOther"),
                     };
                     if (a.Contents.Length > 0 || a.Subtype is 1 or 5 or 6 or 9)
-                        items.Add(new CommentItem(i + 1, label, a.Author, a.Contents, false, i, -1));
+                        items.Add(new CommentItem(i + 1, label, a.Author, a.Contents, false, null));
                 }
             }
             catch (Exception ex)
             {
                 Serilog.Log.Warning(ex, "Не удалось прочитать аннотации страницы {Page}", i + 1);
             }
+
+            if (version != _commentsRefreshVersion)
+                return; // запущено более свежее обновление
         }
 
+        if (version != _commentsRefreshVersion)
+            return;
         Comments.Clear();
         foreach (var item in items.OrderBy(c => c.PageNumber))
             Comments.Add(item);

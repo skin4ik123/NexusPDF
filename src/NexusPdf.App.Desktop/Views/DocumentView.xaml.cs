@@ -37,8 +37,24 @@ public partial class DocumentView : UserControl
     private void OnVmPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(DocumentViewModel.PendingOverlay))
+        {
             UpdatePlacementCursor();
+            if (_vm?.PendingOverlay == null)
+                ResetDrag(); // Esc/отмена посреди растягивания — рамка не должна залипнуть
+        }
     }
+
+    private void ResetDrag()
+    {
+        if (_dragPage != null)
+            _dragPage.DragPreviewRect = null;
+        _dragPage = null;
+        _dragElement = null;
+        if (PagesList.IsMouseCaptured)
+            PagesList.ReleaseMouseCapture();
+    }
+
+    private void OnPagesLostCapture(object sender, MouseEventArgs e) => ResetDrag();
 
     private void UpdatePlacementCursor() =>
         PagesList.Cursor = _vm?.PendingOverlay != null ? Cursors.Cross : null;
@@ -88,6 +104,13 @@ public partial class DocumentView : UserControl
     private void OnPagesPreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (_dragPage == null || _dragElement == null) return;
+        // Кнопку отпустили вне окна / capture отобран системой — сбрасываем,
+        // иначе устаревший _dragStartPt породил бы ложную аннотацию.
+        if (e.LeftButton != MouseButtonState.Pressed || !PagesList.IsMouseCaptured)
+        {
+            ResetDrag();
+            return;
+        }
         _dragPage.DragPreviewRect = DragRectPt(e);
     }
 

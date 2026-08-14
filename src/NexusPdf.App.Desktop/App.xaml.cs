@@ -63,6 +63,8 @@ public partial class App : System.Windows.Application
             {
                 var target = WindowManager.ActiveOrFirst();
                 if (target == null) return;
+                if (target.WindowState == WindowState.Minimized)
+                    target.WindowState = WindowState.Normal; // Activate сам не разворачивает
                 target.Activate();
                 await target.ViewModel.OpenFilesAsync(received.Where(File.Exists));
             });
@@ -83,8 +85,12 @@ public partial class App : System.Windows.Application
                 // закрыты и пересчитывать его нельзя: получился бы пустой список.
                 _services.SaveSettings();
                 _services.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+                // Метку чистого выхода снимает только полный запуск: вторичный
+                // экземпляр (передал файлы и вышел) не должен стирать сентинел
+                // живого первичного процесса.
+                CrashSentinel.MarkCleanExit();
             }
-            CrashSentinel.MarkCleanExit();
             _singleInstance?.Dispose();
             Log.Information("NexusPDF завершён.");
             Log.CloseAndFlush();
