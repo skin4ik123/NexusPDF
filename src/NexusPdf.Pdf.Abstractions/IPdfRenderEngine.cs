@@ -36,4 +36,30 @@ public interface IPdfDocumentHandle : IAsyncDisposable
 
     /// <summary>Существующие аннотации страницы (без Link/Popup) — для панели комментариев.</summary>
     Task<IReadOnlyList<PdfAnnotationInfo>> GetAnnotationsAsync(int pageIndex, CancellationToken ct);
+
+    // ----- Интерактивные формы (AcroForm) -----
+
+    /// <summary>0 — форм нет, 1 — AcroForm, 2/3 — XFA (не поддерживается для заполнения).</summary>
+    Task<int> GetFormTypeAsync(CancellationToken ct);
+
+    /// <summary>Включает окружение заполнения форм. false — формы отсутствуют/не поддерживаются.</summary>
+    Task<bool> InitFormsAsync(CancellationToken ct);
+
+    /// <summary>Клик по странице в отображаемых координатах (пункты от левого верхнего угла).</summary>
+    Task FormClickAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct);
+
+    /// <summary>Ввод символа в сфокусированное поле (Backspace — символ 8).</summary>
+    Task FormCharAsync(char character, CancellationToken ct);
+
+    /// <summary>Клавиша (Windows VK-код: стрелки, Delete, Home/End) в сфокусированное поле.</summary>
+    Task FormKeyDownAsync(int virtualKeyCode, CancellationToken ct);
+
+    /// <summary>Снять фокус с поля (фиксирует введённое значение).</summary>
+    Task FormKillFocusAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Прямое сохранение ТЕКУЩЕГО документа (включая значения форм, закладки и
+    /// всю неизменённую структуру) без перекомпоновки страниц.
+    /// </summary>
+    Task SaveCurrentAsync(string targetPath, CancellationToken ct);
 }

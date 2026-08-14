@@ -63,6 +63,58 @@ public static class PdfFixture
         return buffer.ToArray();
     }
 
+    /// <summary>Одностраничный PDF с настоящим AcroForm-текстовым полем (merged field+widget).</summary>
+    public static byte[] BuildWithTextField(string fieldName, double left, double bottom, double right, double top)
+    {
+        var objects = new List<string>
+        {
+            // 1: каталог с AcroForm
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] /NeedAppearances true " +
+            "/DA (/Helv 12 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >> >>",
+            // 2: дерево страниц
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            // 3: страница с виджетом
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [4 0 R] " +
+            "/Resources << /Font << /Helv 5 0 R >> >> >>",
+            // 4: поле-виджет
+            $"<< /Type /Annot /Subtype /Widget /FT /Tx /T ({fieldName}) " +
+            $"/Rect [{left} {bottom} {right} {top}] /F 4 /DA (/Helv 12 Tf 0 g) >>",
+            // 5: шрифт
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        };
+
+        var buffer = new MemoryStream();
+        void WriteRaw(string s) => buffer.Write(Encoding.ASCII.GetBytes(s));
+
+        WriteRaw("%PDF-1.5\n");
+        buffer.Write(new byte[] { (byte)'%', 0xE2, 0xE3, 0xCF, 0xD3, (byte)'\n' });
+
+        var offsets = new long[objects.Count + 1];
+        for (var i = 0; i < objects.Count; i++)
+        {
+            offsets[i + 1] = buffer.Position;
+            WriteRaw($"{i + 1} 0 obj\n{objects[i]}\nendobj\n");
+        }
+
+        var xrefPosition = buffer.Position;
+        WriteRaw($"xref\n0 {objects.Count + 1}\n");
+        WriteRaw("0000000000 65535 f \n");
+        for (var i = 1; i <= objects.Count; i++)
+            WriteRaw($"{offsets[i]:0000000000} 00000 n \n");
+        WriteRaw($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xrefPosition}\n%%EOF\n");
+        return buffer.ToArray();
+    }
+
+    public static string WriteTextFieldToTemp(string fileName, string fieldName,
+        double left = 100, double bottom = 600, double right = 400, double top = 640)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, fileName);
+        File.WriteAllBytes(path, BuildWithTextField(fieldName, left, bottom, right, top));
+        return path;
+    }
+
     public static string WriteToTemp(string fileName, params PageSpec[] pages)
     {
         var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));

@@ -97,6 +97,7 @@ public sealed partial class MainViewModel : ObservableObject
                 Documents.Add(vm);
                 ActiveDocument = vm;
                 OnPropertyChanged(nameof(HasDocuments));
+                _ = vm.DetectFormsAsync(); // кнопка «Формы» появится, если есть AcroForm
 
                 _services.Settings.TouchRecent(path);
                 SyncRecent();
@@ -216,9 +217,15 @@ public sealed partial class MainViewModel : ObservableObject
         doc.StatusText = Loc.Get("SavingStatus");
         try
         {
+            var savedDirect = SaveService.CanSaveDirect(doc.Document);
             await _services.SaveService.SaveAsAsync(
                 doc.Document, targetPath, _services.Settings.KeepBackupOnSave, CancellationToken.None);
-            doc.StatusText = Loc.F("SavedStatus", Path.GetFileName(targetPath));
+            var hadForms = doc.HasAcroForm;
+            doc.ResetFormStateAfterSave();
+            // Перекомпоновка не переносит AcroForm: поля становятся статикой.
+            doc.StatusText = hadForms && !savedDirect
+                ? Loc.Get("FormFlattenedWarning")
+                : Loc.F("SavedStatus", Path.GetFileName(targetPath));
             _services.Settings.TouchRecent(targetPath);
             _services.SaveSettings();
             SyncRecent();
@@ -399,6 +406,13 @@ public sealed partial class MainViewModel : ObservableObject
     {
         if (ActiveDocument is { } doc)
             await doc.ToggleCommentsCommand.ExecuteAsync(null);
+    }
+
+    [RelayCommand]
+    private async Task ToggleFormModeActive()
+    {
+        if (ActiveDocument is { } doc)
+            await doc.ToggleFormModeCommand.ExecuteAsync(null);
     }
 
     // ----- Печать и инструменты qpdf -----

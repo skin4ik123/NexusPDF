@@ -17,6 +17,32 @@ public sealed class SaveService
     /// освобождаются после проверки и перед подменой: Windows не позволяет заменить
     /// файл с активным отображением в память.
     /// </summary>
+    /// <summary>
+    /// Документ без структурных правок (один источник, исходный порядок, без
+    /// поворотов и нового контента) сохраняется НАПРЯМУЮ из открытого документа:
+    /// это сохраняет закладки, формы (включая заполненные значения), вложения и
+    /// всю прочую структуру, которую перекомпоновка через ImportPages не переносит.
+    /// </summary>
+    public static bool CanSaveDirect(OpenedDocument document)
+    {
+        var model = document.Session.Model;
+        if (model.Sources.Count != 1 || document.Handles.Count != 1)
+            return false;
+        var handle = document.PrimaryHandle;
+        if (model.Pages.Count != handle.Info.PageCount)
+            return false;
+        for (var i = 0; i < model.Pages.Count; i++)
+        {
+            var page = model.Pages[i];
+            if (page.SourceId != document.PrimarySourceId ||
+                page.SourcePageIndex != i ||
+                page.RotationOffset != 0 ||
+                page.OverlayList.Count > 0)
+                return false;
+        }
+        return true;
+    }
+
     public async Task SaveAsAsync(OpenedDocument document, string targetPath, bool keepBackup, CancellationToken ct)
     {
         var composition = document.BuildComposition();
@@ -24,6 +50,7 @@ public sealed class SaveService
         if (expectedCount == 0)
             throw new InvalidOperationException("Документ не содержит страниц.");
 
+        var saveDirect = CanSaveDirect(document);
         var fullTarget = Path.GetFullPath(targetPath);
         var blockingSources = document.Handles
             .Where(kv => string.Equals(Path.GetFullPath(kv.Value.FilePath), fullTarget, StringComparison.OrdinalIgnoreCase))
@@ -32,7 +59,9 @@ public sealed class SaveService
 
         await SafeFileReplace.WriteAndReplaceAsync(
             targetPath,
-            tempPath => _engine.ComposeAsync(composition, tempPath, ct),
+            tempPath => saveDirect
+                ? document.PrimaryHandle.SaveCurrentAsync(tempPath, ct)
+                : _engine.ComposeAsync(composition, tempPath, ct),
             tempPath => ValidateAsync(tempPath, expectedCount, ct),
             beforeReplace: async () =>
             {

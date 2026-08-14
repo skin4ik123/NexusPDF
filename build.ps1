@@ -94,6 +94,12 @@ if ($All) {
     $hashTargets += $zipPath
 }
 
+if ($All) {
+    # Релизная сборка - терминальная: гасим персистентные серверы сборки
+    # .NET SDK (MSBuild/Roslyn), чтобы в системе не висели ".NET Host".
+    dotnet build-server shutdown | Out-Null
+}
+
 Write-Host "== SHA-256 =="
 $hashTargets += (Join-Path $publishDir "NexusPdf.exe")
 $lines = foreach ($f in $hashTargets) {

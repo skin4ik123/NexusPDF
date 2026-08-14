@@ -78,7 +78,29 @@ public partial class DocumentView : UserControl
 
     private void OnPagesPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (_vm?.PendingOverlay == null) return;
+        if (_vm == null) return;
+
+        // Режим заполнения формы: клик уходит в поле PDF.
+        if (_vm.IsFormMode && _vm.PendingOverlay == null)
+        {
+            var formHit = FindPageAt(e.OriginalSource);
+            if (formHit != null)
+            {
+                var (formPage, formElement) = formHit.Value;
+                var formScale = formPage.DisplayScale;
+                if (formScale > 0)
+                {
+                    var formPos = e.GetPosition(formElement);
+                    var dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+                    _ = _vm.FormClickAsync(formPage, formPos.X / formScale, formPos.Y / formScale, dpi);
+                    PagesList.Focus(); // клавиатура должна идти в поле
+                    e.Handled = true;
+                }
+            }
+            return;
+        }
+
+        if (_vm.PendingOverlay == null) return;
         var hit = FindPageAt(e.OriginalSource);
         if (hit == null) return;
         var (page, element) = hit.Value;
@@ -204,6 +226,51 @@ public partial class DocumentView : UserControl
         {
             _vm.ToggleFindCommand.Execute(null);
             e.Handled = true;
+        }
+    }
+
+    private void OnPagesTextInput(object sender, TextCompositionEventArgs e)
+    {
+        if (_vm is not { IsFormMode: true }) return;
+        var dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        foreach (var c in e.Text)
+        {
+            if (!char.IsControl(c))
+                _ = _vm.FormCharAsync(c, dpi);
+        }
+        e.Handled = true;
+    }
+
+    private void OnPagesKeyDown(object sender, KeyEventArgs e)
+    {
+        if (_vm is not { IsFormMode: true }) return;
+        var dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        switch (e.Key)
+        {
+            case Key.Back:
+                _ = _vm.FormCharAsync((char)8, dpi);
+                e.Handled = true;
+                break;
+            case Key.Delete:
+                _ = _vm.FormKeyAsync(0x2E, dpi);
+                e.Handled = true;
+                break;
+            case Key.Left:
+                _ = _vm.FormKeyAsync(0x25, dpi);
+                e.Handled = true;
+                break;
+            case Key.Right:
+                _ = _vm.FormKeyAsync(0x27, dpi);
+                e.Handled = true;
+                break;
+            case Key.Home:
+                _ = _vm.FormKeyAsync(0x24, dpi);
+                e.Handled = true;
+                break;
+            case Key.End:
+                _ = _vm.FormKeyAsync(0x23, dpi);
+                e.Handled = true;
+                break;
         }
     }
 

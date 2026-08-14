@@ -63,12 +63,13 @@ public sealed record ShapeAnnotationDraft(
     string Contents,
     string Author) : PageOverlay;
 
-/// <summary>Существующая аннотация документа (для панели комментариев; только чтение).</summary>
+/// <summary>Существующая аннотация документа (для панели комментариев; только чтение). Value — /V для виджетов форм.</summary>
 public sealed record PdfAnnotationInfo(
     int AnnotIndex,
     int Subtype,
     string Contents,
-    string Author);
+    string Author,
+    string Value = "");
 
 /// <summary>Одна страница будущего документа: источник, номер страницы в источнике, добавочный поворот (в четвертях оборота по часовой) и накладываемый контент.</summary>
 public sealed record ComposedPage(
