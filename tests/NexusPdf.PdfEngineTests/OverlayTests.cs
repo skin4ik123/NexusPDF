@@ -68,6 +68,50 @@ public sealed class OverlayTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Overlay_Placed_Before_Rotation_Is_Remapped_To_Final_Frame()
+    {
+        var path = PdfFixture.WriteToTemp("overlay-remap.pdf",
+            new PdfFixture.PageSpec(612, 792, Text: " ")); // без фонового текста фикстуры
+        await using var doc = await _engine.OpenAsync(path, null, CancellationToken.None);
+
+        // Оверлей размещён у ВЕРХА портретной страницы (PlacedRotation=0),
+        // затем страницу довернули на 90° по часовой: контент верха портрета
+        // должен оказаться у ПРАВОГО края альбомной страницы.
+        var target = Path.Combine(Path.GetDirectoryName(path)!, "overlay-remap-out.pdf");
+        await _engine.ComposeAsync(new[]
+        {
+            new ComposedPage(doc, 0, 1, new PageOverlay[]
+            {
+                new TextOverlay("Шапка", 200, 24, 20, 0xFF000000, 0) { PlacedRotation = 0 },
+            }),
+        }, target, CancellationToken.None);
+
+        await using var result = await _engine.OpenAsync(target, null, CancellationToken.None);
+        Assert.Contains("Шапка", await result.GetPageTextAsync(0, CancellationToken.None));
+
+        var image = await result.RenderPageAsync(0, 396, 306, 0, CancellationToken.None);
+        Assert.True(CountInkInXBand(image, 0.75, 1.0) > 0, "нет текста у правого края");
+        Assert.Equal(0, CountInkInXBand(image, 0.0, 0.5));
+    }
+
+    private static int CountInkInXBand(RenderedPageImage image, double fromXFraction, double toXFraction)
+    {
+        var count = 0;
+        var fromX = (int)(image.PixelWidth * fromXFraction);
+        var toX = (int)(image.PixelWidth * toXFraction);
+        for (var y = 0; y < image.PixelHeight; y++)
+        {
+            for (var x = fromX; x < toX; x++)
+            {
+                var offset = y * image.Stride + x * 4;
+                if (image.Bgra[offset] < 0xF0 || image.Bgra[offset + 1] < 0xF0 || image.Bgra[offset + 2] < 0xF0)
+                    count++;
+            }
+        }
+        return count;
+    }
+
+    [Fact]
     public async Task Image_Overlay_Pixels_Land_In_Target_Rect()
     {
         var path = PdfFixture.WriteToTemp("overlay-img.pdf",

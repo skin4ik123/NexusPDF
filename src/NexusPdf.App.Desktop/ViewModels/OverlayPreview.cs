@@ -22,7 +22,15 @@ public sealed class OverlayPreview
     public double HeightPt { get; private init; }
     /// <summary>Угол для WPF RotateTransform (по часовой; знак уже инвертирован).</summary>
     public double AngleDeg { get; private init; }
+    /// <summary>Центр вращения по Y — базовая линия WPF-текста (совпадает с точкой вращения при запекании).</summary>
+    public double BaselineCenterY { get; private init; }
     public BitmapSource? Image { get; private init; }
+
+    // Запекание ставит базовую линию на 0.75·fs ниже анкера; WPF рисует её на
+    // FontFamily.Baseline·fs ниже верха TextBlock. Разницу компенсируем сдвигом,
+    // иначе предпросмотр систематически стоял бы на ~0.33·fs ниже результата.
+    private const double BakedBaselineFactor = 0.75;
+    private static readonly double WpfBaselineFactor = new FontFamily("Segoe UI").Baseline;
 
     public static OverlayPreview? From(PageOverlay overlay)
     {
@@ -41,8 +49,9 @@ public sealed class OverlayPreview
                     FontSizePt = text.FontSizePt,
                     Fill = brush,
                     XPt = text.XPt,
-                    YPt = text.YPt,
+                    YPt = text.YPt + (BakedBaselineFactor - WpfBaselineFactor) * text.FontSizePt,
                     AngleDeg = -text.RotationDegrees,
+                    BaselineCenterY = WpfBaselineFactor * text.FontSizePt,
                 };
             }
             case ImageOverlay image:

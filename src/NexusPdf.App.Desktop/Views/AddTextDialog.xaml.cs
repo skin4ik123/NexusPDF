@@ -35,7 +35,7 @@ public partial class AddTextDialog : Window
         }
         if (!double.TryParse(SizeBox.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var size) &&
             !double.TryParse(SizeBox.Text.Trim(), NumberStyles.Float, CultureInfo.CurrentCulture, out size) ||
-            size is < 4 or > 144)
+            !(size is >= 4 and <= 144)) // отрицание отсекает и NaN
         {
             ErrorLabel.Text = Loc.Get("FontSizeInvalid");
             ErrorLabel.Visibility = Visibility.Visible;

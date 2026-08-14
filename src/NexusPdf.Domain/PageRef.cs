@@ -23,7 +23,10 @@ public sealed record PageRef(
 
     public PageRef WithOverlay(PageOverlay overlay)
     {
-        var list = new List<PageOverlay>(OverlayList) { overlay };
+        // Фиксируем ориентацию страницы на момент размещения: при последующем
+        // повороте страницы движок пересчитает координаты оверлея.
+        var stamped = overlay with { PlacedRotation = RotationOffset };
+        var list = new List<PageOverlay>(OverlayList) { stamped };
         return this with { Overlays = list };
     }
 

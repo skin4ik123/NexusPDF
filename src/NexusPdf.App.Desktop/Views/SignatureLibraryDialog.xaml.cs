@@ -15,8 +15,7 @@ public partial class SignatureLibraryDialog : Window
     private sealed class Row
     {
         public required SignatureTemplate Template { get; init; }
-        public required BitmapSource Preview { get; init; }
-        public required LoadedImage Image { get; init; }
+        public BitmapSource? Preview { get; init; }
         public string Name => Template.Name;
     }
 
@@ -42,15 +41,25 @@ public partial class SignatureLibraryDialog : Window
         var rows = new List<Row>();
         foreach (var template in _store.List())
         {
+            // Для списка декодируется только эскиз (DecodePixelHeight): полные
+            // растры многомегапиксельных подписей загружаются лениво при вставке.
+            BitmapSource? preview = null;
             try
             {
-                var image = ImageLoader.FromBytes(_store.Load(template));
-                rows.Add(new Row { Template = template, Image = image, Preview = ImageLoader.Preview(image) });
+                var image = new BitmapImage();
+                image.BeginInit();
+                image.CacheOption = BitmapCacheOption.OnLoad;
+                image.DecodePixelHeight = 128;
+                image.StreamSource = new MemoryStream(_store.Load(template));
+                image.EndInit();
+                image.Freeze();
+                preview = image;
             }
             catch (Exception ex)
             {
                 Serilog.Log.Warning(ex, "Шаблон подписи не читается: {Name}", template.Name);
             }
+            rows.Add(new Row { Template = template, Preview = preview });
         }
         SigList.ItemsSource = rows;
         EmptyLabel.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -90,7 +99,15 @@ public partial class SignatureLibraryDialog : Window
     private void OnInsert(object sender, RoutedEventArgs e)
     {
         if (SigList.SelectedItem is not Row row) return;
-        _result = new SignaturePick(row.Image, WidthSlider.Value);
-        DialogResult = true;
+        try
+        {
+            var image = ImageLoader.FromBytes(_store.Load(row.Template));
+            _result = new SignaturePick(image, WidthSlider.Value);
+            DialogResult = true;
+        }
+        catch (Exception ex)
+        {
+            ErrorDialog.Show(this, Loc.Get("ErrorTitle"), Loc.F("ErrorOpenFile", row.Name), ex.ToString());
+        }
     }
 }

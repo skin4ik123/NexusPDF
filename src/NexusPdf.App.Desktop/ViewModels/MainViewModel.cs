@@ -211,6 +211,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         if (doc.IsBusy) return; // идёт печать/сохранение — не трогаем документ
         if (RejectIfTargetOpenElsewhere(doc, targetPath)) return;
+        doc.CancelPlacement(); // курсор-прицел не должен жить во время сохранения
         doc.IsBusy = true;
         doc.StatusText = Loc.Get("SavingStatus");
         try
