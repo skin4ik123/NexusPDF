@@ -58,6 +58,13 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     Task FormKillFocusAsync(CancellationToken ct);
 
     /// <summary>
+    /// Завершает форм-окружение: фиксирует значения, убирает подсветку полей
+    /// из последующих рендеров (включая печать). Повторный InitFormsAsync
+    /// создаёт окружение заново.
+    /// </summary>
+    Task FormEndAsync(CancellationToken ct);
+
+    /// <summary>
     /// Прямое сохранение ТЕКУЩЕГО документа (включая значения форм, закладки и
     /// всю неизменённую структуру) без перекомпоновки страниц.
     /// </summary>

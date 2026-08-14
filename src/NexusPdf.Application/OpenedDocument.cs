@@ -20,6 +20,10 @@ public sealed class OpenedDocument : IAsyncDisposable
     public Guid PrimarySourceId { get; private set; }
     public Dictionary<Guid, IPdfDocumentHandle> Handles { get; }
 
+    /// <summary>Пароль, которым документ был открыт: нужен для валидации и
+    /// переоткрытия после ПРЯМОГО сохранения (шифрование сохраняется в копии).</summary>
+    public string? Password { get; private set; }
+
     public IPdfDocumentHandle PrimaryHandle => Handles[PrimarySourceId];
 
     public string DisplayName =>
@@ -34,7 +38,7 @@ public sealed class OpenedDocument : IAsyncDisposable
             var sourceId = Guid.NewGuid();
             var model = DocumentModel.ForNewSource(sourceId, filePath, handle.Info.PageCount);
             var session = new DocumentSession(model, filePath);
-            return new OpenedDocument(session, sourceId, handle);
+            return new OpenedDocument(session, sourceId, handle) { Password = password };
         }
         catch
         {
@@ -68,9 +72,10 @@ public sealed class OpenedDocument : IAsyncDisposable
     /// После сохранения в новый файл (или на место старого) документ переоткрывается,
     /// чтобы ссылки страниц указывали на актуальный источник. История очищается.
     /// </summary>
-    public async Task RebaseToSavedFileAsync(IPdfRenderEngine engine, string savedPath, CancellationToken ct)
+    public async Task RebaseToSavedFileAsync(IPdfRenderEngine engine, string savedPath, string? password, CancellationToken ct)
     {
-        var newHandle = await engine.OpenAsync(savedPath, null, ct).ConfigureAwait(false);
+        var newHandle = await engine.OpenAsync(savedPath, password, ct).ConfigureAwait(false);
+        Password = password;
         var oldHandles = Handles.Values.ToList();
 
         try

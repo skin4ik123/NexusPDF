@@ -178,6 +178,23 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
         }
     }
 
+    public Task FormEndAsync(CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() =>
+            {
+                // Dispose фиксирует значение (DeactivatePage → KillFocus) и
+                // закрывает окружение — подсветка исчезает из рендеров.
+                // Заполненные значения остаются видимыми: pdfium сгенерировал
+                // appearance-стримы виджетов, их рисует обычный FPDF_ANNOT.
+                _forms?.Dispose();
+                _forms = null;
+            }, ct);
+        }
+    }
+
     public Task SaveCurrentAsync(string targetPath, CancellationToken ct)
     {
         lock (_admissionGate)

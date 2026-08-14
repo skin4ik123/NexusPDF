@@ -51,6 +51,13 @@ public sealed class SaveService
             throw new InvalidOperationException("Документ не содержит страниц.");
 
         var saveDirect = CanSaveDirect(document);
+        // Значение редактируемого поля формы фиксируется только при потере
+        // фокуса — иначе компоновка сохранит пустое поле (прямой путь делает
+        // это сам внутри SaveCurrentAsync).
+        if (!saveDirect)
+            await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
+        // Прямое сохранение сохраняет и шифрование исходника.
+        var resultPassword = saveDirect ? document.Password : null;
         var fullTarget = Path.GetFullPath(targetPath);
         var blockingSources = document.Handles
             .Where(kv => string.Equals(Path.GetFullPath(kv.Value.FilePath), fullTarget, StringComparison.OrdinalIgnoreCase))
@@ -62,7 +69,7 @@ public sealed class SaveService
             tempPath => saveDirect
                 ? document.PrimaryHandle.SaveCurrentAsync(tempPath, ct)
                 : _engine.ComposeAsync(composition, tempPath, ct),
-            tempPath => ValidateAsync(tempPath, expectedCount, ct),
+            tempPath => ValidateAsync(tempPath, expectedCount, resultPassword, ct),
             beforeReplace: async () =>
             {
                 // Компоновка и проверка завершены — эти источники больше не нужны;
@@ -76,7 +83,7 @@ public sealed class SaveService
             keepBackup,
             ct).ConfigureAwait(false);
 
-        await document.RebaseToSavedFileAsync(_engine, targetPath, ct).ConfigureAwait(false);
+        await document.RebaseToSavedFileAsync(_engine, targetPath, resultPassword, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -99,6 +106,7 @@ public sealed class SaveService
     public async Task SaveCopyAsync(OpenedDocument document, string targetPath, CancellationToken ct)
     {
         ThrowIfTargetIsOpenSource(document, targetPath);
+        await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
         var composition = document.BuildComposition();
         if (composition.Count == 0)
             throw new InvalidOperationException("Документ не содержит страниц.");
@@ -115,6 +123,7 @@ public sealed class SaveService
     public async Task ExtractAsync(OpenedDocument document, IReadOnlyList<int> logicalIndices, string targetPath, CancellationToken ct)
     {
         ThrowIfTargetIsOpenSource(document, targetPath);
+        await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
         var all = document.BuildComposition();
         var subset = logicalIndices.Select(i => all[i]).ToList();
         if (subset.Count == 0)
@@ -128,9 +137,12 @@ public sealed class SaveService
             ct).ConfigureAwait(false);
     }
 
-    private async Task ValidateAsync(string path, int expectedPageCount, CancellationToken ct)
+    private async Task ValidateAsync(string path, int expectedPageCount, CancellationToken ct) =>
+        await ValidateAsync(path, expectedPageCount, null, ct).ConfigureAwait(false);
+
+    private async Task ValidateAsync(string path, int expectedPageCount, string? password, CancellationToken ct)
     {
-        var handle = await _engine.OpenAsync(path, null, ct).ConfigureAwait(false);
+        var handle = await _engine.OpenAsync(path, password, ct).ConfigureAwait(false);
         await using (handle.ConfigureAwait(false))
         {
             if (handle.Info.PageCount != expectedPageCount)

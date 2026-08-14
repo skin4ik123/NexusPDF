@@ -20,6 +20,9 @@ public sealed partial class PageViewModel : ObservableObject
     private CancellationTokenSource? _renderCts;
     private CancellationTokenSource? _thumbCts;
     private int _renderedPixelWidth;
+    private int _renderedFormVersion = -1;
+    private string? _lastStoredKey;
+    private int _lastStoredFormVersion = -1;
 
     public PageViewModel(DocumentViewModel owner, int logicalIndex, PageRef pageRef, PdfPageDescriptor sizePt)
     {
@@ -104,15 +107,17 @@ public sealed partial class PageViewModel : ObservableObject
     {
         var pixelWidth = Math.Max(16, (int)Math.Round(WidthDiu * dpiScale));
         var pixelHeight = Math.Max(16, (int)Math.Round(HeightDiu * dpiScale));
-        if (_renderedPixelWidth == pixelWidth && Image != null)
+        var formVersion = _owner.FormRenderVersion;
+        if (_renderedPixelWidth == pixelWidth && _renderedFormVersion == formVersion && Image != null)
             return;
 
         var key = RenderCache.MakeKey(PageRef.SourceId, PageRef.SourcePageIndex, PageRef.RotationOffset, pixelWidth)
-                  + ":f" + _owner.FormRenderVersion;
+                  + ":f" + formVersion;
         if (_owner.Cache.TryGet(key) is { } cached)
         {
             Image = cached;
             _renderedPixelWidth = pixelWidth;
+            _renderedFormVersion = formVersion;
             return;
         }
 
@@ -124,11 +129,18 @@ public sealed partial class PageViewModel : ObservableObject
         {
             var raw = await _owner.Document.RenderLogicalPageAsync(LogicalIndex, pixelWidth, pixelHeight, cts.Token);
             var bitmap = BitmapFactory.ToBitmapSource(raw);
+            // Растры устаревших форм-версий больше никогда не запросятся —
+            // не даём им хоронить бюджет LRU при наборе текста в поле.
+            if (_lastStoredKey != null && _lastStoredFormVersion != formVersion)
+                _owner.Cache.Remove(_lastStoredKey);
             _owner.Cache.Store(key, bitmap);
+            _lastStoredKey = key;
+            _lastStoredFormVersion = formVersion;
             if (!cts.IsCancellationRequested)
             {
                 Image = bitmap;
                 _renderedPixelWidth = pixelWidth;
+                _renderedFormVersion = formVersion;
             }
         }
         catch (OperationCanceledException)
@@ -154,7 +166,8 @@ public sealed partial class PageViewModel : ObservableObject
         var scale = ThumbPixelWidth / Math.Max(1.0, SizePt.WidthPoints);
         var pixelHeight = Math.Max(16, (int)(SizePt.HeightPoints * scale));
 
-        var key = RenderCache.MakeKey(PageRef.SourceId, PageRef.SourcePageIndex, PageRef.RotationOffset, ThumbPixelWidth);
+        var key = RenderCache.MakeKey(PageRef.SourceId, PageRef.SourcePageIndex, PageRef.RotationOffset, ThumbPixelWidth)
+                  + ":f" + _owner.FormRenderVersion;
         if (_owner.Cache.TryGet(key) is { } cached)
         {
             ThumbImage = cached;
@@ -186,6 +199,15 @@ public sealed partial class PageViewModel : ObservableObject
     {
         _renderedPixelWidth = 0;
         EnsureImage(dpiScale);
+    }
+
+    /// <summary>Миниатюра тоже должна показать новое значение поля.</summary>
+    public void ForceRefreshThumbnail()
+    {
+        _thumbCts?.Cancel();
+        _thumbCts = null;
+        ThumbImage = null;
+        EnsureThumbnail();
     }
 
     /// <summary>Страница ушла из видимой области — полноразмерный растр отпускаем (кэш решает, хранить ли его).</summary>

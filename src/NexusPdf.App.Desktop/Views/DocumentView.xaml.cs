@@ -231,7 +231,7 @@ public partial class DocumentView : UserControl
 
     private void OnPagesTextInput(object sender, TextCompositionEventArgs e)
     {
-        if (_vm is not { IsFormMode: true }) return;
+        if (_vm is not { IsFormMode: true, HasActiveFormPage: true }) return;
         var dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
         foreach (var c in e.Text)
         {
@@ -243,7 +243,8 @@ public partial class DocumentView : UserControl
 
     private void OnPagesKeyDown(object sender, KeyEventArgs e)
     {
-        if (_vm is not { IsFormMode: true }) return;
+        // До первого клика в поле клавиатура остаётся у прокрутки/навигации.
+        if (_vm is not { IsFormMode: true, HasActiveFormPage: true }) return;
         var dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
         switch (e.Key)
         {

@@ -61,6 +61,18 @@ public sealed class RenderCache
         }
     }
 
+    public void Remove(string key)
+    {
+        lock (_gate)
+        {
+            if (_map.Remove(key, out var node))
+            {
+                _usedBytes -= node.Value.Bytes;
+                _lru.Remove(node);
+            }
+        }
+    }
+
     public void RemoveSource(Guid sourceId)
     {
         var prefix = sourceId.ToString("N") + ":";
