@@ -12,7 +12,10 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
-$version = "0.2.0"
+# Single source of truth for the version is Directory.Build.props
+$propsXml = [xml](Get-Content (Join-Path $root "Directory.Build.props"))
+$version = ($propsXml.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { $_ } | Select-Object -First 1)
+if (-not $version) { throw "Version not found in Directory.Build.props" }
 
 # Fall back to per-user SDK install if no system-wide SDK is present
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue) -or -not (dotnet --list-sdks 2>$null)) {
