@@ -99,8 +99,8 @@ public sealed partial class MainViewModel : ObservableObject
                 OnPropertyChanged(nameof(HasDocuments));
 
                 _services.Settings.TouchRecent(path);
-                _services.SaveSettings();
                 SyncRecent();
+                UpdateSessionSnapshot(); // включает SaveSettings
                 Log.Information("Открыт документ: {Path}, страниц: {Pages}", path, vm.PageCount);
                 return;
             }
@@ -139,6 +139,46 @@ public sealed partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(HasRecentFiles));
     }
 
+    /// <summary>
+    /// Актуальный список открытых файлов пишется в настройки при каждом
+    /// открытии/закрытии: только так восстановление после краха работает —
+    /// при аварийном завершении OnExit не выполняется вовсе.
+    /// </summary>
+    public void UpdateSessionSnapshot()
+    {
+        _services.Settings.LastSessionFiles = WindowManager.CollectOpenFiles().ToList();
+        _services.SaveSettings();
+    }
+
+    /// <summary>Снимок для «восстановить прошлую сессию» перед закрытием последнего окна.</summary>
+    public void SnapshotBeforeExit()
+    {
+        var files = WindowManager.CollectOpenFiles().ToList();
+        if (files.Count > 0)
+        {
+            _services.Settings.LastSessionFiles = files;
+            _services.SaveSettings();
+        }
+    }
+
+    private bool IsFileOpenElsewhere(DocumentViewModel current, string targetPath)
+    {
+        var fullTarget = Path.GetFullPath(targetPath);
+        return WindowManager.AllViewModels()
+            .SelectMany(vm => vm.Documents)
+            .Where(d => !ReferenceEquals(d, current))
+            .SelectMany(d => d.Document.Handles.Values)
+            .Any(h => string.Equals(Path.GetFullPath(h.FilePath), fullTarget, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool RejectIfTargetOpenElsewhere(DocumentViewModel doc, string targetPath)
+    {
+        if (!IsFileOpenElsewhere(doc, targetPath)) return false;
+        ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"),
+            Loc.Get("FileOpenElsewhere"), targetPath);
+        return true;
+    }
+
     // ----- Сохранение -----
 
     [RelayCommand]
@@ -169,6 +209,8 @@ public sealed partial class MainViewModel : ObservableObject
 
     private async Task SaveCoreAsync(DocumentViewModel doc, string targetPath)
     {
+        if (doc.IsBusy) return; // идёт печать/сохранение — не трогаем документ
+        if (RejectIfTargetOpenElsewhere(doc, targetPath)) return;
         doc.IsBusy = true;
         doc.StatusText = Loc.Get("SavingStatus");
         try
@@ -198,7 +240,7 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task ExtractSelected(IList? selection)
     {
-        if (ActiveDocument is not { } doc || selection is null || selection.Count == 0) return;
+        if (ActiveDocument is not { } doc || doc.IsBusy || selection is null || selection.Count == 0) return;
         var indices = selection.Cast<PageViewModel>().Select(p => p.LogicalIndex).OrderBy(i => i).ToArray();
 
         var dialog = new SaveFileDialog
@@ -208,6 +250,7 @@ public sealed partial class MainViewModel : ObservableObject
             DefaultExt = ".pdf",
         };
         if (dialog.ShowDialog(OwnerWindow) != true) return;
+        if (RejectIfTargetOpenElsewhere(doc, dialog.FileName)) return;
 
         doc.IsBusy = true;
         try
@@ -232,14 +275,14 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task PrintActive()
     {
-        if (ActiveDocument is not { } doc || OwnerWindow is null) return;
+        if (ActiveDocument is not { } doc || doc.IsBusy || OwnerWindow is null) return;
         await _services.Print.PrintInteractiveAsync(doc, OwnerWindow);
     }
 
     [RelayCommand]
     private async Task ProtectWithPassword()
     {
-        if (ActiveDocument is not { } doc || !_services.Tools.IsAvailable) return;
+        if (ActiveDocument is not { } doc || doc.IsBusy || !_services.Tools.IsAvailable) return;
 
         var password = PasswordSetDialog.Show(OwnerWindow);
         if (password == null) return;
@@ -251,6 +294,7 @@ public sealed partial class MainViewModel : ObservableObject
             DefaultExt = ".pdf",
         };
         if (dialog.ShowDialog(OwnerWindow) != true) return;
+        if (RejectIfTargetOpenElsewhere(doc, dialog.FileName)) return;
 
         doc.IsBusy = true;
         doc.StatusText = Loc.Get("SavingStatus");
@@ -276,7 +320,7 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task OptimizeCopy()
     {
-        if (ActiveDocument is not { } doc || !_services.Tools.IsAvailable) return;
+        if (ActiveDocument is not { } doc || doc.IsBusy || !_services.Tools.IsAvailable) return;
 
         var dialog = new SaveFileDialog
         {
@@ -285,6 +329,7 @@ public sealed partial class MainViewModel : ObservableObject
             DefaultExt = ".pdf",
         };
         if (dialog.ShowDialog(OwnerWindow) != true) return;
+        if (RejectIfTargetOpenElsewhere(doc, dialog.FileName)) return;
 
         doc.IsBusy = true;
         doc.StatusText = Loc.Get("OptimizingStatus");
@@ -323,6 +368,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         doc ??= ActiveDocument;
         if (doc == null) return;
+        if (doc.IsBusy) return; // нельзя закрывать документ под печатью/сохранением
 
         if (doc.IsDirty)
         {
@@ -339,11 +385,15 @@ public sealed partial class MainViewModel : ObservableObject
         ActiveDocument = Documents.LastOrDefault();
         OnPropertyChanged(nameof(HasDocuments));
         await doc.DisposeAsync();
+        UpdateSessionSnapshot();
     }
 
     /// <summary>Попытка закрыть все вкладки окна (при закрытии окна). false — пользователь отменил.</summary>
     public async Task<bool> TryCloseAllAsync()
     {
+        if (Documents.Any(d => d.IsBusy))
+            return false; // печать или сохранение ещё идут
+
         var dirty = Documents.Where(d => d.IsDirty).ToList();
         if (dirty.Count > 0)
         {

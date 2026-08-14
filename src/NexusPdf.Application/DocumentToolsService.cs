@@ -29,6 +29,7 @@ public sealed class DocumentToolsService
     public async Task ProtectCopyAsync(
         OpenedDocument document, string targetPath, string userPassword, string? ownerPassword, CancellationToken ct)
     {
+        SaveService.ThrowIfTargetIsOpenSource(document, targetPath);
         var composition = document.BuildComposition();
         await SafeFileReplace.WriteAndReplaceAsync(
             targetPath,
@@ -62,6 +63,7 @@ public sealed class DocumentToolsService
     /// <summary>Структурная оптимизация без потери качества. Возвращает размеры до/после.</summary>
     public async Task<OptimizeResult> OptimizeCopyAsync(OpenedDocument document, string targetPath, CancellationToken ct)
     {
+        SaveService.ThrowIfTargetIsOpenSource(document, targetPath);
         var composition = document.BuildComposition();
         long bytesBefore = 0;
 

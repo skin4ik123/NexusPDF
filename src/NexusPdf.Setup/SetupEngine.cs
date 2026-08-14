@@ -1,8 +1,53 @@
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+using System.Text;
 
 namespace NexusPdf.Setup;
+
+public enum InstalledContext
+{
+    None,
+    PerUser,
+    PerMachine,
+}
+
+/// <summary>
+/// Поиск уже установленной копии NexusPDF по UpgradeCode: Windows Installer
+/// не выполняет мажорное обновление через границу контекстов (per-user ↔
+/// per-machine), поэтому смену режима надо обнаруживать и блокировать заранее —
+/// иначе появились бы две параллельные установки.
+/// </summary>
+public static class InstalledProductInspector
+{
+    private const string UpgradeCode = "{7C6E2B7A-9A1E-4F2B-B4B0-3E62D8C5A101}";
+    private const uint ErrorNoMoreItems = 259;
+
+    [DllImport("msi.dll", CharSet = CharSet.Unicode)]
+    private static extern uint MsiEnumRelatedProducts(string lpUpgradeCode, uint dwReserved, uint iProductIndex, StringBuilder lpProductBuf);
+
+    [DllImport("msi.dll", CharSet = CharSet.Unicode)]
+    private static extern uint MsiGetProductInfo(string szProduct, string szProperty, StringBuilder lpValueBuf, ref uint pcchValueBuf);
+
+    public static InstalledContext Detect()
+    {
+        var productCode = new StringBuilder(39);
+        var status = MsiEnumRelatedProducts(UpgradeCode, 0, 0, productCode);
+        if (status == ErrorNoMoreItems)
+            return InstalledContext.None;
+        if (status != 0)
+            return InstalledContext.None; // не смогли определить — не блокируем установку
+
+        var value = new StringBuilder(8);
+        var length = (uint)value.Capacity;
+        // INSTALLPROPERTY_ASSIGNMENTTYPE: "0" — per-user, "1" — per-machine
+        if (MsiGetProductInfo(productCode.ToString(), "AssignmentType", value, ref length) != 0)
+            return InstalledContext.None;
+        return value.ToString() == "1" ? InstalledContext.PerMachine : InstalledContext.PerUser;
+    }
+}
 
 public sealed class SetupOptions
 {
@@ -32,7 +77,8 @@ public sealed class SetupOptions
         return options;
     }
 
-    public string EffectiveInstallDir => CustomDir ?? DefaultInstallDir(AllUsers);
+    public string EffectiveInstallDir =>
+        string.IsNullOrWhiteSpace(CustomDir) ? DefaultInstallDir(AllUsers) : CustomDir;
 
     public static string DefaultInstallDir(bool allUsers) => allUsers
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "NexusPDF")
@@ -72,10 +118,22 @@ public static class SetupEngine
         return reader.ReadToEnd();
     }
 
+    public static bool IsElevated =>
+        new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
+
     public static async Task<InstallResult> InstallAsync(SetupOptions options, string msiPath)
     {
         var logPath = Path.Combine(Path.GetTempPath(),
             $"NexusPdf-install-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+
+        // Тихий режим никогда не показывает UAC: для per-machine требуем уже
+        // повышенный процесс, иначе честно возвращаем 740 (elevation required).
+        if (options.Silent && options.AllUsers && !IsElevated)
+        {
+            Console.Error.WriteLine(
+                "NexusPdfSetup: /allusers в тихом режиме требует запуска с правами администратора (код 740).");
+            return new InstallResult(740, logPath);
+        }
 
         var args = new List<string>
         {
@@ -88,16 +146,17 @@ public static class SetupEngine
             args.Add("ALLUSERS=1");
         else
             args.Add("MSIINSTALLPERUSER=1");
-        if (options.CustomDir != null)
+        if (!string.IsNullOrWhiteSpace(options.CustomDir))
             args.Add("INSTALLFOLDER=" + Quote(options.CustomDir));
 
+        var needRunas = options.AllUsers && !IsElevated; // интерактивный UAC только в GUI-режиме
         var psi = new ProcessStartInfo
         {
             FileName = "msiexec.exe",
             Arguments = string.Join(" ", args),
-            UseShellExecute = options.AllUsers, // для per-machine нужен UAC
+            UseShellExecute = needRunas,
         };
-        if (options.AllUsers)
+        if (needRunas)
             psi.Verb = "runas";
         else
             psi.CreateNoWindow = true;
@@ -109,10 +168,15 @@ public static class SetupEngine
             await process.WaitForExitAsync();
             return new InstallResult(process.ExitCode, logPath);
         }
-        catch (System.ComponentModel.Win32Exception)
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
             // Пользователь отклонил запрос прав администратора
             return new InstallResult(1602, logPath);
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            Console.Error.WriteLine($"NexusPdfSetup: не удалось запустить msiexec: {ex.Message}");
+            return new InstallResult(1603, logPath);
         }
     }
 

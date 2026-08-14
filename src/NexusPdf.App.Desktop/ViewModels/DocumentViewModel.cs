@@ -17,13 +17,24 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     private const double PageMarginDiu = 24;
 
     private readonly SearchService _search = new();
+    private readonly System.Windows.Threading.Dispatcher _dispatcher;
     private CancellationTokenSource? _searchCts;
 
     public DocumentViewModel(OpenedDocument document, RenderCache cache)
     {
         Document = document;
         Cache = cache;
-        Document.Session.Changed += (_, _) => OnSessionChanged();
+        _dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+        // Session.Changed может прийти с фонового потока (например, после
+        // переоткрытия при сохранении) — перестройка привязанных коллекций
+        // обязана выполняться на потоке диспетчера.
+        Document.Session.Changed += (_, _) =>
+        {
+            if (_dispatcher.CheckAccess())
+                OnSessionChanged();
+            else
+                _dispatcher.Invoke(OnSessionChanged);
+        };
         RebuildPages();
     }
 
@@ -299,8 +310,13 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         StatusText = Loc.Get("SearchingStatus");
         try
         {
-            Matches = await _search.SearchAsync(Document, FindQuery, caseSensitive: false, cts.Token);
-            if (cts.IsCancellationRequested) return;
+            var result = await _search.SearchAsync(Document, FindQuery, caseSensitive: false, cts.Token);
+            // Публикуем результат только если этот запуск всё ещё актуален:
+            // поздняя континуация отменённого поиска не должна воскрешать
+            // устаревшие совпадения по прежней раскладке страниц.
+            if (cts.IsCancellationRequested || !ReferenceEquals(cts, _searchCts))
+                return;
+            Matches = result;
             if (Matches.Count == 0)
             {
                 FindStatus = Loc.Get("NoMatches");
@@ -312,6 +328,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             }
         }
         catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Поиск прерван ошибкой");
+            FindStatus = Loc.Get("NoMatches");
+        }
         finally
         {
             StatusText = Loc.Get("Ready");
@@ -322,6 +343,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     {
         if (_currentMatch < 0 || _currentMatch >= Matches.Count) return;
         var match = Matches[_currentMatch];
+        if (match.LogicalPageIndex >= Pages.Count) return; // страницы изменились после поиска
         FindStatus = Loc.F("MatchesFound", _currentMatch + 1, Matches.Count);
 
         ClearHighlights();

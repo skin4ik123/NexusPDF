@@ -33,6 +33,24 @@ public partial class SetupWindow : Window
         PathBox.Text = SetupOptions.DefaultInstallDir(allUsers: false);
         _pathEditedByUser = false;
 
+        // Windows Installer не выполняет обновление через границу контекстов:
+        // если копия уже установлена, режим фиксируется на существующем.
+        var installed = InstalledProductInspector.Detect();
+        if (installed == InstalledContext.PerUser)
+        {
+            PerUserRadio.IsChecked = true;
+            PerMachineRadio.IsEnabled = false;
+            ContextNote.Text = "Обнаружена установленная копия «только для меня» — обновление выполнится в том же режиме. Для смены режима сначала удалите текущую копию.";
+            ContextNote.Visibility = Visibility.Visible;
+        }
+        else if (installed == InstalledContext.PerMachine)
+        {
+            PerMachineRadio.IsChecked = true;
+            PerUserRadio.IsEnabled = false;
+            ContextNote.Text = "Обнаружена установленная копия «для всех пользователей» — обновление выполнится в том же режиме. Для смены режима сначала удалите текущую копию.";
+            ContextNote.Visibility = Visibility.Visible;
+        }
+
         _phraseTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.7) };
         _phraseTimer.Tick += (_, _) =>
         {
@@ -87,9 +105,33 @@ public partial class SetupWindow : Window
         _options.AllUsers = PerMachineRadio.IsChecked == true;
         _options.DesktopShortcut = DesktopCheck.IsChecked == true;
         var defaultDir = SetupOptions.DefaultInstallDir(_options.AllUsers);
-        _options.CustomDir = string.Equals(PathBox.Text.Trim(), defaultDir, StringComparison.OrdinalIgnoreCase)
-            ? null
-            : PathBox.Text.Trim();
+
+        PathError.Visibility = Visibility.Collapsed;
+        var rawPath = PathBox.Text.Trim();
+        if (rawPath.Length == 0)
+        {
+            _options.CustomDir = null;
+        }
+        else
+        {
+            string fullPath;
+            try
+            {
+                if (!Path.IsPathRooted(rawPath))
+                    throw new ArgumentException("путь не полный");
+                fullPath = Path.GetFullPath(rawPath);
+            }
+            catch
+            {
+                PathError.Text = "Укажите полный путь к папке, например C:\\Apps\\NexusPDF.";
+                PathError.Visibility = Visibility.Visible;
+                _installing = false;
+                return;
+            }
+            _options.CustomDir = string.Equals(fullPath, defaultDir, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : fullPath;
+        }
 
         ShowPage(ProgressPage);
         HeaderText.Text = "Установка…";
