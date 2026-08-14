@@ -77,31 +77,28 @@ internal static class PdfiumOverlayWriter
         var displayHeight = rotation % 2 == 0 ? contentHeight : contentWidth;
 
         var contentAdded = false;
-        foreach (var overlay in overlays)
+        foreach (var raw in overlays)
         {
-            var delta = ((extraQuarterTurns - overlay.PlacedRotation) % 4 + 4) % 4;
+            var (overlay, extraAngle) = OverlayDisplayMapper.ToFrame(
+                raw, extraQuarterTurns, displayWidth, displayHeight);
             switch (overlay)
             {
                 case TextOverlay text:
-                    ApplyText(document, page, font,
-                        RemapText(text, delta, displayWidth, displayHeight),
+                    ApplyText(document, page, font, text,
                         rotation, left, bottom, contentWidth, contentHeight);
                     contentAdded = true;
                     break;
                 case ImageOverlay image:
-                {
-                    var (remapped, extraAngle) = RemapImage(image, delta, displayWidth, displayHeight);
-                    ApplyImage(document, page, remapped, extraAngle,
+                    ApplyImage(document, page, image, extraAngle,
                         rotation, left, bottom, contentWidth, contentHeight);
                     contentAdded = true;
                     break;
-                }
                 case NoteAnnotationDraft note:
-                    ApplyNote(page, RemapNote(note, delta, displayWidth, displayHeight),
+                    ApplyNote(page, note,
                         rotation, left, bottom, contentWidth, contentHeight);
                     break;
                 case ShapeAnnotationDraft shape:
-                    ApplyShape(page, RemapShape(shape, delta, displayWidth, displayHeight),
+                    ApplyShape(page, shape,
                         rotation, left, bottom, contentWidth, contentHeight);
                     break;
             }
@@ -111,27 +108,6 @@ internal static class PdfiumOverlayWriter
         // аннотации живут отдельно от content stream.
         if (contentAdded && fpdf_edit.FPDFPageGenerateContent(page) == 0)
             throw new PdfEngineException("Не удалось сгенерировать содержимое страницы с наложенным контентом.");
-    }
-
-    private static NoteAnnotationDraft RemapNote(NoteAnnotationDraft note, int delta, double finalWidth, double finalHeight)
-    {
-        if (delta == 0) return note;
-        var point = RemapPoint(note.XPt, note.YPt, delta, finalWidth, finalHeight);
-        return note with { XPt = point.X, YPt = point.Y };
-    }
-
-    private static ShapeAnnotationDraft RemapShape(ShapeAnnotationDraft shape, int delta, double finalWidth, double finalHeight)
-    {
-        if (delta == 0) return shape;
-        var p1 = RemapPoint(shape.XPt, shape.YPt, delta, finalWidth, finalHeight);
-        var p2 = RemapPoint(shape.XPt + shape.WidthPt, shape.YPt + shape.HeightPt, delta, finalWidth, finalHeight);
-        return shape with
-        {
-            XPt = Math.Min(p1.X, p2.X),
-            YPt = Math.Min(p1.Y, p2.Y),
-            WidthPt = Math.Abs(p2.X - p1.X),
-            HeightPt = Math.Abs(p2.Y - p1.Y),
-        };
     }
 
     // Подтипы аннотаций по PDF 1.7 (fpdf_annot.h)
@@ -174,7 +150,7 @@ internal static class PdfiumOverlayWriter
             throw new PdfEngineException("Не удалось создать заметку.");
         try
         {
-            const double iconSize = 20;
+            const double iconSize = OverlayDisplayMapper.NoteIconSizePt;
             var rect = ToContentRect(note.XPt, note.YPt, iconSize, iconSize,
                 rotation, offsetX, offsetY, contentWidth, contentHeight);
             fpdf_annot.FPDFAnnotSetRect(annot, rect);
@@ -219,51 +195,6 @@ internal static class PdfiumOverlayWriter
         {
             fpdf_annot.FPDFPageCloseAnnot(annot);
         }
-    }
-
-    /// <summary>Перевод точки из рамки размещения в итоговую отображаемую рамку (страницу довернули на delta четвертей).</summary>
-    private static (double X, double Y) RemapPoint(
-        double x, double y, int delta, double finalWidth, double finalHeight)
-    {
-        // Рамка размещения: при нечётной delta её стороны переставлены
-        // относительно итоговой.
-        var (w, h) = delta % 2 == 0 ? (finalWidth, finalHeight) : (finalHeight, finalWidth);
-        for (var i = 0; i < delta; i++)
-        {
-            (x, y) = (h - y, x);
-            (w, h) = (h, w);
-        }
-        return (x, y);
-    }
-
-    private static TextOverlay RemapText(TextOverlay text, int delta, double finalWidth, double finalHeight)
-    {
-        if (delta == 0) return text;
-        // Базовая линия вычисляется в рамке размещения, переносится в итоговую
-        // рамку, затем анкер восстанавливается так, чтобы стандартный сдвиг
-        // +0.75·fs в итоговой рамке попал в ту же точку.
-        var baseline = RemapPoint(text.XPt, text.YPt + text.FontSizePt * 0.75, delta, finalWidth, finalHeight);
-        return text with
-        {
-            XPt = baseline.X,
-            YPt = baseline.Y - text.FontSizePt * 0.75,
-            RotationDegrees = text.RotationDegrees - 90.0 * delta,
-        };
-    }
-
-    private static (ImageOverlay Overlay, double ExtraAngleDeg) RemapImage(
-        ImageOverlay image, int delta, double finalWidth, double finalHeight)
-    {
-        if (delta == 0) return (image, 0);
-        var center = RemapPoint(
-            image.XPt + image.WidthPt / 2, image.YPt + image.HeightPt / 2,
-            delta, finalWidth, finalHeight);
-        var remapped = image with
-        {
-            XPt = center.X - image.WidthPt / 2,
-            YPt = center.Y - image.HeightPt / 2,
-        };
-        return (remapped, -90.0 * delta);
     }
 
     /// <summary>Перевод точки из отображаемых координат (сверху-слева, y вниз) в координаты содержимого (y вверх).</summary>

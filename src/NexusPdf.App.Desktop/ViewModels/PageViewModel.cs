@@ -46,8 +46,15 @@ public sealed partial class PageViewModel : ObservableObject
 
     private void BuildOverlayPreviews()
     {
+        // Черновики пересчитываются в текущую отображаемую рамку тем же кодом,
+        // что и при запекании: экран обязан совпадать с будущим результатом.
         OverlayPreviews = PageRef.OverlayList
-            .Select(OverlayPreview.From)
+            .Select(raw =>
+            {
+                var (remapped, extraAngle) = OverlayDisplayMapper.ToFrame(
+                    raw, PageRef.RotationOffset, SizePt.WidthPoints, SizePt.HeightPoints);
+                return OverlayPreview.From(remapped, extraAngle);
+            })
             .Where(p => p != null)
             .Cast<OverlayPreview>()
             .ToList();

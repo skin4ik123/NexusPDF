@@ -37,7 +37,10 @@ public sealed class OverlayPreview
     private const double BakedBaselineFactor = 0.75;
     private static readonly double WpfBaselineFactor = new FontFamily("Segoe UI").Baseline;
 
-    public static OverlayPreview? From(PageOverlay overlay)
+    /// <summary>Угол изображения (страница повёрнута после размещения) для RenderTransform вокруг центра.</summary>
+    public double ImageAngleDeg { get; private init; }
+
+    public static OverlayPreview? From(PageOverlay overlay, double imageExtraAngleDeg = 0)
     {
         switch (overlay)
         {
@@ -72,6 +75,8 @@ public sealed class OverlayPreview
                     YPt = image.YPt,
                     WidthPt = image.WidthPt,
                     HeightPt = image.HeightPt,
+                    // Знак: маппер отдаёт угол в ccw-конвенции PDF, WPF вращает по часовой.
+                    ImageAngleDeg = -imageExtraAngleDeg,
                 };
             }
             case NoteAnnotationDraft note:

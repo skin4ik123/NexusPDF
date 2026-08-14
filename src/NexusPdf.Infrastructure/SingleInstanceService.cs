@@ -32,6 +32,7 @@ public sealed class SingleInstanceService : IDisposable
         var ct = _cts.Token;
         _ = Task.Run(async () =>
         {
+            var failureDelayMs = 100;
             while (!ct.IsCancellationRequested)
             {
                 NamedPipeServerStream? server = null;
@@ -66,6 +67,8 @@ public sealed class SingleInstanceService : IDisposable
                             // Ошибка одного клиента не должна останавливать приём.
                         }
                     }, ct);
+
+                    failureDelayMs = 100; // сервер поднялся — сбрасываем backoff
                 }
                 catch (OperationCanceledException)
                 {
@@ -75,6 +78,17 @@ public sealed class SingleInstanceService : IDisposable
                 catch
                 {
                     server?.Dispose();
+                    // Персистентная ошибка создания канала (имя занято чужим
+                    // процессом, ACL) не должна выедать ядро горячим циклом.
+                    try
+                    {
+                        await Task.Delay(failureDelayMs, ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    failureDelayMs = Math.Min(failureDelayMs * 2, 5000);
                 }
             }
         }, ct);
