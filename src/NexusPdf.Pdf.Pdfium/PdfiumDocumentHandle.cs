@@ -135,8 +135,11 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
                 var versionText = fpdfview.FPDF_GetFileVersion(NativeDoc, ref version) != 0 && version > 0
                     ? $"{version / 10}.{version % 10}"
                     : "";
+                // Ревизия security handler есть только у зашифрованных файлов —
+                // ловит и файлы с одним owner-паролем, открытые без пароля.
+                var encrypted = fpdfview.FPDF_GetSecurityHandlerRevision(NativeDoc) >= 0;
                 return new PdfDocumentMetadata(
-                    versionText,
+                    versionText, encrypted,
                     GetMetaText("Title"), GetMetaText("Author"), GetMetaText("Subject"),
                     GetMetaText("Creator"), GetMetaText("Producer"),
                     GetMetaText("CreationDate"), GetMetaText("ModDate"));

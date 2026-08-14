@@ -86,9 +86,10 @@ public sealed record PdfAnnotationInfo(
     string Author,
     string Value = "");
 
-/// <summary>Метаданные документа: версия PDF и строки словаря /Info (пустые, если не заданы).</summary>
+/// <summary>Метаданные документа: версия PDF, шифрование и строки словаря /Info (пустые, если не заданы).</summary>
 public sealed record PdfDocumentMetadata(
     string PdfVersion,
+    bool IsEncrypted,
     string Title,
     string Author,
     string Subject,

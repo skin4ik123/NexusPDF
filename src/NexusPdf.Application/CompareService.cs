@@ -8,9 +8,16 @@ public sealed record PageCompareInfo(
     bool OnlyInFirst,
     bool OnlyInSecond,
     bool SizeMismatch,
-    double DiffPercent)
+    double DiffPercent,
+    long DiffPixels)
 {
-    public bool IsDifferent => OnlyInFirst || OnlyInSecond || SizeMismatch || DiffPercent > 0.01;
+    // Порог АБСОЛЮТНЫЙ (не процент площади!): замена одной цифры в дате —
+    // это ~20-60 пикселей, а 0.01% страницы Letter — уже 86. Инструмент
+    // сравнения не имеет права называть такое «идентичными».
+    public const long DiffPixelThreshold = 4;
+
+    public bool IsDifferent =>
+        OnlyInFirst || OnlyInSecond || SizeMismatch || DiffPixels > DiffPixelThreshold;
 }
 
 /// <summary>Пара растров страницы на общем канвасе + маска отличий (byte на пиксель, 1 — отличие).</summary>
@@ -110,8 +117,9 @@ public sealed class CompareSession : IAsyncDisposable
         {
             var only = inFirst ? _first : _second;
             var size = only.Info.Pages[pageIndex];
-            var (w, h) = PixelSize(size.WidthPoints, size.HeightPoints);
-            var info = new PageCompareInfo(pageIndex, inFirst, inSecond, false, 100);
+            var scaleOnly = ScaleFor(Math.Max(size.WidthPoints, size.HeightPoints));
+            var (w, h) = PixelSize(size, scaleOnly);
+            var info = new PageCompareInfo(pageIndex, inFirst, inSecond, false, 100, w * (long)h);
             if (!keepImages)
                 return (info, null);
             var image = await only.RenderPageAsync(pageIndex, w, h, 0, ct).ConfigureAwait(false);
@@ -125,10 +133,14 @@ public sealed class CompareSession : IAsyncDisposable
             Math.Abs(sizeA.WidthPoints - sizeB.WidthPoints) > 1 ||
             Math.Abs(sizeA.HeightPoints - sizeB.HeightPoints) > 1;
 
-        // Общий канвас по большей странице; каждая страница рендерится в СВОЁМ
-        // разрешении того же DPI (без искажения аспекта) от левого верхнего угла.
-        var (wA, hA) = PixelSize(sizeA.WidthPoints, sizeA.HeightPoints);
-        var (wB, hB) = PixelSize(sizeB.WidthPoints, sizeB.HeightPoints);
+        // Масштаб ОБЩИЙ на пару (иначе кламп большой страницы дал бы двум
+        // почти одинаковым листам разный DPI и ложные отличия по всему краю);
+        // общий канвас по большей странице, рендер от левого верхнего угла.
+        var scale = ScaleFor(Math.Max(
+            Math.Max(sizeA.WidthPoints, sizeA.HeightPoints),
+            Math.Max(sizeB.WidthPoints, sizeB.HeightPoints)));
+        var (wA, hA) = PixelSize(sizeA, scale);
+        var (wB, hB) = PixelSize(sizeB, scale);
         var width = Math.Max(wA, wB);
         var height = Math.Max(hA, hB);
 
@@ -137,39 +149,48 @@ public sealed class CompareSession : IAsyncDisposable
         var canvasA = ToCanvas(imageA, width, height);
         var canvasB = ToCanvas(imageB, width, height);
 
+        // При размерах в пределах допуска (< 1 pt) кромка канваса за меньшей
+        // страницей — это разница округления, а не контента: она не считается.
+        var compareWidth = sizeMismatch ? width : Math.Min(wA, wB);
+        var compareHeight = sizeMismatch ? height : Math.Min(hA, hB);
+
         var mask = keepImages ? new byte[width * height] : null;
         long diffCount = 0;
-        var totalPixels = width * height;
-        for (var p = 0; p < totalPixels; p++)
+        for (var y = 0; y < compareHeight; y++)
         {
-            var o = p * 4;
-            var delta = Math.Abs(canvasA[o] - canvasB[o]) +
-                        Math.Abs(canvasA[o + 1] - canvasB[o + 1]) +
-                        Math.Abs(canvasA[o + 2] - canvasB[o + 2]);
-            if (delta > ChannelTolerance)
+            var rowStart = y * width;
+            for (var x = 0; x < compareWidth; x++)
             {
-                diffCount++;
-                if (mask != null)
-                    mask[p] = 1;
+                var o = (rowStart + x) * 4;
+                var delta = Math.Abs(canvasA[o] - canvasB[o]) +
+                            Math.Abs(canvasA[o + 1] - canvasB[o + 1]) +
+                            Math.Abs(canvasA[o + 2] - canvasB[o + 2]);
+                if (delta > ChannelTolerance)
+                {
+                    diffCount++;
+                    if (mask != null)
+                        mask[rowStart + x] = 1;
+                }
             }
         }
 
         var infoResult = new PageCompareInfo(
-            pageIndex, false, false, sizeMismatch, diffCount * 100.0 / totalPixels);
+            pageIndex, false, false, sizeMismatch,
+            diffCount * 100.0 / (compareWidth * (long)compareHeight), diffCount);
         if (!keepImages)
             return (infoResult, null);
         return (infoResult, new PageCompareImages(
             new RenderedPageImage(width, height, width * 4, canvasA),
             new RenderedPageImage(width, height, width * 4, canvasB),
-            diffCount > 0 ? mask : null, width, height));
+            diffCount > PageCompareInfo.DiffPixelThreshold ? mask : null, width, height));
     }
 
-    private static (int Width, int Height) PixelSize(double widthPoints, double heightPoints)
-    {
-        var scale = Math.Min(RenderDpi / 72.0, MaxCompareSide / Math.Max(widthPoints, heightPoints));
-        return (Math.Max(1, (int)Math.Round(widthPoints * scale)),
-                Math.Max(1, (int)Math.Round(heightPoints * scale)));
-    }
+    private static double ScaleFor(double maxSidePoints) =>
+        Math.Min(RenderDpi / 72.0, MaxCompareSide / Math.Max(1.0, maxSidePoints));
+
+    private static (int Width, int Height) PixelSize(PdfPageDescriptor size, double scale) =>
+        (Math.Max(1, (int)Math.Round(size.WidthPoints * scale)),
+         Math.Max(1, (int)Math.Round(size.HeightPoints * scale)));
 
     /// <summary>Растр страницы на белом канвасе большего размера (от левого верхнего угла).</summary>
     private static byte[] ToCanvas(RenderedPageImage image, int width, int height)
@@ -200,32 +221,40 @@ public static class PdfAClaimDetector
     public static string? DetectClaim(string filePath)
     {
         // XMP лежит близко к началу или к концу файла — читаем до 4 МиБ с
-        // каждой стороны, не загружая гигантский файл целиком.
+        // каждой стороны, не загружая гигантский файл целиком. Инкрементальные
+        // сохранения дописываются в КОНЕЦ, поэтому побеждает заявление из
+        // хвоста (мёртвый пакет старой ревизии в голове не должен «воскресать»).
         const int window = 4 * 1024 * 1024;
         using var stream = File.OpenRead(filePath);
         var headLength = (int)Math.Min(stream.Length, window);
         var head = new byte[headLength];
         stream.ReadExactly(head, 0, headLength);
-        var claim = Scan(head);
-        if (claim != null || stream.Length <= window)
-            return claim;
+        var headClaim = ScanLast(head);
+        if (stream.Length <= window)
+            return headClaim;
 
         stream.Seek(-window, SeekOrigin.End);
         var tail = new byte[window];
         stream.ReadExactly(tail, 0, window);
-        return Scan(tail);
+        return ScanLast(tail) ?? headClaim;
     }
 
-    private static string? Scan(byte[] bytes)
+    private static string? ScanLast(byte[] bytes)
     {
         var text = System.Text.Encoding.Latin1.GetString(bytes);
-        var part = System.Text.RegularExpressions.Regex.Match(text,
-            @"pdfaid:part(?:>\s*|="")(\d)");
-        if (!part.Success)
+        // Обе формы XMP: атрибут (кавычки любые, пробелы вокруг «=») и элемент.
+        var parts = System.Text.RegularExpressions.Regex.Matches(text,
+            @"pdfaid:part(?:>\s*|\s*=\s*[""'])(\d)");
+        if (parts.Count == 0)
             return null;
-        var conformance = System.Text.RegularExpressions.Regex.Match(text,
-            @"pdfaid:conformance(?:>\s*|="")([ABUab])");
-        return conformance.Success
+        var part = parts[^1];
+        var conformances = System.Text.RegularExpressions.Regex.Matches(text,
+            @"pdfaid:conformance(?:>\s*|\s*=\s*[""'])([ABUab])");
+        // Соответствие берётся из того же (последнего) пакета — ближайшее
+        // вхождение после последнего part, иначе последнее вообще.
+        var conformance = conformances
+            .LastOrDefault(m => m.Index > part.Index) ?? conformances.LastOrDefault();
+        return conformance != null
             ? $"PDF/A-{part.Groups[1].Value}{conformance.Groups[1].Value.ToUpperInvariant()}"
             : $"PDF/A-{part.Groups[1].Value}";
     }
