@@ -63,6 +63,21 @@ public sealed record ShapeAnnotationDraft(
     string Contents,
     string Author) : PageOverlay;
 
+/// <summary>Распознанное OCR слово: рамка в отображаемых пунктах (от левого верхнего угла на момент распознавания).</summary>
+public sealed record OcrWordBox(
+    string Text,
+    double XPt,
+    double YPt,
+    double WidthPt,
+    double HeightPt);
+
+/// <summary>
+/// Невидимый текстовый слой поверх скана (результат OCR): каждое слово
+/// запекается невидимым текстовым объектом, растянутым по своей рамке —
+/// поиск/копирование работают, изображение страницы не меняется.
+/// </summary>
+public sealed record OcrTextLayerOverlay(IReadOnlyList<OcrWordBox> Words) : PageOverlay;
+
 /// <summary>Существующая аннотация документа (для панели комментариев; только чтение). Value — /V для виджетов форм.</summary>
 public sealed record PdfAnnotationInfo(
     int AnnotIndex,

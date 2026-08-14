@@ -20,6 +20,9 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
     <PackageReference Include="gong-wpf-dragdrop" Version="4.0.0" />
+    <!-- Прямая ссылка нужна ради нативных x64-библиотек: пакет Tesseract
+         копирует их через build/-targets, которые не текут транзитивно. -->
+    <PackageReference Include="Tesseract" Version="5.2.0" />
   </ItemGroup>
 
   <ItemGroup>

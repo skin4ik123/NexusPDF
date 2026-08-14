@@ -19,6 +19,8 @@ public sealed class AppServices : IAsyncDisposable
         Tools = new DocumentToolsService(engine, Qpdf, Qpdf);
         Print = new PrintService();
         Signatures = new SignatureStore();
+        OcrEngine = new NexusPdf.Ocr.TesseractOcrEngine();
+        Ocr = new OcrService(OcrEngine);
     }
 
     public IPdfRenderEngine Engine { get; }
@@ -30,6 +32,8 @@ public sealed class AppServices : IAsyncDisposable
     public DocumentToolsService Tools { get; }
     public PrintService Print { get; }
     public SignatureStore Signatures { get; }
+    public NexusPdf.Ocr.TesseractOcrEngine OcrEngine { get; }
+    public OcrService Ocr { get; }
 
     public void SaveSettings()
     {
@@ -43,5 +47,9 @@ public sealed class AppServices : IAsyncDisposable
         }
     }
 
-    public async ValueTask DisposeAsync() => await Engine.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        OcrEngine.Dispose();
+        await Engine.DisposeAsync();
+    }
 }

@@ -143,7 +143,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
                     var overlays = pages[k].Overlays;
                     if (overlays == null || overlays.Count == 0) continue;
 
-                    if (overlayFont == null && overlays.Any(o => o is TextOverlay))
+                    if (overlayFont == null && overlays.Any(o => o is TextOverlay or OcrTextLayerOverlay))
                     {
                         overlayFont = PdfiumOverlayWriter.LoadOverlayFont(newDoc);
                     }

@@ -101,6 +101,11 @@ internal static class PdfiumOverlayWriter
                     ApplyShape(page, shape,
                         rotation, left, bottom, contentWidth, contentHeight);
                     break;
+                case OcrTextLayerOverlay ocrLayer:
+                    ApplyOcrLayer(document, page, font, ocrLayer, extraAngle,
+                        rotation, left, bottom, contentWidth, contentHeight);
+                    contentAdded = true;
+                    break;
             }
         }
 
@@ -252,6 +257,67 @@ internal static class PdfiumOverlayWriter
         fpdf_edit.FPDFPageObjTransform(obj, cos, sin, -sin, cos, offsetX + cx, offsetY + cy);
 
         fpdf_edit.FPDFPageInsertObject(page, obj); // объект переходит во владение страницы
+    }
+
+    // PDF text render mode Tr 3 — глифы не рисуются, но участвуют в
+    // текстовом слое (поиск/выделение/копирование).
+    private const int TextRenderModeInvisible = 3;
+
+    private static void ApplyOcrLayer(
+        FpdfDocumentT document, FpdfPageT page, FpdfFontT? font, OcrTextLayerOverlay layer,
+        double extraAngleDeg, int rotation, double offsetX, double offsetY,
+        double contentWidth, double contentHeight)
+    {
+        if (font == null)
+            throw new PdfEngineException(
+                "Для текстового слоя OCR нужен системный шрифт TTF (Segoe UI/Arial), но он не найден.");
+
+        var angle = (extraAngleDeg + 90.0 * rotation) * Math.PI / 180.0;
+        var cos = Math.Cos(angle);
+        var sin = Math.Sin(angle);
+
+        foreach (var word in layer.Words)
+        {
+            if (word.Text.Length == 0 ||
+                !double.IsFinite(word.XPt) || !double.IsFinite(word.YPt) ||
+                !(word.WidthPt > 0) || !(word.HeightPt > 0))
+                continue;
+
+            var fontSize = (float)word.HeightPt;
+            var obj = fpdf_edit.FPDFPageObjCreateTextObj(document, font, fontSize);
+            if (obj == null || obj.__Instance == IntPtr.Zero)
+                throw new PdfEngineException("Не удалось создать текстовый объект слоя OCR.");
+
+            var buffer = new ushort[word.Text.Length + 1];
+            for (var i = 0; i < word.Text.Length; i++)
+                buffer[i] = word.Text[i];
+            if (fpdf_edit.FPDFTextSetText(obj, ref buffer[0]) == 0)
+            {
+                fpdf_edit.FPDFPageObjDestroy(obj);
+                continue; // слово с непечатаемыми символами — пропускаем, не роняя сохранение
+            }
+
+            fpdf_edit.FPDFTextObjSetTextRenderMode(obj, (FPDF_TEXT_RENDERMODE)TextRenderModeInvisible);
+
+            // Слово растягивается по горизонтали под ширину распознанной рамки,
+            // чтобы прямоугольники выделения совпадали со сканом.
+            float bl = 0, bb = 0, br = 0, bt = 0;
+            if (fpdf_edit.FPDFPageObjGetBounds(obj, ref bl, ref bb, ref br, ref bt) != 0)
+            {
+                var measured = br - bl;
+                if (measured > 0.01)
+                {
+                    var sx = Math.Clamp(word.WidthPt / measured, 0.05, 20.0);
+                    fpdf_edit.FPDFPageObjTransform(obj, sx, 0, 0, 1, 0, 0);
+                }
+            }
+
+            var baselineDisplayed = (X: word.XPt, Y: word.YPt + word.HeightPt * OverlayDisplayMapper.TextBaselineFactor);
+            var (cx, cy) = DisplayedToContent(baselineDisplayed.X, baselineDisplayed.Y, rotation, contentWidth, contentHeight);
+            fpdf_edit.FPDFPageObjTransform(obj, cos, sin, -sin, cos, offsetX + cx, offsetY + cy);
+
+            fpdf_edit.FPDFPageInsertObject(page, obj); // объект переходит во владение страницы
+        }
     }
 
     private static void ApplyImage(
