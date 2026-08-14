@@ -260,9 +260,13 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        await Task.Yield();
-        _thread.Dispose();
+        // Строго синхронно: DisposeAsync вызывается из OnExit через
+        // GetAwaiter().GetResult() на UI-потоке — любой await с возвратом на
+        // диспетчер дал бы deadlock и оставил процесс-зомби без окон
+        // (именно так и происходило до этого фикса).
+        _thread.Dispose(); // общий поток фоновый и завершается вместе с процессом
+        return ValueTask.CompletedTask;
     }
 }
