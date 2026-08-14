@@ -6,6 +6,7 @@
         xmlns:vm="clr-namespace:NexusPdf.App.Desktop.ViewModels"
         xmlns:views="clr-namespace:NexusPdf.App.Desktop.Views"
         Title="{Binding WindowTitle}"
+        Icon="/Assets/app.ico"
         Width="1200" Height="800" MinWidth="860" MinHeight="560"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBg}"
@@ -20,6 +21,7 @@
     <KeyBinding Modifiers="Ctrl" Key="O" Command="{Binding OpenCommand}"/>
     <KeyBinding Modifiers="Ctrl" Key="S" Command="{Binding SaveCommand}"/>
     <KeyBinding Modifiers="Ctrl+Shift" Key="S" Command="{Binding SaveAsCommand}"/>
+    <KeyBinding Modifiers="Ctrl" Key="P" Command="{Binding PrintActiveCommand}"/>
     <KeyBinding Modifiers="Ctrl" Key="F" Command="{Binding ToggleFindActiveCommand}"/>
     <KeyBinding Modifiers="Ctrl" Key="W" Command="{Binding CloseActiveTabCommand}"/>
     <KeyBinding Modifiers="Ctrl" Key="Z" Command="{Binding UndoActiveCommand}"/>
@@ -65,6 +67,10 @@
           <Button Style="{StaticResource ToolButton}" Command="{Binding SaveAsCommand}"
                   IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc SaveAsTooltip}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE792;"/>
+          </Button>
+          <Button Style="{StaticResource ToolButton}" Command="{Binding PrintActiveCommand}"
+                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc PrintTooltip}">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE749;"/>
           </Button>
 
           <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
@@ -127,6 +133,17 @@
                 <Button Style="{StaticResource LinkButton}" Content="English"
                         Command="{Binding SetLanguageCommand}" CommandParameter="en" Click="OnMenuItem"/>
                 <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
+                <StackPanel Visibility="{Binding HasPdfTools, Converter={StaticResource BoolToVis}}">
+                  <TextBlock Text="{l:Loc ToolsSection}" Foreground="{DynamicResource TextSecondary}"
+                             FontSize="11" Margin="6,4"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc ProtectPdf}"
+                          Command="{Binding ProtectWithPasswordCommand}" IsEnabled="{Binding HasDocuments}"
+                          Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc OptimizeCopy}"
+                          Command="{Binding OptimizeCopyCommand}" IsEnabled="{Binding HasDocuments}"
+                          Click="OnMenuItem"/>
+                  <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
+                </StackPanel>
                 <Button Style="{StaticResource LinkButton}" Content="{l:Loc DetachTab}"
                         Command="{Binding DetachTabCommand}" IsEnabled="{Binding HasDocuments}"
                         Click="OnMenuItem"/>
@@ -217,8 +234,16 @@
             BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,1,0,0">
       <Grid Margin="10,3">
         <StackPanel Orientation="Horizontal">
+          <TextBlock Text="{l:Loc PageShort}" Foreground="{DynamicResource TextSecondary}"
+                     VerticalAlignment="Center" Margin="0,0,5,0"
+                     Visibility="{Binding HasDocuments, Converter={StaticResource BoolToVis}}"/>
+          <TextBox x:Name="PageBox" Width="44" FontSize="12" Padding="3,1" TextAlignment="Center"
+                   Style="{StaticResource ThemedTextBox}" VerticalAlignment="Center"
+                   Text="{Binding ActiveDocument.CurrentPageNumber, Mode=OneWay}"
+                   KeyDown="OnPageBoxKeyDown"
+                   Visibility="{Binding HasDocuments, Converter={StaticResource BoolToVis}}"/>
           <TextBlock Text="{Binding ActiveDocument.PageOfText, FallbackValue=''}"
-                     Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"/>
+                     Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center" Margin="6,0,0,0"/>
           <TextBlock Text="{Binding ActiveDocument.CurrentPageSizeText, FallbackValue=''}"
                      Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" Margin="16,0,0,0"/>
           <TextBlock Text="{Binding ActiveDocument.StatusText, FallbackValue=''}"

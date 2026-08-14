@@ -1,52 +1,52 @@
 # Установщик NexusPDF
 
-Статус: **MSI собирается** (WiX 5.0.2, проверено локально: ~52 МБ с
-self-contained приложением). Цикл установки/обновления/удаления ещё не
-прогонялся — см. docs/KNOWN_LIMITATIONS.md. План поставки: подписанный
-Setup.exe-bootstrapper + MSI + portable ZIP.
+Статус: **готов и проверен** (Windows 11, per-user цикл прогнан автоматически:
+установка → файлы/реестр/ярлык → запуск приложения → удаление без следов).
 
-Важно: WiX ставится **версии 5.x** (`dotnet tool install --global wix
---version 5.0.2`). WiX 7 требует принятия платного OSMF EULA — осознанно не
-используется.
+## Поставка
 
-## Сборка MSI
+| Артефакт | Что это |
+| --- | --- |
+| `artifacts/NexusPdfSetup.exe` | фирменный установщик с WPF-интерфейсом (hero-панель, выбор режима и пути, ярлык, лицензия, прогресс, запуск после установки) |
+| `artifacts/NexusPdf.msi` | MSI x64 (WiX 5) — основа: обновления, Repair, удаление через «Установленные приложения»; при прямом запуске показывает запасной мастер WixUI на русском |
+| `artifacts/NexusPdf-<v>-portable-win-x64.zip` | portable-версия без установки |
+| `artifacts/checksums.sha256.txt` | контрольные суммы |
+
+Сборка всего: `./build.ps1 -All`.
+
+## Тихая установка / удаление
 
 ```powershell
-./build.ps1 -Msi
+.\NexusPdfSetup.exe /S                     # для текущего пользователя
+.\NexusPdfSetup.exe /S /allusers           # для всех (UAC)
+.\NexusPdfSetup.exe /S /dir="D:\Apps\NexusPDF" /nodesktop
+msiexec /x NexusPdf.msi /qn                # тихое удаление
 ```
 
-или вручную:
+Код возврата — стандартный код msiexec (0 — успех, 3010 — нужна перезагрузка).
 
-```powershell
-./build.ps1                                   # наполняет artifacts/publish/win-x64
-dotnet tool install --global wix --version 5.0.2
-wix build installer/Msi/NexusPdf.wxs -bindpath publish=<абс. путь>/artifacts/publish/win-x64 -o artifacts/NexusPdf.msi
-```
+## Что регистрирует установка
 
-(bindpath передавайте абсолютным путём — относительный WiX разрешает от
-каталога .wxs.)
-
-## Что регистрирует MSI
-
-- файлы приложения в `Program Files\NexusPDF` (или профиль пользователя при
-  установке per-user);
-- ярлык в меню «Пуск»;
+- файлы приложения (+ qpdf, THIRD_PARTY_NOTICES, лицензия);
+- ярлык в меню «Пуск» (+ на рабочем столе, если выбран);
 - ProgID `NexusPdf.Document.1` (значок, команда открытия с путём в кавычках);
-- `.pdf\OpenWithProgids` — появление в «Открыть с помощью»;
-- `Capabilities` + `RegisteredApplications` — появление в системной странице
-  «Приложения по умолчанию».
+- `.pdf\OpenWithProgids` — «Открыть с помощью»;
+- `Capabilities` + `RegisteredApplications` — страница «Приложения по умолчанию»;
+- запись в «Установленные приложения» с иконкой и версией.
 
-Чего установщик **не делает** намеренно:
+Принципиально **не делает**: не подменяет `UserChoice`, не назначает себя
+обработчиком по умолчанию, при удалении не трогает чужие ассоциации и
+документы пользователя.
 
-- не подменяет `UserChoice` и не назначает себя обработчиком по умолчанию —
-  это выбор пользователя в настройках Windows;
-- не трогает чужие ассоциации при удалении.
+## Инструменты
 
-## Осталось до полноценного установщика (этап 8–10)
+WiX **5.0.2** (`dotnet tool install --global wix --version 5.0.2` +
+`wix extension add --global WixToolset.UI.wixext/5.0.2`). WiX 7 осознанно не
+используется: требует принятия платного OSMF EULA.
 
-- bootstrapper Setup.exe (лицензия, выбор пути, per-user/per-machine, проверка
-  места и архитектуры, тихий режим, лог);
-- диалог удаления с выбором: сохранить/удалить настройки, кэш, журналы;
-- portable ZIP;
-- подпись артефактов;
-- installer-тесты из TEST_MATRIX (установка/обновление/repair/удаление).
+## Остатки (см. KNOWN_LIMITATIONS)
+
+- артефакты не подписаны сертификатом кода (SmartScreen при скачивании);
+- per-machine режим реализован, но авто-цикл прогнан только per-user;
+- Setup.exe ~117 МБ (два self-contained рантайма) — план: framework-dependent
+  Setup или нативный стуб.

@@ -24,14 +24,15 @@ jobs:
       - name: PDF engine tests
         run: dotnet test tests/NexusPdf.PdfEngineTests -c Release --no-build --logger "trx"
 
-      - name: Publish win-x64
-        run: dotnet publish src/NexusPdf.App.Desktop -c Release -r win-x64 --self-contained true -o artifacts/publish/win-x64
-
-      - name: Hashes
+      - name: Full artifact pipeline (publish + MSI + Setup + ZIP)
         shell: pwsh
-        run: Get-ChildItem artifacts/publish/win-x64 -File | Get-FileHash -Algorithm SHA256 | Format-Table -AutoSize | Out-File artifacts/sha256.txt
+        run: ./build.ps1 -All -SkipTests
 
       - uses: actions/upload-artifact@v4
         with:
           name: NexusPdf-win-x64
-          path: artifacts/
+          path: |
+            artifacts/NexusPdf.msi
+            artifacts/NexusPdfSetup.exe
+            artifacts/*.zip
+            artifacts/checksums.sha256.txt

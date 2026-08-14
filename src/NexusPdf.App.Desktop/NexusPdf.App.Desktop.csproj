@@ -7,11 +7,13 @@
     <AssemblyName>NexusPdf</AssemblyName>
     <RootNamespace>NexusPdf.App.Desktop</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <SatelliteResourceLanguages>ru;en</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="Resources\i18n\*.json" />
+    <Resource Include="Assets\app.ico" />
   </ItemGroup>
 
   <ItemGroup>

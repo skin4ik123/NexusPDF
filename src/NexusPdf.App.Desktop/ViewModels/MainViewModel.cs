@@ -34,6 +34,9 @@ public sealed partial class MainViewModel : ObservableObject
     public bool HasRecentFiles => RecentFiles.Count > 0;
     public bool HasLastSession => _services.Settings.LastSessionFiles.Count > 0;
 
+    /// <summary>Функции qpdf (пароль, оптимизация) видимы только при наличии движка.</summary>
+    public bool HasPdfTools => _services.Tools.IsAvailable;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasDocuments))]
     [NotifyPropertyChangedFor(nameof(WindowTitle))]
@@ -223,6 +226,95 @@ public sealed partial class MainViewModel : ObservableObject
             doc.IsBusy = false;
         }
     }
+
+    // ----- Печать и инструменты qpdf -----
+
+    [RelayCommand]
+    private async Task PrintActive()
+    {
+        if (ActiveDocument is not { } doc || OwnerWindow is null) return;
+        await _services.Print.PrintInteractiveAsync(doc, OwnerWindow);
+    }
+
+    [RelayCommand]
+    private async Task ProtectWithPassword()
+    {
+        if (ActiveDocument is not { } doc || !_services.Tools.IsAvailable) return;
+
+        var password = PasswordSetDialog.Show(OwnerWindow);
+        if (password == null) return;
+
+        var dialog = new SaveFileDialog
+        {
+            Filter = Loc.Get("PdfFilter"),
+            FileName = Path.GetFileNameWithoutExtension(doc.Title) + "-protected.pdf",
+            DefaultExt = ".pdf",
+        };
+        if (dialog.ShowDialog(OwnerWindow) != true) return;
+
+        doc.IsBusy = true;
+        doc.StatusText = Loc.Get("SavingStatus");
+        try
+        {
+            await _services.Tools.ProtectCopyAsync(doc.Document, dialog.FileName, password, null, CancellationToken.None);
+            doc.StatusText = Loc.F("ProtectDone", Path.GetFileName(dialog.FileName));
+            Log.Information("Создана защищённая копия: {Path}", dialog.FileName);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка создания защищённой копии");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"),
+                Loc.F("ErrorSaveFile", Path.GetFileName(dialog.FileName)), ex.ToString());
+            doc.StatusText = Loc.Get("Ready");
+        }
+        finally
+        {
+            doc.IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task OptimizeCopy()
+    {
+        if (ActiveDocument is not { } doc || !_services.Tools.IsAvailable) return;
+
+        var dialog = new SaveFileDialog
+        {
+            Filter = Loc.Get("PdfFilter"),
+            FileName = Path.GetFileNameWithoutExtension(doc.Title) + "-optimized.pdf",
+            DefaultExt = ".pdf",
+        };
+        if (dialog.ShowDialog(OwnerWindow) != true) return;
+
+        doc.IsBusy = true;
+        doc.StatusText = Loc.Get("OptimizingStatus");
+        try
+        {
+            var result = await _services.Tools.OptimizeCopyAsync(doc.Document, dialog.FileName, CancellationToken.None);
+            doc.StatusText = Loc.F("OptimizeDone",
+                FormatBytes(result.BytesBefore), FormatBytes(result.BytesAfter));
+            Log.Information("Оптимизирована копия: {Path} ({Before} → {After})",
+                dialog.FileName, result.BytesBefore, result.BytesAfter);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка оптимизации");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"),
+                Loc.F("ErrorSaveFile", Path.GetFileName(dialog.FileName)), ex.ToString());
+            doc.StatusText = Loc.Get("Ready");
+        }
+        finally
+        {
+            doc.IsBusy = false;
+        }
+    }
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        >= 1024 * 1024 => $"{bytes / (1024.0 * 1024.0):0.#} МБ",
+        >= 1024 => $"{bytes / 1024.0:0.#} КБ",
+        _ => $"{bytes} Б",
+    };
 
     // ----- Вкладки и окна -----
 
