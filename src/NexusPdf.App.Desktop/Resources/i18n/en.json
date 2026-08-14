@@ -159,6 +159,7 @@
   "SignAlreadySigned": "The document already contains signatures. Re-signing would rebuild the file and break them — save the edited copy under a different name and sign that.",
   "SignaturesTitle": "Document signatures",
   "SignBadgeOk": "Signatures valid",
+  "SignBadgeUntrusted": "Signed, certificate not trusted",
   "SignBadgeProblem": "Signature problem",
   "SignUnknownSigner": "Unknown signer",
   "SignCryptoOk": "Cryptographic check passed",

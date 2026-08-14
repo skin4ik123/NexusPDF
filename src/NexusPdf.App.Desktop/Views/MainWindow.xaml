@@ -315,8 +315,12 @@
                 <TextBlock.Style>
                   <Style TargetType="TextBlock">
                     <Setter Property="Text" Value="{l:Loc SignBadgeProblem}"/>
-                    <Setter Property="Foreground" Value="#D97706"/>
+                    <Setter Property="Foreground" Value="#DC2626"/>
                     <Style.Triggers>
+                      <DataTrigger Binding="{Binding ActiveDocument.SignaturesValidButUntrusted}" Value="True">
+                        <Setter Property="Text" Value="{l:Loc SignBadgeUntrusted}"/>
+                        <Setter Property="Foreground" Value="#D97706"/>
+                      </DataTrigger>
                       <DataTrigger Binding="{Binding ActiveDocument.AllSignaturesValid}" Value="True">
                         <Setter Property="Text" Value="{l:Loc SignBadgeOk}"/>
                         <Setter Property="Foreground" Value="#16A34A"/>

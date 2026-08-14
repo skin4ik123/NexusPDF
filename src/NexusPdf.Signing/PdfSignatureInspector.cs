@@ -69,7 +69,8 @@ public static class PdfSignatureInspector
         // (a+b .. c) и есть значение Contents вместе с ограждающими скобками.
         var contentsHex = ExtractHexBetween(bytes, a + b, c);
         if (contentsHex == null)
-            return new PdfSignatureInfo("", "", null, "", "", false, false, false, "Не найден /Contents подписи.");
+            return new PdfSignatureInfo("", "", null, "", "", false, false, false,
+                "Дыра ByteRange не совпадает со значением /Contents — в файле есть байты, не покрытые подписью.");
 
         var pkcs7 = Convert.FromHexString(contentsHex);
         // Хвостовые нулевые байты заполнителя допустимы.
@@ -136,15 +137,17 @@ public static class PdfSignatureInspector
             error = "PKCS#7 не разобран: " + ex.Message;
         }
 
-        // Окно словаря подписи: байты до значения /Contents и после него —
-        // строковые поля (/M /Name /Reason /Location) могут стоять по обе
-        // стороны от многокилобайтного hex-заполнителя Contents.
-        var dictWindow = GetSignatureDictWindow(bytes, byteRangePos, a + b, c);
-        signTime ??= ParsePdfDate(FindLiteralString(dictWindow, "/M"));
-        var reason = FindLiteralString(dictWindow, "/Reason") ?? "";
-        var location = FindLiteralString(dictWindow, "/Location") ?? "";
+        // Строковые поля (/M /Name /Reason /Location) могут стоять по обе
+        // стороны от многокилобайтного hex-заполнителя Contents; каждый
+        // сегмент окна словаря подписи просматривается отдельно.
+        var (dictBefore, dictAfter) = GetSignatureDictWindow(bytes, byteRangePos, a + b, c);
+        string? FindKey(string key) =>
+            FindLiteralString(dictBefore, key) ?? FindLiteralString(dictAfter, key);
+        signTime ??= ParsePdfDate(FindKey("/M"));
+        var reason = FindKey("/Reason") ?? "";
+        var location = FindKey("/Location") ?? "";
         if (signerName.Length == 0)
-            signerName = FindLiteralString(dictWindow, "/Name") ?? "";
+            signerName = FindKey("/Name") ?? "";
 
         return new PdfSignatureInfo(
             signerName, subject, signTime, reason, location,
@@ -171,38 +174,105 @@ public static class PdfSignatureInspector
         return (values[0], values[1], values[2], values[3]);
     }
 
-    /// <summary>Hex-содержимое между двумя частями ByteRange: «дырка» — это &lt;hex&gt; вместе со скобками.</summary>
+    /// <summary>
+    /// Hex-содержимое «дырки» ByteRange. Дырка обязана быть РОВНО значением
+    /// /Contents: «&lt;» первым байтом, «&gt;» последним, внутри только hex и
+    /// пробелы. Любые лишние байты в дырке не покрыты подписью — так строится
+    /// подделка «полностью валидного» файла, поэтому такие подписи отвергаются.
+    /// </summary>
     private static string? ExtractHexBetween(byte[] bytes, long from, long to)
     {
-        var start = from;
-        while (start < to && bytes[start] != '<')
-            start++;
-        var end = to - 1;
-        while (end > start && bytes[end] != '>')
-            end--;
-        if (start >= end)
+        if (to - from < 2 || bytes[from] != '<' || bytes[to - 1] != '>')
             return null;
-        var builder = new StringBuilder((int)(end - start));
-        for (var i = start + 1; i < end; i++)
+        var builder = new StringBuilder((int)(to - from));
+        for (var i = from + 1; i < to - 1; i++)
         {
             var ch = (char)bytes[i];
-            if (!char.IsWhiteSpace(ch))
-                builder.Append(ch);
+            if (char.IsWhiteSpace(ch))
+                continue;
+            if (ch is not ((>= '0' and <= '9') or (>= 'A' and <= 'F') or (>= 'a' and <= 'f')))
+                return null;
+            builder.Append(ch);
         }
         return builder.Length % 2 == 0 ? builder.ToString() : null;
     }
 
-    /// <summary>Окно словаря подписи: сегменты до и после значения /Contents.</summary>
-    private static string GetSignatureDictWindow(byte[] bytes, int byteRangePos, long contentsStart, long contentsEnd)
+    /// <summary>
+    /// Окно словаря подписи: два сегмента внутри границ самого словаря
+    /// (сбалансированный скан от /ByteRange назад до «&lt;&lt;» и вперёд до
+    /// парного «&gt;&gt;») — до значения /Contents и после него. Сегменты не
+    /// склеиваются: строка не должна «перетекать» через многокилобайтную
+    /// hex-дырку, а ключи соседних объектов файла не должны попадать в окно.
+    /// </summary>
+    private static (string Before, string After) GetSignatureDictWindow(
+        byte[] bytes, int byteRangePos, long contentsStart, long contentsEnd)
     {
-        var beforeStart = Math.Max(0, byteRangePos - 2048);
-        var beforeLength = (int)Math.Min(Math.Max(0, contentsStart - beforeStart), 4096);
-        var afterStart = Math.Min(bytes.LongLength, contentsEnd);
-        var afterLength = (int)Math.Min(bytes.LongLength - afterStart, 4096);
+        var dictStart = FindEnclosingDictStart(bytes, byteRangePos);
+        var dictEnd = FindEnclosingDictEnd(bytes, byteRangePos);
+        var beforeEnd = Math.Min(contentsStart, dictEnd);
+        var afterStart = Math.Max(contentsEnd, dictStart);
         // Латиница и разделители PDF читаются как Latin-1; юникод-строки
         // (hex UTF-16BE с BOM) декодирует FindLiteralString.
-        return Encoding.Latin1.GetString(bytes, beforeStart, beforeLength)
-             + Encoding.Latin1.GetString(bytes, (int)afterStart, afterLength);
+        static string Cut(byte[] source, long start, long end) =>
+            end > start ? Encoding.Latin1.GetString(source, (int)start, (int)(end - start)) : "";
+        return (Cut(bytes, dictStart, beforeEnd), Cut(bytes, afterStart, dictEnd));
+    }
+
+    private static long FindEnclosingDictStart(byte[] bytes, long pos)
+    {
+        var depth = 0;
+        for (var i = pos - 1; i > 0; i--)
+        {
+            if (bytes[i] == '>' && bytes[i - 1] == '>') { depth++; i--; }
+            else if (bytes[i] == '<' && bytes[i - 1] == '<')
+            {
+                if (depth == 0) return i - 1;
+                depth--;
+                i--;
+            }
+        }
+        return 0;
+    }
+
+    private static long FindEnclosingDictEnd(byte[] bytes, long pos)
+    {
+        var depth = 1L;
+        var i = pos;
+        while (i < bytes.LongLength)
+        {
+            var ch = bytes[i];
+            if (ch == '(')
+            {
+                // Литеральная строка: до парной «)» с учётом \-экранирования.
+                i++;
+                var strDepth = 1;
+                while (i < bytes.LongLength && strDepth > 0)
+                {
+                    if (bytes[i] == '\\') i++;
+                    else if (bytes[i] == '(') strDepth++;
+                    else if (bytes[i] == ')') strDepth--;
+                    i++;
+                }
+                continue;
+            }
+            if (ch == '<' && i + 1 < bytes.LongLength && bytes[i + 1] == '<') { depth++; i += 2; continue; }
+            if (ch == '<')
+            {
+                // Hex-строка (в т.ч. дырка /Contents): до закрывающей «>».
+                i++;
+                while (i < bytes.LongLength && bytes[i] != '>') i++;
+                i++;
+                continue;
+            }
+            if (ch == '>' && i + 1 < bytes.LongLength && bytes[i + 1] == '>')
+            {
+                if (--depth == 0) return i;
+                i += 2;
+                continue;
+            }
+            i++;
+        }
+        return bytes.LongLength;
     }
 
     private static string? FindLiteralString(string window, string key)
