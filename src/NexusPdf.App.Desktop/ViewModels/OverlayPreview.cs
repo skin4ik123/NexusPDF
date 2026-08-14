@@ -13,6 +13,11 @@ public sealed class OverlayPreview
     private OverlayPreview() { }
 
     public bool IsText { get; private init; }
+    public bool IsNote { get; private init; }
+    public bool IsRectShape { get; private init; }
+    public bool IsEllipseShape { get; private init; }
+    public Brush Stroke { get; private init; } = Brushes.Transparent;
+    public double StrokeThickness { get; private init; }
     public string Text { get; private init; } = "";
     public double FontSizePt { get; private init; }
     public Brush Fill { get; private init; } = Brushes.Black;
@@ -69,8 +74,43 @@ public sealed class OverlayPreview
                     HeightPt = image.HeightPt,
                 };
             }
+            case NoteAnnotationDraft note:
+                return new OverlayPreview
+                {
+                    IsNote = true,
+                    Text = note.Contents,
+                    XPt = note.XPt,
+                    YPt = note.YPt,
+                    WidthPt = 20,
+                    HeightPt = 20,
+                };
+            case ShapeAnnotationDraft shape:
+            {
+                var stroke = MakeBrush(shape.StrokeArgb);
+                var fill = MakeBrush(shape.FillArgb);
+                return new OverlayPreview
+                {
+                    IsRectShape = !shape.IsEllipse,
+                    IsEllipseShape = shape.IsEllipse,
+                    Stroke = stroke,
+                    Fill = fill,
+                    StrokeThickness = shape.BorderWidthPt,
+                    XPt = shape.XPt,
+                    YPt = shape.YPt,
+                    WidthPt = shape.WidthPt,
+                    HeightPt = shape.HeightPt,
+                };
+            }
             default:
                 return null;
         }
+    }
+
+    private static Brush MakeBrush(uint argb)
+    {
+        var brush = new SolidColorBrush(Color.FromArgb(
+            (byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb));
+        brush.Freeze();
+        return brush;
     }
 }

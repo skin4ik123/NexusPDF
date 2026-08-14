@@ -349,6 +349,58 @@ public sealed partial class MainViewModel : ObservableObject
         });
     }
 
+    // ----- Комментарии и аннотации -----
+
+    [RelayCommand]
+    private void AddNote()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        var note = NoteDialog.Show(OwnerWindow);
+        if (note == null) return;
+        doc.BeginPlacement((_, xPt, yPt) =>
+            new NexusPdf.Pdf.Abstractions.NoteAnnotationDraft(xPt, yPt, note.Contents, note.Author));
+    }
+
+    [RelayCommand]
+    private void AddHighlight()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        doc.BeginRectPlacement((_, rect) =>
+            new NexusPdf.Pdf.Abstractions.ShapeAnnotationDraft(
+                rect.X, rect.Y, rect.Width, rect.Height,
+                StrokeArgb: 0x00000000, FillArgb: 0x66FDE047, BorderWidthPt: 0,
+                IsEllipse: false, Contents: "", Author: Environment.UserName));
+    }
+
+    [RelayCommand]
+    private void AddRectShape()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        doc.BeginRectPlacement((_, rect) =>
+            new NexusPdf.Pdf.Abstractions.ShapeAnnotationDraft(
+                rect.X, rect.Y, rect.Width, rect.Height,
+                StrokeArgb: 0xFFDC2626, FillArgb: 0x00000000, BorderWidthPt: 2,
+                IsEllipse: false, Contents: "", Author: Environment.UserName));
+    }
+
+    [RelayCommand]
+    private void AddEllipseShape()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        doc.BeginRectPlacement((_, rect) =>
+            new NexusPdf.Pdf.Abstractions.ShapeAnnotationDraft(
+                rect.X, rect.Y, rect.Width, rect.Height,
+                StrokeArgb: 0xFFDC2626, FillArgb: 0x00000000, BorderWidthPt: 2,
+                IsEllipse: true, Contents: "", Author: Environment.UserName));
+    }
+
+    [RelayCommand]
+    private async Task ToggleCommentsActive()
+    {
+        if (ActiveDocument is { } doc)
+            await doc.ToggleCommentsCommand.ExecuteAsync(null);
+    }
+
     // ----- Печать и инструменты qpdf -----
 
     [RelayCommand]

@@ -101,6 +101,31 @@
                   IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc FindTooltip}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE721;"/>
           </Button>
+
+          <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
+
+          <Button Style="{StaticResource ToolButton}" Command="{Binding AddNoteCommand}"
+                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc NoteTool}">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE90A;"/>
+          </Button>
+          <Button Style="{StaticResource ToolButton}" Command="{Binding AddHighlightCommand}"
+                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc HighlightTool}">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE7E6;"/>
+          </Button>
+          <Button Style="{StaticResource ToolButton}" Command="{Binding AddRectShapeCommand}"
+                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc RectTool}">
+            <TextBlock Text="▭" FontSize="14"/>
+          </Button>
+          <Button Style="{StaticResource ToolButton}" Command="{Binding AddEllipseShapeCommand}"
+                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc EllipseTool}">
+            <TextBlock Text="◯" FontSize="13"/>
+          </Button>
+          <ToggleButton Style="{StaticResource ToolButton}"
+                        IsChecked="{Binding ActiveDocument.IsCommentsVisible, Mode=OneWay}"
+                        Command="{Binding ToggleCommentsActiveCommand}"
+                        IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc CommentsPanel}">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8BD;"/>
+          </ToggleButton>
         </StackPanel>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">

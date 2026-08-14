@@ -69,6 +69,22 @@ public sealed partial class PageViewModel : ObservableObject
     [ObservableProperty]
     private IReadOnlyList<Rect> _highlights = Array.Empty<Rect>();
 
+    // ----- Живая рамка при drag-размещении аннотации (в пунктах страницы) -----
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DragRectXPt))]
+    [NotifyPropertyChangedFor(nameof(DragRectYPt))]
+    [NotifyPropertyChangedFor(nameof(DragRectWPt))]
+    [NotifyPropertyChangedFor(nameof(DragRectHPt))]
+    [NotifyPropertyChangedFor(nameof(HasDragRect))]
+    private Rect? _dragPreviewRect;
+
+    public bool HasDragRect => DragPreviewRect.HasValue;
+    public double DragRectXPt => DragPreviewRect?.X ?? 0;
+    public double DragRectYPt => DragPreviewRect?.Y ?? 0;
+    public double DragRectWPt => DragPreviewRect?.Width ?? 0;
+    public double DragRectHPt => DragPreviewRect?.Height ?? 0;
+
     public void NotifyZoomChanged()
     {
         OnPropertyChanged(nameof(WidthDiu));

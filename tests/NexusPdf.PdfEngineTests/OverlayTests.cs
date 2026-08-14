@@ -175,6 +175,49 @@ public sealed class OverlayTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task Annotations_Are_Created_And_Readable_After_Save()
+    {
+        var path = PdfFixture.WriteToTemp("annots.pdf",
+            new PdfFixture.PageSpec(600, 600, Text: " "));
+        await using var doc = await _engine.OpenAsync(path, null, CancellationToken.None);
+
+        var target = Path.Combine(Path.GetDirectoryName(path)!, "annots-out.pdf");
+        await _engine.ComposeAsync(new[]
+        {
+            new ComposedPage(doc, 0, 0, new PageOverlay[]
+            {
+                new NoteAnnotationDraft(100, 100, "Проверить раздел 3", "Артур"),
+                new ShapeAnnotationDraft(200, 200, 150, 100, 0xFFDC2626, 0x60FDE047, 2, false, "важно", "Артур"),
+            }),
+        }, target, CancellationToken.None);
+
+        await using var result = await _engine.OpenAsync(target, null, CancellationToken.None);
+        var annots = await result.GetAnnotationsAsync(0, CancellationToken.None);
+
+        Assert.Equal(2, annots.Count);
+        var note = Assert.Single(annots, a => a.Subtype == 1);
+        Assert.Equal("Проверить раздел 3", note.Contents);
+        Assert.Equal("Артур", note.Author);
+        var square = Assert.Single(annots, a => a.Subtype == 5);
+        Assert.Equal("важно", square.Contents);
+
+        // Аннотации должны быть видны при рендере с флагом FPDF_ANNOT:
+        // внутри прямоугольника маркера есть неисходно-белые пиксели.
+        var image = await result.RenderPageAsync(0, 300, 300, 0, CancellationToken.None);
+        var inked = 0;
+        for (var y = 102; y < 148; y++)
+        {
+            for (var x = 102; x < 173; x++)
+            {
+                var offset = y * image.Stride + x * 4;
+                if (image.Bgra[offset] < 0xF0 || image.Bgra[offset + 1] < 0xF0 || image.Bgra[offset + 2] < 0xF0)
+                    inked++;
+            }
+        }
+        Assert.True(inked > 0, "маркер не отрисован в области прямоугольника");
+    }
+
     private static int CountInk(RenderedPageImage image, double fromYFraction, double toYFraction)
     {
         var count = 0;

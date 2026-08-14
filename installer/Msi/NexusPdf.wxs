@@ -17,7 +17,7 @@
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="NexusPDF"
            Manufacturer="NexusPDF"
-           Version="0.3.0"
+           Version="0.4.0"
            UpgradeCode="7C6E2B7A-9A1E-4F2B-B4B0-3E62D8C5A101"
            Language="1049"
            Scope="perUserOrMachine">

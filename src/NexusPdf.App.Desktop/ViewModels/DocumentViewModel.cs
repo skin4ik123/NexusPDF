@@ -183,18 +183,40 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         ScrollToPageRequested?.Invoke(this, index);
     }
 
-    // ----- Размещение нового контента кликом -----
+    // ----- Размещение нового контента кликом или растягиванием рамки -----
 
-    /// <summary>Фабрика оверлея: страница + точка клика (в пунктах от левого верхнего угла).</summary>
-    public sealed record PendingPlacement(Func<PageViewModel, double, double, Pdf.Abstractions.PageOverlay> Factory);
+    /// <summary>
+    /// Ожидающее размещение: либо фабрика по точке клика, либо фабрика по
+    /// прямоугольнику (drag). Координаты — в пунктах от левого верхнего угла.
+    /// </summary>
+    public sealed record PendingPlacement(
+        Func<PageViewModel, double, double, Pdf.Abstractions.PageOverlay>? PointFactory,
+        Func<PageViewModel, Rect, Pdf.Abstractions.PageOverlay>? RectFactory);
 
     [ObservableProperty]
     private PendingPlacement? _pendingOverlay;
 
     public void BeginPlacement(Func<PageViewModel, double, double, Pdf.Abstractions.PageOverlay> factory)
     {
-        PendingOverlay = new PendingPlacement(factory);
+        PendingOverlay = new PendingPlacement(factory, null);
         StatusText = Loc.Get("PlaceHint");
+    }
+
+    public void BeginRectPlacement(Func<PageViewModel, Rect, Pdf.Abstractions.PageOverlay> factory)
+    {
+        PendingOverlay = new PendingPlacement(null, factory);
+        StatusText = Loc.Get("PlaceRectHint");
+    }
+
+    public void PlacePendingRect(PageViewModel page, Rect rectPt)
+    {
+        if (PendingOverlay is not { RectFactory: { } factory }) return;
+        if (IsBusy) return;
+        if (rectPt.Width < 4 || rectPt.Height < 4) return; // случайный клик — не считается рамкой
+        var overlay = factory(page, rectPt);
+        PendingOverlay = null;
+        StatusText = Loc.Get("Ready");
+        Document.Session.Apply(new AddOverlayOperation(page.LogicalIndex, overlay));
     }
 
     public void CancelPlacement()
@@ -206,12 +228,97 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     public void PlacePendingOverlay(PageViewModel page, double xPt, double yPt)
     {
-        if (PendingOverlay is not { } pending) return;
+        if (PendingOverlay is not { PointFactory: { } factory }) return;
         if (IsBusy) return; // идёт сохранение/печать: клик игнорируем, правка не должна молча потеряться
-        var overlay = pending.Factory(page, xPt, yPt);
+        var overlay = factory(page, xPt, yPt);
         PendingOverlay = null;
         StatusText = Loc.Get("Ready");
         Document.Session.Apply(new AddOverlayOperation(page.LogicalIndex, overlay));
+    }
+
+    // ----- Панель комментариев -----
+
+    public sealed record CommentItem(
+        int PageNumber, string TypeLabel, string Author, string Text,
+        bool IsDraft, int PageIndex, int OverlayIndex);
+
+    public ObservableCollection<CommentItem> Comments { get; } = new();
+
+    [ObservableProperty]
+    private bool _isCommentsVisible;
+
+    [RelayCommand]
+    private async Task ToggleComments()
+    {
+        IsCommentsVisible = !IsCommentsVisible;
+        if (IsCommentsVisible)
+            await RefreshCommentsAsync();
+    }
+
+    [RelayCommand]
+    private void DeleteDraftComment(CommentItem? item)
+    {
+        if (item is not { IsDraft: true }) return;
+        Document.Session.Apply(new RemoveOverlayAtOperation(item.PageIndex, item.OverlayIndex));
+    }
+
+    [RelayCommand]
+    private void GoToComment(CommentItem? item)
+    {
+        if (item != null)
+            GoToPage(item.PageNumber);
+    }
+
+    public async Task RefreshCommentsAsync()
+    {
+        var items = new List<CommentItem>();
+        var pages = Document.Session.Model.Pages.ToArray();
+        for (var i = 0; i < pages.Length; i++)
+        {
+            // Черновики этой сессии (ещё не сохранены).
+            for (var k = 0; k < pages[i].OverlayList.Count; k++)
+            {
+                var (label, author, text) = pages[i].OverlayList[k] switch
+                {
+                    NexusPdf.Pdf.Abstractions.NoteAnnotationDraft n => (Loc.Get("AnnotNote"), n.Author, n.Contents),
+                    NexusPdf.Pdf.Abstractions.ShapeAnnotationDraft s => (
+                        s.FillArgb != 0 && s.BorderWidthPt == 0 ? Loc.Get("AnnotHighlight")
+                            : s.IsEllipse ? Loc.Get("AnnotEllipse") : Loc.Get("AnnotRect"),
+                        s.Author, s.Contents),
+                    _ => ("", "", ""),
+                };
+                if (label.Length > 0)
+                    items.Add(new CommentItem(i + 1, label, author, text, true, i, k));
+            }
+
+            // Существующие аннотации файла (только чтение).
+            try
+            {
+                var existing = await Document.Handles[pages[i].SourceId]
+                    .GetAnnotationsAsync(pages[i].SourcePageIndex, CancellationToken.None);
+                foreach (var a in existing)
+                {
+                    var label = a.Subtype switch
+                    {
+                        1 => Loc.Get("AnnotNote"),
+                        5 => Loc.Get("AnnotRect"),
+                        6 => Loc.Get("AnnotEllipse"),
+                        9 => Loc.Get("AnnotHighlight"),
+                        _ => Loc.Get("AnnotOther"),
+                    };
+                    if (a.Contents.Length > 0 || a.Subtype is 1 or 5 or 6 or 9)
+                        items.Add(new CommentItem(i + 1, label, a.Author, a.Contents, false, i, -1));
+                }
+            }
+            catch (Exception ex)
+            {
+                Serilog.Log.Warning(ex, "Не удалось прочитать аннотации страницы {Page}", i + 1);
+            }
+        }
+
+        Comments.Clear();
+        foreach (var item in items.OrderBy(c => c.PageNumber))
+            Comments.Add(item);
     }
 
     // ----- Операции систематизации -----
@@ -460,6 +567,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         OnPropertyChanged(nameof(CanUndo));
         OnPropertyChanged(nameof(CanRedo));
         ClearSearch();
+        if (IsCommentsVisible)
+            _ = RefreshCommentsAsync();
     }
 
     private void RebuildPages()

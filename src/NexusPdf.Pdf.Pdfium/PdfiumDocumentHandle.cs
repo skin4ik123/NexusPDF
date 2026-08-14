@@ -140,6 +140,75 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
         }, ct);
     }
 
+    public Task<IReadOnlyList<PdfAnnotationInfo>> GetAnnotationsAsync(int pageIndex, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return GetAnnotationsCore(pageIndex, ct);
+        }
+    }
+
+    private Task<IReadOnlyList<PdfAnnotationInfo>> GetAnnotationsCore(int pageIndex, CancellationToken ct)
+    {
+        const int subtypeLink = 2;
+        const int subtypePopup = 16;
+
+        return _thread.InvokeAsync<IReadOnlyList<PdfAnnotationInfo>>(() =>
+        {
+            var page = fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
+            if (page == null || page.__Instance == IntPtr.Zero)
+                throw new PdfEngineException($"Не удалось открыть страницу {pageIndex + 1}.");
+            try
+            {
+                var count = fpdf_annot.FPDFPageGetAnnotCount(page);
+                var result = new List<PdfAnnotationInfo>(Math.Max(0, count));
+                for (var i = 0; i < count; i++)
+                {
+                    var annot = fpdf_annot.FPDFPageGetAnnot(page, i);
+                    if (annot == null || annot.__Instance == IntPtr.Zero)
+                        continue;
+                    try
+                    {
+                        var subtype = fpdf_annot.FPDFAnnotGetSubtype(annot);
+                        if (subtype is subtypeLink or subtypePopup)
+                            continue;
+                        result.Add(new PdfAnnotationInfo(
+                            i, subtype,
+                            GetAnnotString(annot, "Contents"),
+                            GetAnnotString(annot, "T")));
+                    }
+                    finally
+                    {
+                        fpdf_annot.FPDFPageCloseAnnot(annot);
+                    }
+                }
+                return result;
+            }
+            finally
+            {
+                fpdfview.FPDF_ClosePage(page);
+            }
+        }, ct);
+    }
+
+    private static string GetAnnotString(FpdfAnnotationT annot, string key)
+    {
+        var probe = new ushort[1];
+        var bytesNeeded = fpdf_annot.FPDFAnnotGetStringValue(annot, key, ref probe[0], 0);
+        if (bytesNeeded <= 2)
+            return "";
+        var buffer = new ushort[bytesNeeded / 2];
+        fpdf_annot.FPDFAnnotGetStringValue(annot, key, ref buffer[0], bytesNeeded);
+        var length = Array.IndexOf(buffer, (ushort)0);
+        if (length < 0)
+            length = buffer.Length;
+        var chars = new char[length];
+        for (var i = 0; i < length; i++)
+            chars[i] = (char)buffer[i];
+        return new string(chars);
+    }
+
     public async ValueTask DisposeAsync()
     {
         Task closeTask;
