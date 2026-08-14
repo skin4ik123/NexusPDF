@@ -34,25 +34,47 @@ public sealed class SingleInstanceService : IDisposable
         {
             while (!ct.IsCancellationRequested)
             {
+                NamedPipeServerStream? server = null;
                 try
                 {
-                    using var server = new NamedPipeServerStream(
-                        BaseName + ".pipe", PipeDirection.In, 1,
+                    server = new NamedPipeServerStream(
+                        BaseName + ".pipe", PipeDirection.In,
+                        NamedPipeServerStream.MaxAllowedServerInstances,
                         PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
                     await server.WaitForConnectionAsync(ct).ConfigureAwait(false);
-                    using var reader = new StreamReader(server, Encoding.UTF8);
-                    var payload = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
-                    var files = JsonSerializer.Deserialize<List<string>>(payload);
-                    if (files is { Count: > 0 })
-                        onFilesReceived(files);
+
+                    // Чтение — в фоне, чтобы сразу поднять следующий сервер:
+                    // залповое открытие нескольких файлов из Проводника не должно
+                    // получать отказ подключения и плодить лишние экземпляры.
+                    var connected = server;
+                    server = null;
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            using var owned = connected;
+                            using var reader = new StreamReader(owned, Encoding.UTF8);
+                            var payload = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
+                            var files = JsonSerializer.Deserialize<List<string>>(payload);
+                            // Пустой список — это запуск без файлов: окно всё равно
+                            // нужно активировать, поэтому колбэк вызывается всегда.
+                            if (files != null)
+                                onFilesReceived(files);
+                        }
+                        catch
+                        {
+                            // Ошибка одного клиента не должна останавливать приём.
+                        }
+                    }, ct);
                 }
                 catch (OperationCanceledException)
                 {
+                    server?.Dispose();
                     break;
                 }
                 catch
                 {
-                    // Ошибка одного клиента не должна останавливать приём.
+                    server?.Dispose();
                 }
             }
         }, ct);
@@ -64,7 +86,7 @@ public sealed class SingleInstanceService : IDisposable
         try
         {
             using var client = new NamedPipeClientStream(".", BaseName + ".pipe", PipeDirection.Out);
-            client.Connect(1500);
+            client.Connect(4000);
             using var writer = new StreamWriter(client, Encoding.UTF8);
             writer.Write(JsonSerializer.Serialize(files));
             writer.Flush();

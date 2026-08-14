@@ -28,9 +28,14 @@ public partial class HeaderFooterDialog : Window
     {
         ErrorLabel.Visibility = Visibility.Collapsed;
 
+        if (TemplateBox.Text.Trim().Length == 0)
+        {
+            ShowError(Loc.Get("AtTextEmpty"));
+            return;
+        }
         if (!double.TryParse(SizeBox.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var size) &&
             !double.TryParse(SizeBox.Text.Trim(), NumberStyles.Float, CultureInfo.CurrentCulture, out size) ||
-            size is < 4 or > 72)
+            !(size is >= 4 and <= 72)) // отрицание отсекает и NaN
         {
             ShowError(Loc.Get("FontSizeInvalid"));
             return;

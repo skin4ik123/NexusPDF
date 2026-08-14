@@ -141,10 +141,11 @@
                       <Grid>
                         <TextBlock Text="{Binding Text}" FontSize="{Binding FontSizePt}"
                                    FontFamily="Segoe UI" Foreground="{Binding Fill}"
-                                   RenderTransformOrigin="0,0"
                                    Visibility="{Binding IsText, Converter={StaticResource BoolToVis}}">
                           <TextBlock.RenderTransform>
-                            <RotateTransform Angle="{Binding AngleDeg}"/>
+                            <!-- Вращение вокруг начала базовой линии — как при запекании -->
+                            <RotateTransform Angle="{Binding AngleDeg}" CenterX="0"
+                                             CenterY="{Binding BaselineCenterY}"/>
                           </TextBlock.RenderTransform>
                         </TextBlock>
                         <Image Source="{Binding Image}" Width="{Binding WidthPt}" Height="{Binding HeightPt}"

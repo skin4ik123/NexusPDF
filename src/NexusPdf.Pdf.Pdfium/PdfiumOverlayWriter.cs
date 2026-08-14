@@ -38,38 +38,111 @@ internal static class PdfiumOverlayWriter
     }
 
     public static void ApplyOverlays(
-        FpdfDocumentT document, FpdfPageT page, FpdfFontT? font, IReadOnlyList<PageOverlay> overlays)
+        FpdfDocumentT document, FpdfPageT page, FpdfFontT? font,
+        IReadOnlyList<PageOverlay> overlays, int extraQuarterTurns)
     {
         var rotation = ((fpdf_edit.FPDFPageGetRotation(page) % 4) + 4) % 4;
 
-        float mediaLeft = 0, mediaBottom = 0, mediaRight = 0, mediaTop = 0;
-        if (fpdf_transformpage.FPDFPageGetMediaBox(page, ref mediaLeft, ref mediaBottom, ref mediaRight, ref mediaTop) == 0)
+        // Экран (клик, предпросмотр, рендер) живёт в рамке CropBox∩MediaBox —
+        // именно её и берём; MediaBox используется только как запасной вариант.
+        float left = 0, bottom = 0, right = 0, top = 0;
+        var hasBox = fpdf_transformpage.FPDFPageGetCropBox(page, ref left, ref bottom, ref right, ref top) != 0;
+        float mLeft = 0, mBottom = 0, mRight = 0, mTop = 0;
+        var hasMedia = fpdf_transformpage.FPDFPageGetMediaBox(page, ref mLeft, ref mBottom, ref mRight, ref mTop) != 0;
+        if (hasBox && hasMedia)
         {
-            mediaLeft = 0;
-            mediaBottom = 0;
-            mediaRight = (float)fpdfview.FPDF_GetPageWidthF(page);
-            mediaTop = (float)fpdfview.FPDF_GetPageHeightF(page);
-            if (rotation % 2 == 1)
-                (mediaRight, mediaTop) = (mediaTop, mediaRight); // ширина/высота были отданы в отображаемой ориентации
+            left = Math.Max(left, mLeft);
+            bottom = Math.Max(bottom, mBottom);
+            right = Math.Min(right, mRight);
+            top = Math.Min(top, mTop);
         }
-        var contentWidth = mediaRight - mediaLeft;
-        var contentHeight = mediaTop - mediaBottom;
+        else if (!hasBox && hasMedia)
+        {
+            (left, bottom, right, top) = (mLeft, mBottom, mRight, mTop);
+        }
+        else if (!hasBox)
+        {
+            left = 0;
+            bottom = 0;
+            right = (float)fpdfview.FPDF_GetPageWidthF(page);
+            top = (float)fpdfview.FPDF_GetPageHeightF(page);
+            if (rotation % 2 == 1)
+                (right, top) = (top, right); // ширина/высота были отданы в отображаемой ориентации
+        }
+        var contentWidth = right - left;
+        var contentHeight = top - bottom;
+
+        // Итоговая отображаемая рамка.
+        var displayWidth = rotation % 2 == 0 ? contentWidth : contentHeight;
+        var displayHeight = rotation % 2 == 0 ? contentHeight : contentWidth;
 
         foreach (var overlay in overlays)
         {
+            var delta = ((extraQuarterTurns - overlay.PlacedRotation) % 4 + 4) % 4;
             switch (overlay)
             {
                 case TextOverlay text:
-                    ApplyText(document, page, font, text, rotation, mediaLeft, mediaBottom, contentWidth, contentHeight);
+                    ApplyText(document, page, font,
+                        RemapText(text, delta, displayWidth, displayHeight),
+                        rotation, left, bottom, contentWidth, contentHeight);
                     break;
                 case ImageOverlay image:
-                    ApplyImage(document, page, image, rotation, mediaLeft, mediaBottom, contentWidth, contentHeight);
+                {
+                    var (remapped, extraAngle) = RemapImage(image, delta, displayWidth, displayHeight);
+                    ApplyImage(document, page, remapped, extraAngle,
+                        rotation, left, bottom, contentWidth, contentHeight);
                     break;
+                }
             }
         }
 
         if (fpdf_edit.FPDFPageGenerateContent(page) == 0)
             throw new PdfEngineException("Не удалось сгенерировать содержимое страницы с наложенным контентом.");
+    }
+
+    /// <summary>Перевод точки из рамки размещения в итоговую отображаемую рамку (страницу довернули на delta четвертей).</summary>
+    private static (double X, double Y) RemapPoint(
+        double x, double y, int delta, double finalWidth, double finalHeight)
+    {
+        // Рамка размещения: при нечётной delta её стороны переставлены
+        // относительно итоговой.
+        var (w, h) = delta % 2 == 0 ? (finalWidth, finalHeight) : (finalHeight, finalWidth);
+        for (var i = 0; i < delta; i++)
+        {
+            (x, y) = (h - y, x);
+            (w, h) = (h, w);
+        }
+        return (x, y);
+    }
+
+    private static TextOverlay RemapText(TextOverlay text, int delta, double finalWidth, double finalHeight)
+    {
+        if (delta == 0) return text;
+        // Базовая линия вычисляется в рамке размещения, переносится в итоговую
+        // рамку, затем анкер восстанавливается так, чтобы стандартный сдвиг
+        // +0.75·fs в итоговой рамке попал в ту же точку.
+        var baseline = RemapPoint(text.XPt, text.YPt + text.FontSizePt * 0.75, delta, finalWidth, finalHeight);
+        return text with
+        {
+            XPt = baseline.X,
+            YPt = baseline.Y - text.FontSizePt * 0.75,
+            RotationDegrees = text.RotationDegrees - 90.0 * delta,
+        };
+    }
+
+    private static (ImageOverlay Overlay, double ExtraAngleDeg) RemapImage(
+        ImageOverlay image, int delta, double finalWidth, double finalHeight)
+    {
+        if (delta == 0) return (image, 0);
+        var center = RemapPoint(
+            image.XPt + image.WidthPt / 2, image.YPt + image.HeightPt / 2,
+            delta, finalWidth, finalHeight);
+        var remapped = image with
+        {
+            XPt = center.X - image.WidthPt / 2,
+            YPt = center.Y - image.HeightPt / 2,
+        };
+        return (remapped, -90.0 * delta);
     }
 
     /// <summary>Перевод точки из отображаемых координат (сверху-слева, y вниз) в координаты содержимого (y вверх).</summary>
@@ -92,6 +165,9 @@ internal static class PdfiumOverlayWriter
         if (font == null)
             throw new PdfEngineException(
                 "Для добавления текста нужен системный шрифт TTF (Segoe UI/Arial), но он не найден.");
+        if (!double.IsFinite(text.XPt) || !double.IsFinite(text.YPt) ||
+            !double.IsFinite(text.FontSizePt) || text.FontSizePt <= 0)
+            throw new PdfEngineException("Некорректные параметры текстового оверлея.");
 
         var obj = fpdf_edit.FPDFPageObjCreateTextObj(document, font, (float)text.FontSizePt);
         if (obj == null || obj.__Instance == IntPtr.Zero)
@@ -127,53 +203,62 @@ internal static class PdfiumOverlayWriter
     }
 
     private static void ApplyImage(
-        FpdfDocumentT document, FpdfPageT page, ImageOverlay image,
+        FpdfDocumentT document, FpdfPageT page, ImageOverlay image, double extraAngleDeg,
         int rotation, double offsetX, double offsetY, double contentWidth, double contentHeight)
     {
         var obj = fpdf_edit.FPDFPageObjNewImageObj(document);
         if (obj == null || obj.__Instance == IntPtr.Zero)
             throw new PdfEngineException("Не удалось создать объект изображения.");
 
-        var stride = image.PixelWidth * 4;
-        var pin = GCHandle.Alloc(image.Bgra, GCHandleType.Pinned);
         try
         {
-            var bitmap = fpdfview.FPDFBitmapCreateEx(
-                image.PixelWidth, image.PixelHeight, FpdfBitmapBgra, pin.AddrOfPinnedObject(), stride);
-            if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
-                throw new PdfEngineException("Не удалось подготовить растр изображения.");
+            var stride = image.PixelWidth * 4;
+            var pin = GCHandle.Alloc(image.Bgra, GCHandleType.Pinned);
             try
             {
-                if (fpdf_edit.FPDFImageObjSetBitmap(null, 0, obj, bitmap) == 0)
-                    throw new PdfEngineException("Не удалось поместить изображение в объект.");
+                var bitmap = fpdfview.FPDFBitmapCreateEx(
+                    image.PixelWidth, image.PixelHeight, FpdfBitmapBgra, pin.AddrOfPinnedObject(), stride);
+                if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
+                    throw new PdfEngineException("Не удалось подготовить растр изображения.");
+                try
+                {
+                    if (fpdf_edit.FPDFImageObjSetBitmap(null, 0, obj, bitmap) == 0)
+                        throw new PdfEngineException("Не удалось поместить изображение в объект.");
+                }
+                finally
+                {
+                    fpdfview.FPDFBitmapDestroy(bitmap);
+                }
             }
             finally
             {
-                fpdfview.FPDFBitmapDestroy(bitmap);
+                pin.Free();
             }
+
+            // Единичный квадрат изображения масштабируется до отображаемого
+            // прямоугольника, доворачивается на 90°·q (+ добавка при повороте
+            // страницы после размещения) и центрируется в точке, соответствующей
+            // центру прямоугольника в координатах содержимого.
+            var centerDisplayed = (X: image.XPt + image.WidthPt / 2, Y: image.YPt + image.HeightPt / 2);
+            var (ccx, ccy) = DisplayedToContent(centerDisplayed.X, centerDisplayed.Y, rotation, contentWidth, contentHeight);
+
+            var angle = (90.0 * rotation + extraAngleDeg) * Math.PI / 180.0;
+            var cos = Math.Cos(angle);
+            var sin = Math.Sin(angle);
+            var a = cos * image.WidthPt;
+            var b = sin * image.WidthPt;
+            var c = -sin * image.HeightPt;
+            var d = cos * image.HeightPt;
+            var e = offsetX + ccx - 0.5 * (a + c);
+            var f = offsetY + ccy - 0.5 * (b + d);
+            fpdf_edit.FPDFPageObjTransform(obj, a, b, c, d, e, f);
+
+            fpdf_edit.FPDFPageInsertObject(page, obj); // объект переходит во владение страницы
         }
-        finally
+        catch
         {
-            pin.Free();
+            fpdf_edit.FPDFPageObjDestroy(obj);
+            throw;
         }
-
-        // Единичный квадрат изображения масштабируется до отображаемого
-        // прямоугольника, доворачивается на 90°·q и центрируется в точке,
-        // соответствующей центру прямоугольника в координатах содержимого.
-        var centerDisplayed = (X: image.XPt + image.WidthPt / 2, Y: image.YPt + image.HeightPt / 2);
-        var (ccx, ccy) = DisplayedToContent(centerDisplayed.X, centerDisplayed.Y, rotation, contentWidth, contentHeight);
-
-        var angle = 90.0 * rotation * Math.PI / 180.0;
-        var cos = Math.Cos(angle);
-        var sin = Math.Sin(angle);
-        var a = cos * image.WidthPt;
-        var b = sin * image.WidthPt;
-        var c = -sin * image.HeightPt;
-        var d = cos * image.HeightPt;
-        var e = offsetX + ccx - 0.5 * (a + c);
-        var f = offsetY + ccy - 0.5 * (b + d);
-        fpdf_edit.FPDFPageObjTransform(obj, a, b, c, d, e, f);
-
-        fpdf_edit.FPDFPageInsertObject(page, obj);
     }
 }

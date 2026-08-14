@@ -153,7 +153,8 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
                         throw new PdfEngineException($"Не удалось открыть страницу {k + 1} нового документа.");
                     try
                     {
-                        PdfiumOverlayWriter.ApplyOverlays(newDoc, page, overlayFont, overlays);
+                        PdfiumOverlayWriter.ApplyOverlays(newDoc, page, overlayFont, overlays,
+                            ((pages[k].ExtraQuarterTurns % 4) + 4) % 4);
                     }
                     finally
                     {

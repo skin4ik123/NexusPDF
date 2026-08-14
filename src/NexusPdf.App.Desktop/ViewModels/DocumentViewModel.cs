@@ -207,6 +207,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     public void PlacePendingOverlay(PageViewModel page, double xPt, double yPt)
     {
         if (PendingOverlay is not { } pending) return;
+        if (IsBusy) return; // идёт сохранение/печать: клик игнорируем, правка не должна молча потеряться
         var overlay = pending.Factory(page, xPt, yPt);
         PendingOverlay = null;
         StatusText = Loc.Get("Ready");
