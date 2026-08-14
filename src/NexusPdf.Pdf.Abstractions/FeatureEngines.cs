@@ -11,14 +11,17 @@ public interface IEngineFeature
     string? UnavailableReason { get; }
 }
 
-/// <summary>Структурные операции над файлами PDF (линеаризация, проверка, восстановление). Планируемая реализация — qpdf.</summary>
+/// <summary>Структурные операции над файлами PDF (линеаризация, оптимизация, проверка). Реализация — qpdf.</summary>
 public interface IPdfStructureEngine : IEngineFeature
 {
-    Task<PdfValidationResult> CheckAsync(string filePath, CancellationToken ct);
+    Task<PdfValidationResult> CheckAsync(string filePath, string? password, CancellationToken ct);
     Task LinearizeAsync(string sourcePath, string targetPath, CancellationToken ct);
+
+    /// <summary>Структурная оптимизация без потери качества: объектные потоки, пересжатие потоков.</summary>
+    Task OptimizeAsync(string sourcePath, string targetPath, bool linearize, CancellationToken ct);
 }
 
-/// <summary>Шифрование/снятие защиты. Планируемая реализация — qpdf.</summary>
+/// <summary>Шифрование/снятие защиты. Реализация — qpdf (AES-256).</summary>
 public interface IPdfSecurityEngine : IEngineFeature
 {
     Task EncryptAsync(string sourcePath, string targetPath, string userPassword, string? ownerPassword, CancellationToken ct);
@@ -28,7 +31,7 @@ public interface IPdfSecurityEngine : IEngineFeature
 /// <summary>Проверка результата сохранения независимым инструментом.</summary>
 public interface IPdfValidationEngine : IEngineFeature
 {
-    Task<PdfValidationResult> ValidateAsync(string filePath, CancellationToken ct);
+    Task<PdfValidationResult> ValidateAsync(string filePath, string? password, CancellationToken ct);
 }
 
 /// <summary>Редактирование существующего содержимого (текстовые объекты, изображения).</summary>

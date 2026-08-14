@@ -31,6 +31,21 @@ public sealed class SaveService
         await document.RebaseToSavedFileAsync(_engine, targetPath, ct).ConfigureAwait(false);
     }
 
+    /// <summary>Сохранение копии текущего состояния в файл без переключения документа на него.</summary>
+    public async Task SaveCopyAsync(OpenedDocument document, string targetPath, CancellationToken ct)
+    {
+        var composition = document.BuildComposition();
+        if (composition.Count == 0)
+            throw new InvalidOperationException("Документ не содержит страниц.");
+
+        await SafeFileReplace.WriteAndReplaceAsync(
+            targetPath,
+            tempPath => _engine.ComposeAsync(composition, tempPath, ct),
+            tempPath => ValidateAsync(tempPath, composition.Count, ct),
+            keepBackup: false,
+            ct).ConfigureAwait(false);
+    }
+
     /// <summary>Извлечение выбранных логических страниц в отдельный файл (исходный документ не меняется).</summary>
     public async Task ExtractAsync(OpenedDocument document, IReadOnlyList<int> logicalIndices, string targetPath, CancellationToken ct)
     {

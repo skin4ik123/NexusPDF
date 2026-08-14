@@ -1,6 +1,7 @@
 using NexusPdf.Application;
 using NexusPdf.Infrastructure;
 using NexusPdf.Pdf.Abstractions;
+using NexusPdf.Pdf.Qpdf;
 
 namespace NexusPdf.App.Desktop.Services;
 
@@ -14,6 +15,9 @@ public sealed class AppServices : IAsyncDisposable
         SettingsStore = store;
         Cache = new RenderCache(settings.RenderCacheMegabytes);
         SaveService = new SaveService(engine);
+        Qpdf = new QpdfEngine();
+        Tools = new DocumentToolsService(engine, Qpdf, Qpdf);
+        Print = new PrintService();
     }
 
     public IPdfRenderEngine Engine { get; }
@@ -21,6 +25,9 @@ public sealed class AppServices : IAsyncDisposable
     public JsonSettingsStore SettingsStore { get; }
     public RenderCache Cache { get; }
     public SaveService SaveService { get; }
+    public QpdfEngine Qpdf { get; }
+    public DocumentToolsService Tools { get; }
+    public PrintService Print { get; }
 
     public void SaveSettings()
     {

@@ -1,18 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  MSI-пакет NexusPDF (WiX v5+).
-  Сборка (после ./build.ps1, который наполняет artifacts/publish/win-x64):
-    dotnet tool install wix (глобально, версия 5.x; однократно; см. installer/README.md)
-    wix build installer/Msi/NexusPdf.wxs -bindpath publish=artifacts/publish/win-x64 -o artifacts/NexusPdf.msi
+  MSI-пакет NexusPDF (WiX 5, схема v4). Собирается из build.ps1 (-Msi) командой:
+    wix build installer/Msi/NexusPdf.wxs -arch x64 -culture ru-RU
+        -ext WixToolset.UI.wixext
+        -bindpath publish=<абс. путь publish>  -bindpath assets=<абс. путь installer/Assets>
+        -o artifacts/NexusPdf.msi
+
+  Основной путь установки для пользователя - фирменный NexusPdfSetup.exe
+  (WPF-интерфейс поверх этого MSI). WixUI_InstallDir здесь - запасной интерфейс
+  для прямого запуска MSI двойным кликом.
 
   Правила ассоциаций: версионируемый ProgID, Capabilities/RegisteredApplications,
-  OpenWith. UserChoice не подменяется - выбор по умолчанию делает пользователь.
-  При удалении сносятся только собственные ключи.
+  OpenWith. UserChoice не подменяется. При удалении сносятся только свои ключи.
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="NexusPDF"
            Manufacturer="NexusPDF"
-           Version="0.1.0"
+           Version="0.2.0"
            UpgradeCode="7C6E2B7A-9A1E-4F2B-B4B0-3E62D8C5A101"
            Language="1049"
            Scope="perUserOrMachine">
@@ -20,22 +25,41 @@
     <MajorUpgrade DowngradeErrorMessage="Установлена более новая версия NexusPDF."/>
     <MediaTemplate EmbedCab="yes"/>
 
+    <!-- Scope=perUserOrMachine уже даёт по умолчанию установку для текущего
+         пользователя (без прав администратора); Setup.exe для режима
+         "для всех" передаёт ALLUSERS=1. -->
+    <Property Id="DESKTOP_SHORTCUT" Value="0"/>
+
+    <Icon Id="AppIco" SourceFile="!(bindpath.assets)\app.ico"/>
+    <Property Id="ARPPRODUCTICON" Value="AppIco"/>
+
+    <WixVariable Id="WixUILicenseRtf" Value="!(bindpath.assets)\license.ru.rtf"/>
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER"/>
+
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="NexusPDF"/>
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder"/>
+    <StandardDirectory Id="DesktopFolder"/>
 
-    <!-- Все файлы publish-каталога -->
+    <!-- Все файлы publish-каталога (включая tools\qpdf и THIRD_PARTY_NOTICES) -->
     <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
       <Files Include="!(bindpath.publish)\**"/>
     </ComponentGroup>
 
-    <!-- Ярлык в меню Пуск -->
     <ComponentGroup Id="Shortcuts" Directory="ProgramMenuFolder">
       <Component Id="StartMenuShortcut">
         <Shortcut Id="AppShortcut" Name="NexusPDF"
-                  Target="[INSTALLFOLDER]NexusPdf.exe" WorkingDirectory="INSTALLFOLDER"/>
-        <RegistryValue Root="HKCU" Key="Software\NexusPDF" Name="shortcut"
+                  Target="[INSTALLFOLDER]NexusPdf.exe" WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIco"/>
+        <RegistryValue Root="HKMU" Key="Software\NexusPDF" Name="startMenuShortcut"
+                       Type="integer" Value="1" KeyPath="yes"/>
+      </Component>
+      <Component Id="DesktopShortcut" Directory="DesktopFolder" Condition="DESKTOP_SHORTCUT=1">
+        <Shortcut Id="AppDesktopShortcut" Name="NexusPDF"
+                  Target="[INSTALLFOLDER]NexusPdf.exe" WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIco"/>
+        <RegistryValue Root="HKMU" Key="Software\NexusPDF" Name="desktopShortcut"
                        Type="integer" Value="1" KeyPath="yes"/>
       </Component>
     </ComponentGroup>

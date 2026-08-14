@@ -4,16 +4,24 @@ using PDFiumCore;
 namespace NexusPdf.Pdf.Pdfium;
 
 /// <summary>
-/// PDFium не потокобезопасен: все вызовы библиотеки сериализуются на одном
-/// выделенном потоке. Инициализация и освобождение библиотеки привязаны к
-/// жизненному циклу этого потока.
+/// PDFium не потокобезопасен, а его инициализация глобальна для процесса:
+/// все вызовы библиотеки сериализуются на одном общем выделенном потоке.
+/// Поток создаётся один на процесс и живёт до его завершения — повторные
+/// FPDF_InitLibrary/FPDF_DestroyLibrary из разных экземпляров движка
+/// приводили бы к порче глобального состояния.
 /// </summary>
 internal sealed class PdfiumThread : IDisposable
 {
+    private static readonly Lazy<PdfiumThread> SharedInstance =
+        new(() => new PdfiumThread(), LazyThreadSafetyMode.ExecutionAndPublication);
+
+    /// <summary>Общий поток PDFium для всего процесса.</summary>
+    public static PdfiumThread Shared => SharedInstance.Value;
+
     private readonly BlockingCollection<Action> _queue = new();
     private readonly Thread _thread;
 
-    public PdfiumThread()
+    private PdfiumThread()
     {
         _thread = new Thread(Run)
         {
@@ -81,12 +89,8 @@ internal sealed class PdfiumThread : IDisposable
 
     public void Dispose()
     {
-        _queue.CompleteAdding();
-        if (!_thread.Join(TimeSpan.FromSeconds(10)))
-        {
-            // Поток занят затянувшейся нативной операцией; при выходе процесса он
-            // будет остановлен как фоновый.
-        }
-        _queue.Dispose();
+        // Общий поток процесса не останавливается: он фоновый и завершится
+        // вместе с процессом. Явная остановка ломала бы других пользователей
+        // PDFium в том же процессе (например, параллельные тесты).
     }
 }

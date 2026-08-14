@@ -91,6 +91,10 @@
                     BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1"
                     Width="{Binding WidthDiu}" Height="{Binding HeightDiu}"
                     views:ViewBehaviors.RenderFullPage="True">
+              <Border.Effect>
+                <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.22"
+                                  Color="{DynamicResource ShadowColor}"/>
+              </Border.Effect>
               <Grid>
                 <TextBlock Text="{l:Loc Rendering}" HorizontalAlignment="Center" VerticalAlignment="Center"
                            Foreground="{DynamicResource TextSecondary}"/>

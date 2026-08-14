@@ -8,3 +8,4 @@ artifacts/
 *.nexustmp-*
 .probe
 third_party/downloads/
+tools/qpdf/

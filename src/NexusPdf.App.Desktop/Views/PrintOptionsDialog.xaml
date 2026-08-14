@@ -1,0 +1,36 @@
+<Window x:Class="NexusPdf.App.Desktop.Views.PrintOptionsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:l="clr-namespace:NexusPdf.App.Desktop.Localization"
+        Title="{l:Loc Print}"
+        Width="430" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{DynamicResource PanelBg}">
+  <StackPanel Margin="20">
+    <TextBlock Text="{l:Loc PrintPages}" Foreground="{DynamicResource TextSecondary}" FontSize="12"/>
+    <RadioButton x:Name="AllRadio" Content="{l:Loc PrintAll}" IsChecked="True" Margin="0,6,0,2"
+                 Foreground="{DynamicResource TextBrush}"/>
+    <RadioButton x:Name="CurrentRadio" Content="{l:Loc PrintCurrent}" Margin="0,2"
+                 Foreground="{DynamicResource TextBrush}"/>
+    <StackPanel Orientation="Horizontal" Margin="0,2">
+      <RadioButton x:Name="RangeRadio" Content="{l:Loc PrintRange}" VerticalAlignment="Center"
+                   Foreground="{DynamicResource TextBrush}"/>
+      <TextBox x:Name="RangeBox" Width="140" Margin="10,0,0,0" Style="{StaticResource ThemedTextBox}"
+               ToolTip="1,3-8" GotKeyboardFocus="OnRangeFocused"/>
+    </StackPanel>
+    <TextBlock x:Name="RangeError" Foreground="#D9534F" FontSize="12" Visibility="Collapsed"/>
+
+    <TextBlock Text="{l:Loc PrintScale}" Foreground="{DynamicResource TextSecondary}" FontSize="12"
+               Margin="0,14,0,0"/>
+    <RadioButton x:Name="FitRadio" Content="{l:Loc PrintFit}" IsChecked="True" Margin="0,6,0,2"
+                 Foreground="{DynamicResource TextBrush}"/>
+    <RadioButton x:Name="ActualRadio" Content="{l:Loc PrintActualSize}" Margin="0,2"
+                 Foreground="{DynamicResource TextBrush}"/>
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+      <Button Content="{l:Loc PrintNext}" Style="{StaticResource PrimaryButton}" MinWidth="110"
+              IsDefault="True" Click="OnNext"/>
+      <Button Content="{l:Loc Cancel}" Style="{StaticResource LinkButton}" Margin="8,0,0,0" IsCancel="True"/>
+    </StackPanel>
+  </StackPanel>
+</Window>

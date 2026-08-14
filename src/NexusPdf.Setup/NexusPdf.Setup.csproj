@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>NexusPdfSetup</AssemblyName>
+    <RootNamespace>NexusPdf.Setup</RootNamespace>
+    <ApplicationIcon>..\..\installer\Assets\app.ico</ApplicationIcon>
+    <!-- Путь к MSI передаётся при publish: -p:MsiPath=<абс. путь>. Без него
+         собирается dev-версия, которая честно сообщает об отсутствии пакета. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="$(MsiPath)" Condition="'$(MsiPath)' != ''"
+                      LogicalName="NexusPdf.Setup.Payload.NexusPdf.msi"
+                      Link="Payload\NexusPdf.msi"/>
+    <EmbeddedResource Include="..\..\installer\Assets\license.ru.txt"
+                      LogicalName="NexusPdf.Setup.Payload.license.txt"/>
+  </ItemGroup>
+
+</Project>

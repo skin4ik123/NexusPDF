@@ -14,7 +14,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
     private const ulong ErrPassword = 4;
     private const ulong ErrSecurity = 5;
 
-    private readonly PdfiumThread _thread = new();
+    private readonly PdfiumThread _thread = PdfiumThread.Shared;
 
     public string EngineName => "PDFium";
 

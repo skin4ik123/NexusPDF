@@ -35,7 +35,8 @@ public partial class App : System.Windows.Application
         }
 
         Log.Logger = LoggingSetup.Create();
-        Log.Information("NexusPDF запускается. Версия {Version}", "0.1.0");
+        Log.Information("NexusPDF запускается. Версия {Version}",
+            typeof(App).Assembly.GetName().Version?.ToString(3) ?? "?");
 
         Loc.Load(settings.Language);
         ThemeManager.Apply(settings.Theme);

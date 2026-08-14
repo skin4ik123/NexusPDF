@@ -85,6 +85,14 @@ public partial class MainWindow : Window
             await ViewModel.OpenFilesAsync(pdfs);
     }
 
+    private void OnPageBoxKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || ViewModel.ActiveDocument is not { } doc) return;
+        if (int.TryParse(PageBox.Text.Trim(), out var page))
+            doc.GoToPage(page);
+        e.Handled = true;
+    }
+
     private void OnMenuItem(object sender, RoutedEventArgs e) => MenuToggle.IsChecked = false;
 
     private void OnMenuClosed(object sender, EventArgs e) => MenuToggle.IsChecked = false;
