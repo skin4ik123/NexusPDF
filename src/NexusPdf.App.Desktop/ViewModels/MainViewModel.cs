@@ -37,6 +37,9 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Функции qpdf (пароль, оптимизация) видимы только при наличии движка.</summary>
     public bool HasPdfTools => _services.Tools.IsAvailable;
 
+    /// <summary>OCR видим только при наличии языковых моделей tessdata.</summary>
+    public bool HasOcr => _services.Ocr.IsAvailable;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasDocuments))]
     [NotifyPropertyChangedFor(nameof(WindowTitle))]
@@ -471,6 +474,22 @@ public sealed partial class MainViewModel : ObservableObject
             ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"),
                 Loc.F("ErrorSaveFile", Path.GetFileName(dialog.FileName)), ex.ToString());
             doc.StatusText = Loc.Get("Ready");
+        }
+        finally
+        {
+            doc.IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private void RecognizeText()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy || !_services.Ocr.IsAvailable) return;
+        doc.CancelPlacement();
+        doc.IsBusy = true; // клики по страницам во время распознавания игнорируются
+        try
+        {
+            OcrDialog.Run(OwnerWindow, _services.Ocr, doc);
         }
         finally
         {

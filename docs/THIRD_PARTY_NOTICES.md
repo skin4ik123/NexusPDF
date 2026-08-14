@@ -11,8 +11,8 @@ SPDX; при сборке установщика этот файл включа�
 - **Microsoft.Extensions.DependencyInjection** — © Microsoft, MIT.
 - **gong-wpf-dragdrop** — © Jan Karger, Steven Kirk и участники, BSD-3-Clause.
 - **Serilog**, **Serilog.Sinks.File** — © Serilog Contributors, Apache-2.0.
-
-Планируемые компоненты (появятся в поставке вместе с функциями):
-
 - **qpdf** — © Jay Berkenbilt и участники, Apache-2.0.
-- **Tesseract OCR** и **tessdata** — © Google и участники, Apache-2.0.
+- **Tesseract OCR** (нативные библиотеки) — © Google и участники, Apache-2.0.
+- **Tesseract .NET wrapper** — © Charles Weld и участники, Apache-2.0.
+- **Leptonica** — © Dan Bloomberg и участники, BSD-2-Clause.
+- **tessdata_fast** (языковые модели rus/eng) — © Google и участники, Apache-2.0.

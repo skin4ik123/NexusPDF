@@ -9,3 +9,4 @@ artifacts/
 .probe
 third_party/downloads/
 tools/qpdf/
+tools/tessdata/

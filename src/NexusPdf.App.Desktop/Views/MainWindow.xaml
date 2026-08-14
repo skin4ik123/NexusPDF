@@ -200,6 +200,12 @@
                           Click="OnMenuItem"/>
                   <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
                 </StackPanel>
+                <StackPanel Visibility="{Binding HasOcr, Converter={StaticResource BoolToVis}}">
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc OcrMenu}"
+                          Command="{Binding RecognizeTextCommand}" IsEnabled="{Binding HasDocuments}"
+                          Click="OnMenuItem"/>
+                  <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
+                </StackPanel>
                 <Button Style="{StaticResource LinkButton}" Content="{l:Loc DetachTab}"
                         Command="{Binding DetachTabCommand}" IsEnabled="{Binding HasDocuments}"
                         Click="OnMenuItem"/>

@@ -1,0 +1,17 @@
+{
+  "name": "tessdata",
+  "source": "tesseract-ocr/tessdata_fast 4.1.0",
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "name": "rus.traineddata",
+      "url": "https://github.com/tesseract-ocr/tessdata_fast/raw/4.1.0/rus.traineddata",
+      "sha256": "E16E5E036CCE1D9EC2B00063CF8B54472625B9E14D893A169E2B0DEDEB4DF225"
+    },
+    {
+      "name": "eng.traineddata",
+      "url": "https://github.com/tesseract-ocr/tessdata_fast/raw/4.1.0/eng.traineddata",
+      "sha256": "7D4322BD2A7749724879683FC3912CB542F19906C83BCC1A52132556427170B2"
+    }
+  ]
+}

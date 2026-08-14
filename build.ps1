@@ -34,6 +34,13 @@ if (-not (Test-Path "$root\tools\qpdf\qpdf.exe")) {
     & "$root\tools\fetch-qpdf.ps1" -Version $lock.version -ExpectedSha256 $lock.sha256
 }
 
+# Tesseract language models: restore pinned files if missing (tools/tessdata.lock.json)
+if (-not (Test-Path "$root\tools\tessdata\rus.traineddata") -or
+    -not (Test-Path "$root\tools\tessdata\eng.traineddata")) {
+    Write-Host "== Fetching tessdata (rus+eng) =="
+    & "$root\tools\fetch-tessdata.ps1"
+}
+
 Write-Host "== Restore + Build ($Configuration) =="
 dotnet build NexusPdf.slnx -c $Configuration
 if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -51,9 +58,11 @@ $publishDir = Join-Path $root "artifacts/publish/win-x64"
 dotnet publish src/NexusPdf.App.Desktop -c $Configuration -r win-x64 --self-contained true -o $publishDir
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
-# Bundle qpdf + notices + license with the app
+# Bundle qpdf + tessdata + notices + license with the app
 New-Item -ItemType Directory -Force (Join-Path $publishDir "tools/qpdf") | Out-Null
 Copy-Item "$root\tools\qpdf\*" (Join-Path $publishDir "tools/qpdf") -Force
+New-Item -ItemType Directory -Force (Join-Path $publishDir "tools/tessdata") | Out-Null
+Copy-Item "$root\tools\tessdata\*.traineddata" (Join-Path $publishDir "tools/tessdata") -Force
 Copy-Item "$root\docs\THIRD_PARTY_NOTICES.md" $publishDir -Force
 Copy-Item "$root\installer\Assets\license.ru.txt" (Join-Path $publishDir "LICENSE.ru.txt") -Force
 

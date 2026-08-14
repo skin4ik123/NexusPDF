@@ -5,6 +5,7 @@
     <ProjectReference Include="..\NexusPdf.Pdf.Abstractions\NexusPdf.Pdf.Abstractions.csproj" />
     <ProjectReference Include="..\NexusPdf.Infrastructure\NexusPdf.Infrastructure.csproj" />
     <ProjectReference Include="..\NexusPdf.Signing\NexusPdf.Signing.csproj" />
+    <ProjectReference Include="..\NexusPdf.Ocr\NexusPdf.Ocr.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
