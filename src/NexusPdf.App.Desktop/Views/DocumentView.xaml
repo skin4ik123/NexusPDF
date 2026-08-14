@@ -1,0 +1,211 @@
+<UserControl x:Class="NexusPdf.App.Desktop.Views.DocumentView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:l="clr-namespace:NexusPdf.App.Desktop.Localization"
+             xmlns:dd="urn:gong-wpf-dragdrop"
+             xmlns:app="clr-namespace:NexusPdf.App.Desktop"
+             xmlns:views="clr-namespace:NexusPdf.App.Desktop.Views"
+             DataContextChanged="OnDataContextChanged">
+  <UserControl.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+    <app:InverseBoolToVisibilityConverter x:Key="InvBoolToVisLocal"/>
+    <app:MinusOneConverter x:Key="MinusOne"/>
+    <app:NonZeroToVisibilityConverter x:Key="RotBadgeVis"/>
+  </UserControl.Resources>
+
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+    </Grid.RowDefinitions>
+
+    <!-- Панель поиска -->
+    <Border Grid.Row="0" Background="{DynamicResource PanelBg}"
+            BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,0,1"
+            Visibility="{Binding IsFindVisible, Converter={StaticResource BoolToVis}}">
+      <StackPanel Orientation="Horizontal" Margin="10,6">
+        <TextBox x:Name="FindBox" Width="280" Style="{StaticResource ThemedTextBox}"
+                 Text="{Binding FindQuery, UpdateSourceTrigger=PropertyChanged}"
+                 KeyDown="OnFindBoxKeyDown" ToolTip="{l:Loc FindPlaceholder}"/>
+        <Button Style="{StaticResource ToolButton}" Command="{Binding FindPreviousCommand}" ToolTip="↑">
+          <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE70E;" FontSize="12"/>
+        </Button>
+        <Button Style="{StaticResource ToolButton}" Command="{Binding FindNextCommand}" ToolTip="↓">
+          <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE70D;" FontSize="12"/>
+        </Button>
+        <TextBlock Text="{Binding FindStatus}" Foreground="{DynamicResource TextSecondary}"
+                   VerticalAlignment="Center" Margin="10,0"/>
+        <Button Style="{StaticResource ToolButton}" Command="{Binding ToggleFindCommand}">
+          <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE711;" FontSize="11"/>
+        </Button>
+      </StackPanel>
+    </Border>
+
+    <!-- Режим чтения: миниатюры + страницы -->
+    <Grid Grid.Row="1" Visibility="{Binding IsOrganizeMode, Converter={StaticResource InvBoolToVisLocal}}">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="176"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+
+      <Border Grid.Column="0" Background="{DynamicResource PanelBg}"
+              BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,1,0">
+        <ListBox x:Name="ThumbList" ItemsSource="{Binding Pages}"
+                 Background="Transparent" BorderThickness="0"
+                 SelectedIndex="{Binding CurrentPageNumber, Converter={StaticResource MinusOne}, Mode=OneWay}"
+                 SelectionChanged="OnThumbSelectionChanged"
+                 ItemContainerStyle="{StaticResource ThumbItem}"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 VirtualizingPanel.IsVirtualizing="True"
+                 VirtualizingPanel.VirtualizationMode="Standard">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <StackPanel views:ViewBehaviors.RenderThumbnail="True" Width="140">
+                <Border Background="{DynamicResource PageBg}" BorderBrush="{DynamicResource PanelBorder}"
+                        BorderThickness="1">
+                  <Image Source="{Binding ThumbImage}" Stretch="Uniform"/>
+                </Border>
+                <TextBlock Text="{Binding PageNumber}" HorizontalAlignment="Center"
+                           Foreground="{DynamicResource TextSecondary}" FontSize="11" Margin="0,3,0,0"/>
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </Border>
+
+      <ListBox x:Name="PagesList" Grid.Column="1" ItemsSource="{Binding Pages}"
+               Background="{DynamicResource ViewerBg}" BorderThickness="0"
+               SelectionMode="Single" Focusable="True"
+               ItemContainerStyle="{StaticResource ReadingPageItem}"
+               ScrollViewer.CanContentScroll="True"
+               ScrollViewer.HorizontalScrollBarVisibility="Auto"
+               VirtualizingPanel.IsVirtualizing="True"
+               VirtualizingPanel.VirtualizationMode="Standard"
+               VirtualizingPanel.ScrollUnit="Pixel"
+               VirtualizingPanel.CacheLength="1,1"
+               VirtualizingPanel.CacheLengthUnit="Page"
+               PreviewMouseWheel="OnPagesMouseWheel">
+        <ListBox.ItemTemplate>
+          <DataTemplate>
+            <Border Margin="0,12" Background="{DynamicResource PageBg}"
+                    BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1"
+                    Width="{Binding WidthDiu}" Height="{Binding HeightDiu}"
+                    views:ViewBehaviors.RenderFullPage="True">
+              <Grid>
+                <TextBlock Text="{l:Loc Rendering}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                           Foreground="{DynamicResource TextSecondary}"/>
+                <Image Source="{Binding Image}" Stretch="Fill"/>
+                <ItemsControl ItemsSource="{Binding Highlights}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <Canvas/>
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemContainerStyle>
+                    <Style TargetType="ContentPresenter">
+                      <Setter Property="Canvas.Left" Value="{Binding X}"/>
+                      <Setter Property="Canvas.Top" Value="{Binding Y}"/>
+                    </Style>
+                  </ItemsControl.ItemContainerStyle>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Rectangle Width="{Binding Width}" Height="{Binding Height}"
+                                 Fill="{DynamicResource HighlightBrush}"/>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+    </Grid>
+
+    <!-- Режим систематизации -->
+    <Grid Grid.Row="1" Visibility="{Binding IsOrganizeMode, Converter={StaticResource BoolToVis}}">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="*"/>
+      </Grid.RowDefinitions>
+
+      <Border Grid.Row="0" Background="{DynamicResource PanelBg}"
+              BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,0,1">
+        <StackPanel Orientation="Horizontal" Margin="8,4">
+          <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc RotateLeft}"
+                  Command="{Binding RotateSelectedLeftCommand}"
+                  CommandParameter="{Binding SelectedItems, ElementName=OrganizeList}">
+            <TextBlock Text="⟲" FontSize="16"/>
+          </Button>
+          <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc RotateRight}"
+                  Command="{Binding RotateSelectedCommand}"
+                  CommandParameter="{Binding SelectedItems, ElementName=OrganizeList}">
+            <TextBlock Text="⟳" FontSize="16"/>
+          </Button>
+          <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc Rotate180}"
+                  Command="{Binding RotateSelected180Command}"
+                  CommandParameter="{Binding SelectedItems, ElementName=OrganizeList}">
+            <TextBlock Text="180°" FontSize="12"/>
+          </Button>
+          <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
+          <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc DuplicatePages}"
+                  Command="{Binding DuplicateSelectedCommand}"
+                  CommandParameter="{Binding SelectedItems, ElementName=OrganizeList}">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8C8;"/>
+          </Button>
+          <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc DeletePages}"
+                  Command="{Binding DeleteSelectedCommand}"
+                  CommandParameter="{Binding SelectedItems, ElementName=OrganizeList}">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE74D;"/>
+          </Button>
+          <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
+          <Button Style="{StaticResource ToolButton}"
+                  Command="{Binding DataContext.ExtractSelectedCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                  CommandParameter="{Binding SelectedItems, ElementName=OrganizeList}">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE898;"/>
+              <TextBlock Text="{l:Loc ExtractPages}" Margin="6,0,0,0"/>
+            </StackPanel>
+          </Button>
+          <TextBlock Text="{l:Loc OrganizeHint}" Foreground="{DynamicResource TextSecondary}"
+                     FontSize="11" VerticalAlignment="Center" Margin="16,0,0,0"/>
+        </StackPanel>
+      </Border>
+
+      <ListBox x:Name="OrganizeList" Grid.Row="1" ItemsSource="{Binding Pages}"
+               Background="{DynamicResource ViewerBg}" BorderThickness="0"
+               SelectionMode="Extended"
+               ItemContainerStyle="{StaticResource OrganizeItem}"
+               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+               dd:DragDrop.IsDragSource="True"
+               dd:DragDrop.IsDropTarget="True"
+               dd:DragDrop.DropHandler="{Binding}"
+               KeyDown="OnOrganizeKeyDown">
+        <ListBox.ItemsPanel>
+          <ItemsPanelTemplate>
+            <WrapPanel/>
+          </ItemsPanelTemplate>
+        </ListBox.ItemsPanel>
+        <ListBox.ItemTemplate>
+          <DataTemplate>
+            <StackPanel views:ViewBehaviors.RenderThumbnail="True" Width="150">
+              <Border Background="{DynamicResource PageBg}" BorderBrush="{DynamicResource PanelBorder}"
+                      BorderThickness="1" Height="190">
+                <Grid>
+                  <Image Source="{Binding ThumbImage}" Stretch="Uniform"/>
+                  <Border Background="{DynamicResource Accent}" CornerRadius="3" Padding="4,1"
+                          HorizontalAlignment="Right" VerticalAlignment="Top" Margin="4"
+                          Visibility="{Binding PageRef.RotationOffset, Converter={StaticResource RotBadgeVis}}">
+                    <TextBlock Text="{Binding RotationDegrees, StringFormat={}{0}°}"
+                               Foreground="{DynamicResource AccentText}" FontSize="10"/>
+                  </Border>
+                </Grid>
+              </Border>
+              <TextBlock Text="{Binding PageNumber}" HorizontalAlignment="Center"
+                         Foreground="{DynamicResource TextBrush}" FontSize="12" Margin="0,4,0,0"/>
+            </StackPanel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+    </Grid>
+  </Grid>
+</UserControl>
