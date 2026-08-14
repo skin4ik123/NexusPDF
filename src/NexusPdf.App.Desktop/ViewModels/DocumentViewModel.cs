@@ -241,6 +241,32 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         Document.Session.Apply(new AddOverlayOperation(page.LogicalIndex, overlay));
     }
 
+    // ----- Цифровые подписи (статус при открытии) -----
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSignatures))]
+    [NotifyPropertyChangedFor(nameof(AllSignaturesValid))]
+    private IReadOnlyList<NexusPdf.Signing.PdfSignatureInfo> _signatures =
+        Array.Empty<NexusPdf.Signing.PdfSignatureInfo>();
+
+    public bool HasSignatures => Signatures.Count > 0;
+
+    public bool AllSignaturesValid =>
+        Signatures.Count > 0 && Signatures.All(s => s.IsCryptoValid && s.CoversWholeDocument);
+
+    public async Task LoadSignaturesAsync()
+    {
+        if (FilePath is not { } path) return;
+        try
+        {
+            Signatures = await NexusPdf.Signing.PdfSignatureInspector.InspectAsync(path, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Не удалось проверить подписи {Path}", path);
+        }
+    }
+
     // ----- Заполнение форм (AcroForm) -----
 
     [ObservableProperty]

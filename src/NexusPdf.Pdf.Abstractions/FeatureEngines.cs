@@ -19,6 +19,9 @@ public interface IPdfStructureEngine : IEngineFeature
 
     /// <summary>Структурная оптимизация без потери качества: объектные потоки, пересжатие потоков.</summary>
     Task OptimizeAsync(string sourcePath, string targetPath, bool linearize, CancellationToken ct);
+
+    /// <summary>Нормализация в предсказуемый текстовый вид (QDF): нужна для инкрементального подписания.</summary>
+    Task NormalizeAsync(string sourcePath, string targetPath, CancellationToken ct);
 }
 
 /// <summary>Шифрование/снятие защиты. Реализация — qpdf (AES-256).</summary>

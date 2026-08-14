@@ -97,7 +97,8 @@ public sealed partial class MainViewModel : ObservableObject
                 Documents.Add(vm);
                 ActiveDocument = vm;
                 OnPropertyChanged(nameof(HasDocuments));
-                _ = vm.DetectFormsAsync(); // кнопка «Формы» появится, если есть AcroForm
+                _ = vm.DetectFormsAsync();     // кнопка «Формы» появится, если есть AcroForm
+                _ = vm.LoadSignaturesAsync();  // значок статуса подписей в статус-баре
 
                 _services.Settings.TouchRecent(path);
                 SyncRecent();
@@ -222,6 +223,7 @@ public sealed partial class MainViewModel : ObservableObject
                 doc.Document, targetPath, _services.Settings.KeepBackupOnSave, CancellationToken.None);
             var hadForms = doc.HasAcroForm;
             doc.ResetFormStateAfterSave();
+            _ = doc.LoadSignaturesAsync();
             // Перекомпоновка не переносит AcroForm: поля становятся статикой.
             doc.StatusText = hadForms && !savedDirect
                 ? Loc.Get("FormFlattenedWarning")
@@ -413,6 +415,60 @@ public sealed partial class MainViewModel : ObservableObject
     {
         if (ActiveDocument is { } doc)
             await doc.ToggleFormModeCommand.ExecuteAsync(null);
+    }
+
+    [RelayCommand]
+    private void ShowSignatures()
+    {
+        if (ActiveDocument is { HasSignatures: true } doc)
+            SignaturesDialog.Show(OwnerWindow, doc.Signatures);
+    }
+
+    [RelayCommand]
+    private async Task SignWithCertificate()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy || !_services.Tools.IsAvailable) return;
+        if (doc.HasSignatures)
+        {
+            // Наш конвейер нормализует файл перед подписью — существующие
+            // подписи при этом были бы разрушены. Честно отказываем.
+            ErrorDialog.Show(OwnerWindow, Loc.Get("SignTitle"),
+                Loc.Get("SignAlreadySigned"), "");
+            return;
+        }
+
+        var request = SignDialog.Show(OwnerWindow);
+        if (request == null) return;
+
+        var dialog = new SaveFileDialog
+        {
+            Filter = Loc.Get("PdfFilter"),
+            FileName = Path.GetFileNameWithoutExtension(doc.Title) + "-signed.pdf",
+            DefaultExt = ".pdf",
+        };
+        if (dialog.ShowDialog(OwnerWindow) != true) return;
+        if (RejectIfTargetOpenElsewhere(doc, dialog.FileName)) return;
+
+        doc.IsBusy = true;
+        doc.StatusText = Loc.Get("SigningStatus");
+        try
+        {
+            await _services.Tools.SignCopyAsync(doc.Document, dialog.FileName,
+                request.Certificate, request.Reason, request.Location, CancellationToken.None);
+            doc.StatusText = Loc.F("SignDone", Path.GetFileName(dialog.FileName));
+            Log.Information("Создана подписанная копия: {Path}", dialog.FileName);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка подписания");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"),
+                Loc.F("ErrorSaveFile", Path.GetFileName(dialog.FileName)), ex.ToString());
+            doc.StatusText = Loc.Get("Ready");
+        }
+        finally
+        {
+            doc.IsBusy = false;
+        }
     }
 
     // ----- Печать и инструменты qpdf -----

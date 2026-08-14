@@ -1,0 +1,43 @@
+<Window x:Class="NexusPdf.App.Desktop.Views.SignDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:l="clr-namespace:NexusPdf.App.Desktop.Localization"
+        Title="{l:Loc SignTitle}"
+        Width="480" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{DynamicResource PanelBg}">
+  <StackPanel Margin="20">
+    <TextBlock Text="{l:Loc SignIntro}" Foreground="{DynamicResource TextSecondary}" FontSize="12"
+               TextWrapping="Wrap"/>
+
+    <TextBlock Text="{l:Loc SignCertificate}" Foreground="{DynamicResource TextSecondary}" FontSize="12"
+               Margin="0,12,0,4"/>
+    <Grid>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <ComboBox x:Name="CertCombo" DisplayMemberPath="Display"/>
+      <Button Grid.Column="1" Content="{l:Loc SignFromPfx}" Style="{StaticResource LinkButton}"
+              Margin="8,0,0,0" Click="OnPickPfx"/>
+    </Grid>
+    <TextBlock x:Name="NoCertsLabel" Text="{l:Loc SignNoCerts}" Foreground="{DynamicResource TextSecondary}"
+               FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" Visibility="Collapsed"/>
+
+    <TextBlock Text="{l:Loc SignReason}" Foreground="{DynamicResource TextSecondary}" FontSize="12"
+               Margin="0,12,0,4"/>
+    <TextBox x:Name="ReasonBox" Style="{StaticResource ThemedTextBox}"/>
+    <TextBlock Text="{l:Loc SignLocation}" Foreground="{DynamicResource TextSecondary}" FontSize="12"
+               Margin="0,10,0,4"/>
+    <TextBox x:Name="LocationBox" Style="{StaticResource ThemedTextBox}"/>
+
+    <TextBlock x:Name="ErrorLabel" Foreground="#D9534F" FontSize="12" Margin="0,8,0,0"
+               Visibility="Collapsed" TextWrapping="Wrap"/>
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+      <Button Content="{l:Loc SignAction}" Style="{StaticResource PrimaryButton}" MinWidth="130"
+              IsDefault="True" Click="OnSign"/>
+      <Button Content="{l:Loc Cancel}" Style="{StaticResource LinkButton}" Margin="8,0,0,0" IsCancel="True"/>
+    </StackPanel>
+  </StackPanel>
+</Window>
