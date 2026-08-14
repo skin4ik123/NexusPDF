@@ -12,11 +12,23 @@ public sealed record PageRef(
     Guid SourceId,
     int SourcePageIndex,
     int RotationOffset,
-    IReadOnlyList<PageOverlay>? Overlays = null)
+    IReadOnlyList<PageOverlay>? Overlays = null,
+    IReadOnlyList<int>? RemovedAnnotations = null)
 {
     public static int NormalizeQuarterTurns(int quarterTurns) => ((quarterTurns % 4) + 4) % 4;
 
     public IReadOnlyList<PageOverlay> OverlayList => Overlays ?? Array.Empty<PageOverlay>();
+
+    /// <summary>Индексы аннотаций ИСХОДНОЙ страницы, помеченные к удалению при сохранении.</summary>
+    public IReadOnlyList<int> RemovedAnnotationList => RemovedAnnotations ?? Array.Empty<int>();
+
+    public PageRef WithRemovedAnnotation(int annotIndex)
+    {
+        if (RemovedAnnotationList.Contains(annotIndex))
+            return this;
+        var list = new List<int>(RemovedAnnotationList) { annotIndex };
+        return this with { RemovedAnnotations = list };
+    }
 
     public PageRef Rotated(int quarterTurns) =>
         this with { RotationOffset = NormalizeQuarterTurns(RotationOffset + quarterTurns) };

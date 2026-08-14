@@ -106,11 +106,12 @@ public sealed record ImagePageSpec(
     double WidthPoints,
     double HeightPoints);
 
-/// <summary>Одна страница будущего документа: источник, номер страницы в источнике, добавочный поворот (в четвертях оборота по часовой) и накладываемый контент.</summary>
+/// <summary>Одна страница будущего документа: источник, номер страницы в источнике, добавочный поворот (в четвертях оборота по часовой), накладываемый контент и аннотации источника, помеченные к удалению.</summary>
 public sealed record ComposedPage(
     IPdfDocumentHandle Source,
     int SourcePageIndex,
     int ExtraQuarterTurns,
-    IReadOnlyList<PageOverlay>? Overlays = null);
+    IReadOnlyList<PageOverlay>? Overlays = null,
+    IReadOnlyList<int>? RemovedAnnotations = null);
 
 public sealed record PdfValidationResult(bool IsValid, int PageCount, IReadOnlyList<string> Problems);

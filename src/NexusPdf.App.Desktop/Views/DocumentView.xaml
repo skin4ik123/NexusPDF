@@ -243,8 +243,8 @@
                       </StackPanel>
                       <Button Style="{StaticResource ToolButton}" Padding="3,1"
                               HorizontalAlignment="Right" ToolTip="{l:Loc DeleteComment}"
-                              Visibility="{Binding IsDraft, Converter={StaticResource BoolToVis}}"
-                              Command="{Binding DataContext.DeleteDraftCommentCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                              Visibility="{Binding Deletable, Converter={StaticResource BoolToVis}}"
+                              Command="{Binding DataContext.DeleteCommentCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                               CommandParameter="{Binding}">
                         <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE74D;" FontSize="10"/>
                       </Button>

@@ -206,6 +206,33 @@ public sealed class RemoveOverlayAtOperation : DocumentOperationBase
     }
 }
 
+/// <summary>
+/// Пометка СУЩЕСТВУЮЩЕЙ аннотации исходного файла к удалению при сохранении.
+/// Исходный файл не мутируется: индекс аннотации исходной страницы стабилен
+/// до сохранения, Ctrl+Z снимает пометку.
+/// </summary>
+public sealed class RemoveExistingAnnotationOperation : DocumentOperationBase
+{
+    private readonly int _pageIndex;
+    private readonly int _annotIndex;
+
+    public RemoveExistingAnnotationOperation(int pageIndex, int annotIndex)
+    {
+        _pageIndex = pageIndex;
+        _annotIndex = annotIndex;
+    }
+
+    public override string Name => "Удаление аннотации";
+
+    protected override void ApplyCore(DocumentModel model)
+    {
+        ValidateIndices(model, new[] { _pageIndex });
+        if (_annotIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(_annotIndex));
+        model.Pages[_pageIndex] = model.Pages[_pageIndex].WithRemovedAnnotation(_annotIndex);
+    }
+}
+
 /// <summary>Удаление всего наложенного контента с выбранных страниц.</summary>
 public sealed class RemoveOverlaysOperation : DocumentOperationBase
 {

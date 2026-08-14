@@ -117,14 +117,31 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
             for (var k = 0; k < pages.Count; k++)
             {
                 var extra = ((pages[k].ExtraQuarterTurns % 4) + 4) % 4;
-                if (extra == 0) continue;
+                var removed = pages[k].RemovedAnnotations;
+                if (extra == 0 && (removed == null || removed.Count == 0)) continue;
                 var page = fpdfview.FPDF_LoadPage(newDoc, k);
                 if (page == null || page.__Instance == IntPtr.Zero)
                     throw new PdfEngineException($"Не удалось открыть страницу {k + 1} нового документа.");
                 try
                 {
-                    var current = fpdf_edit.FPDFPageGetRotation(page);
-                    fpdf_edit.FPDFPageSetRotation(page, (current + extra) % 4);
+                    if (extra != 0)
+                    {
+                        var current = fpdf_edit.FPDFPageGetRotation(page);
+                        fpdf_edit.FPDFPageSetRotation(page, (current + extra) % 4);
+                    }
+
+                    if (removed is { Count: > 0 })
+                    {
+                        // Индексы даны для исходной страницы; после импорта они
+                        // совпадают. Удаление от большего к меньшему — индексы
+                        // оставшихся не сдвигаются под ногами.
+                        foreach (var annotIndex in removed.Distinct().OrderByDescending(i => i))
+                        {
+                            if (fpdf_annot.FPDFPageRemoveAnnot(page, annotIndex) == 0)
+                                throw new PdfEngineException(
+                                    $"Не удалось удалить аннотацию {annotIndex} со страницы {k + 1}.");
+                        }
+                    }
                 }
                 finally
                 {

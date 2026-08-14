@@ -7,8 +7,8 @@ namespace NexusPdf.PdfEngineTests;
 
 /// <summary>
 /// OCR: полный конвейер «скан → распознавание → невидимый текстовый слой →
-/// сохранение → текст ищется, картинка не изменилась». Пропускаются, если
-/// языковые модели tessdata не скачаны (tools/fetch-tessdata.ps1).
+/// сохранение → текст ищется, картинка не изменилась». Требуют tessdata
+/// (tools/fetch-tessdata.ps1) — без моделей падают громко.
 /// </summary>
 public sealed class OcrTests : IAsyncLifetime
 {
