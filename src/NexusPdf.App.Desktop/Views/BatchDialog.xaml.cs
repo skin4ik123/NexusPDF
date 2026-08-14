@@ -105,23 +105,34 @@ public partial class BatchDialog : Window
         _cts = new CancellationTokenSource();
         var ok = 0;
         var failed = 0;
+        // Уже занятые имена результатов: одноимённые входы из разных папок
+        // и файлы прошлых прогонов получают суффикс « (2)», а не затираются.
+        var takenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
             Directory.CreateDirectory(outputDir);
             foreach (var row in _rows.ToList())
             {
+                // Отмена — строго между файлами: обрыв qpdf посреди записи
+                // оставил бы обрубок вместо результата.
                 if (_cts.Token.IsCancellationRequested) break;
                 row.Status = Loc.Get("BatchStatusWorking");
                 try
                 {
-                    await ProcessAsync(row.Path, outputDir, operation, password, _cts.Token);
+                    await ProcessAsync(row.Path, outputDir, operation, password, takenNames, _cts.Token);
                     row.Status = Loc.Get("BatchStatusOk");
                     ok++;
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (_cts.Token.IsCancellationRequested)
                 {
                     row.Status = Loc.Get("BatchStatusPending");
                     break;
+                }
+                catch (OperationCanceledException)
+                {
+                    // Не отмена пользователя, а 5-минутный таймаут qpdf.
+                    row.Status = Loc.F("BatchStatusError", Loc.Get("BatchTimeout"));
+                    failed++;
                 }
                 catch (Exception ex)
                 {
@@ -140,22 +151,59 @@ public partial class BatchDialog : Window
         }
     }
 
-    private async Task ProcessAsync(string sourcePath, string outputDir, int operation, string password, CancellationToken ct)
+    /// <summary>Свободное имя в папке результатов: занятые (набором или диском) получают « (2)», « (3)»…</summary>
+    private static string UniqueTarget(string outputDir, string fileName, HashSet<string> takenNames, bool directory = false)
+    {
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        var extension = Path.GetExtension(fileName);
+        var candidate = fileName;
+        var n = 2;
+        while (takenNames.Contains(candidate) ||
+               (directory ? Directory.Exists(Path.Combine(outputDir, candidate))
+                          : File.Exists(Path.Combine(outputDir, candidate))))
+            candidate = $"{stem} ({n++}){extension}";
+        takenNames.Add(candidate);
+        return Path.Combine(outputDir, candidate);
+    }
+
+    private async Task ProcessAsync(
+        string sourcePath, string outputDir, int operation, string password,
+        HashSet<string> takenNames, CancellationToken ct)
     {
         var name = Path.GetFileName(sourcePath);
-        var targetPath = Path.Combine(outputDir, name);
-        if (operation is 0 or 1 &&
-            string.Equals(Path.GetFullPath(targetPath), Path.GetFullPath(sourcePath), StringComparison.OrdinalIgnoreCase))
-            throw new PdfEngineException(Loc.Get("BatchSameFolder"));
 
         switch (operation)
         {
-            case 0:
-                await _services.Qpdf.OptimizeAsync(sourcePath, targetPath, linearize: true, ct);
+            case 0 or 1:
+            {
+                // Запароленный вход qpdf не возьмёт — честный отказ заранее.
+                try
+                {
+                    await using var probe = await _services.Engine.OpenAsync(sourcePath, null, CancellationToken.None);
+                }
+                catch (PdfPasswordRequiredException)
+                {
+                    throw new PdfEngineException(Loc.Get("BatchProtectedInput"));
+                }
+
+                var targetPath = UniqueTarget(outputDir, name, takenNames);
+                // qpdf пишет во временный файл: сбой или таймаут не оставляют
+                // в папке результатов обрубок под финальным именем.
+                var tmp = targetPath + ".nexustmp-qpdf";
+                try
+                {
+                    if (operation == 0)
+                        await _services.Qpdf.OptimizeAsync(sourcePath, tmp, linearize: true, CancellationToken.None);
+                    else
+                        await _services.Qpdf.EncryptAsync(sourcePath, tmp, password, null, CancellationToken.None);
+                    File.Move(tmp, targetPath, overwrite: true);
+                }
+                finally
+                {
+                    try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* лучшая попытка */ }
+                }
                 break;
-            case 1:
-                await _services.Qpdf.EncryptAsync(sourcePath, targetPath, password, null, ct);
-                break;
+            }
             case 2:
             {
                 OpenedDocument document;
@@ -169,15 +217,16 @@ public partial class BatchDialog : Window
                 }
                 await using (document)
                 {
-                    var imagesDir = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(name));
-                    Directory.CreateDirectory(imagesDir);
                     var baseName = Path.GetFileNameWithoutExtension(name);
+                    var imagesDir = UniqueTarget(outputDir, baseName, takenNames, directory: true);
+                    Directory.CreateDirectory(imagesDir);
                     await _services.Convert.ExportImagesAsync(
                         document, null, 150,
-                        async (image, pageIndex, token) =>
+                        async (image, pageIndex, effectiveDpi, token) =>
                         {
                             var file = Path.Combine(imagesDir, $"{baseName}-{pageIndex + 1:000}.png");
-                            await File.WriteAllBytesAsync(file, ImageEncoder.Encode(image, jpeg: false, 150), token);
+                            await File.WriteAllBytesAsync(file,
+                                ImageEncoder.Encode(image, jpeg: false, effectiveDpi), token);
                         },
                         null, ct);
                 }

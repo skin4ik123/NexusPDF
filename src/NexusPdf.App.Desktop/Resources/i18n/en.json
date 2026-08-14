@@ -229,6 +229,7 @@
   "BatchNeedFiles": "Add files and choose an output folder.",
   "BatchPasswordNeed": "Enter a password.",
   "BatchSameFolder": "The result would overwrite the source file — choose another folder.",
+  "BatchTimeout": "the operation did not finish within 5 minutes",
   "BatchProtectedInput": "The file is password-protected — skipped.",
   "SignReasonLabel": "Reason: {0}",
   "SignLocationLabel": "Location: {0}",

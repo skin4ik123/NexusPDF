@@ -36,12 +36,19 @@ public sealed class ConvertTests : IAsyncLifetime
         await using (document)
         {
             var images = new List<(int PageIndex, RenderedPageImage Image)>();
+            var dpis = new List<double>();
             var count = await _convert.ExportImagesAsync(
                 document, null, 150,
-                (image, pageIndex, _) => { images.Add((pageIndex, image)); return Task.CompletedTask; },
+                (image, pageIndex, effectiveDpi, _) =>
+                {
+                    images.Add((pageIndex, image));
+                    dpis.Add(effectiveDpi);
+                    return Task.CompletedTask;
+                },
                 null, CancellationToken.None);
 
             Assert.Equal(2, count);
+            Assert.All(dpis, d => Assert.Equal(150, d, 1)); // страница обычная — DPI не урезан
             Assert.Equal(new[] { 0, 1 }, images.Select(i => i.PageIndex));
             // 612 pt на 150 DPI = 1275 px; повёрнутая страница отдаётся в отображаемой ориентации.
             Assert.Equal(1275, images[0].Image.PixelWidth);

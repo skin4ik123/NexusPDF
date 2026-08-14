@@ -530,12 +530,18 @@ public sealed partial class MainViewModel : ObservableObject
         {
             var baseName = Path.GetFileNameWithoutExtension(doc.Title);
             var extension = request.Jpeg ? "jpg" : "png";
+            // Существующие файлы не перезаписываются молча: занятые имена
+            // получают суффикс « (2)» — как в пакетной обработке.
+            var prefix = baseName;
+            var n = 2;
+            while (Directory.EnumerateFiles(folder.FolderName, $"{prefix}-*.{extension}").Any())
+                prefix = $"{baseName} ({n++})";
             var count = await _services.Convert.ExportImagesAsync(
                 doc.Document, targets, request.Dpi,
-                async (image, pageIndex, ct) =>
+                async (image, pageIndex, effectiveDpi, ct) =>
                 {
-                    var path = Path.Combine(folder.FolderName, $"{baseName}-{pageIndex + 1:000}.{extension}");
-                    await File.WriteAllBytesAsync(path, ImageEncoder.Encode(image, request.Jpeg, request.Dpi), ct);
+                    var path = Path.Combine(folder.FolderName, $"{prefix}-{pageIndex + 1:000}.{extension}");
+                    await File.WriteAllBytesAsync(path, ImageEncoder.Encode(image, request.Jpeg, effectiveDpi), ct);
                 },
                 new Progress<(int Done, int Total)>(p =>
                     doc.StatusText = Loc.F("ExportImagesProgress", p.Done, p.Total)),
@@ -604,7 +610,9 @@ public sealed partial class MainViewModel : ObservableObject
         _convertBusy = true;
         try
         {
-            var specs = open.FileNames.Select(ImageEncoder.DecodeAsPageSpec).ToList();
+            // Декодирование пачки фото — работа на секунды: не на UI-потоке.
+            var files = open.FileNames;
+            var specs = await Task.Run(() => files.Select(ImageEncoder.DecodeAsPageSpec).ToList());
             await _services.Convert.CreateFromImagesAsync(specs, save.FileName, CancellationToken.None);
             Log.Information("Создан PDF из {Count} изображений: {Path}", specs.Count, save.FileName);
             await OpenFilesAsync(new[] { save.FileName });
@@ -664,13 +672,14 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void ShowBatch() => BatchDialog.Run(OwnerWindow, _services);
 
-    /// <summary>Цель записи не должна быть открыта ни в одной вкладке этого окна.</summary>
+    /// <summary>Цель записи не должна быть открыта ни в одной вкладке НИ ОДНОГО окна приложения.</summary>
     private bool RejectIfTargetOpenAnywhere(string targetPath)
     {
         var full = Path.GetFullPath(targetPath);
-        var isOpen = Documents.Any(d =>
-            d.FilePath is { } p &&
-            string.Equals(Path.GetFullPath(p), full, StringComparison.OrdinalIgnoreCase));
+        var isOpen = WindowManager.AllViewModels()
+            .SelectMany(vm => vm.Documents)
+            .SelectMany(d => d.Document.Handles.Values)
+            .Any(h => string.Equals(Path.GetFullPath(h.FilePath), full, StringComparison.OrdinalIgnoreCase));
         if (isOpen)
             ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"), Loc.Get("ConvertTargetIsOpen"), "");
         return isOpen;
@@ -797,8 +806,8 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Попытка закрыть все вкладки окна (при закрытии окна). false — пользователь отменил.</summary>
     public async Task<bool> TryCloseAllAsync()
     {
-        if (Documents.Any(d => d.IsBusy))
-            return false; // печать или сохранение ещё идут
+        if (Documents.Any(d => d.IsBusy) || _convertBusy)
+            return false; // печать, сохранение или конвертация ещё идут
 
         var dirty = Documents.Where(d => d.IsDirty).ToList();
         if (dirty.Count > 0)
