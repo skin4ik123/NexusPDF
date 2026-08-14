@@ -20,9 +20,11 @@ public sealed class SearchService
             return matches;
 
         var comparison = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-        var pages = document.Session.Model.Pages;
+        // Неизменяемый снимок: UI-поток может править список страниц, пока поиск
+        // идёт на пуле потоков; устаревшие результаты отбрасывает вызывающая сторона.
+        var pages = document.Session.Model.Pages.ToArray();
 
-        for (var logicalIndex = 0; logicalIndex < pages.Count; logicalIndex++)
+        for (var logicalIndex = 0; logicalIndex < pages.Length; logicalIndex++)
         {
             ct.ThrowIfCancellationRequested();
             var page = pages[logicalIndex];

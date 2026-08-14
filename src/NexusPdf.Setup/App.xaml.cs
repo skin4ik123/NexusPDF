@@ -13,6 +13,25 @@ public partial class App : System.Windows.Application
             int exitCode;
             try
             {
+                if (!string.IsNullOrWhiteSpace(options.CustomDir) &&
+                    !System.IO.Path.IsPathRooted(options.CustomDir))
+                {
+                    Console.Error.WriteLine("NexusPdfSetup: /dir= требует полный путь (код 87).");
+                    Shutdown(87);
+                    return;
+                }
+
+                var installed = InstalledProductInspector.Detect();
+                if (installed == InstalledContext.PerUser && options.AllUsers ||
+                    installed == InstalledContext.PerMachine && !options.AllUsers)
+                {
+                    Console.Error.WriteLine(
+                        "NexusPdfSetup: продукт уже установлен в другом режиме (per-user/per-machine). " +
+                        "Сначала удалите существующую копию (код 1638).");
+                    Shutdown(1638);
+                    return;
+                }
+
                 var msi = SetupEngine.ExtractMsi();
                 var result = await SetupEngine.InstallAsync(options, msi);
                 exitCode = result.ExitCode;

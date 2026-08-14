@@ -160,6 +160,10 @@
             <Button Grid.Column="1" Content="Обзор…" Style="{StaticResource Ghost}" Margin="8,0,0,0"
                     Click="OnBrowse"/>
           </Grid>
+          <TextBlock x:Name="PathError" Foreground="#DC2626" FontSize="12" Margin="0,4,0,0"
+                     TextWrapping="Wrap" Visibility="Collapsed"/>
+          <TextBlock x:Name="ContextNote" Foreground="{StaticResource InkSoft}" FontSize="12"
+                     Margin="0,8,0,0" TextWrapping="Wrap" Visibility="Collapsed"/>
 
           <CheckBox x:Name="DesktopCheck" IsChecked="True" Margin="0,16,0,0"
                     Content="Добавить ярлык на рабочий стол"/>

@@ -61,6 +61,9 @@ public partial class MainWindow : Window
         if (_forceClose) return;
 
         e.Cancel = true;
+        // Снимок открытых файлов ДО закрытия вкладок — иначе «восстановить
+        // прошлую сессию» после чистого выхода всегда видела бы пустой список.
+        ViewModel.SnapshotBeforeExit();
         if (await ViewModel.TryCloseAllAsync())
         {
             _forceClose = true;

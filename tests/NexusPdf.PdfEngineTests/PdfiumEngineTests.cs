@@ -176,6 +176,45 @@ public sealed class PdfiumEngineTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SaveService_Saves_In_Place_Over_Open_File()
+    {
+        var path = PdfFixture.WriteToTemp("inplace.pdf",
+            new PdfFixture.PageSpec(612, 792, Text: "Page A"),
+            new PdfFixture.PageSpec(612, 792, Text: "Page B"));
+
+        var document = await OpenedDocument.OpenAsync(_engine, path, null, CancellationToken.None);
+        await using (document)
+        {
+            document.Session.Apply(new DeletePagesOperation(new[] { 0 }));
+
+            // Ctrl+S: цель совпадает с открытым (отображённым в память) источником.
+            await new SaveService(_engine).SaveAsAsync(document, path, keepBackup: false, CancellationToken.None);
+
+            Assert.False(document.Session.IsDirty);
+            Assert.Equal(1, document.Session.Model.Pages.Count);
+            Assert.Contains("Page B",
+                await document.PrimaryHandle.GetPageTextAsync(0, CancellationToken.None));
+        }
+
+        await using var reopened = await _engine.OpenAsync(path, null, CancellationToken.None);
+        Assert.Equal(1, reopened.Info.PageCount);
+    }
+
+    [Fact]
+    public async Task Copy_Operations_Refuse_Target_That_Is_Open_Source()
+    {
+        var path = PdfFixture.WriteToTemp("busy-target.pdf", new PdfFixture.PageSpec(612, 792));
+        var document = await OpenedDocument.OpenAsync(_engine, path, null, CancellationToken.None);
+        await using (document)
+        {
+            await Assert.ThrowsAsync<PdfEngineException>(
+                () => new SaveService(_engine).SaveCopyAsync(document, path, CancellationToken.None));
+            await Assert.ThrowsAsync<PdfEngineException>(
+                () => new SaveService(_engine).ExtractAsync(document, new[] { 0 }, path, CancellationToken.None));
+        }
+    }
+
+    [Fact]
     public async Task Extract_Writes_Selected_Pages_Only()
     {
         var path = PdfFixture.WriteToTemp("extract.pdf",

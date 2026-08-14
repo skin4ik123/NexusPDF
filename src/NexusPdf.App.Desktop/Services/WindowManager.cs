@@ -27,6 +27,9 @@ public static class WindowManager
     public static MainWindow? ActiveOrFirst() =>
         Windows.FirstOrDefault(w => w.IsActive) ?? Windows.FirstOrDefault();
 
+    public static IEnumerable<MainViewModel> AllViewModels() =>
+        Windows.Select(w => w.ViewModel);
+
     public static IReadOnlyList<string> CollectOpenFiles() =>
         Windows.SelectMany(w => w.ViewModel.Documents)
             .Select(d => d.FilePath)

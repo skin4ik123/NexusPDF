@@ -99,7 +99,13 @@ public sealed class QpdfEngine : IPdfStructureEngine, IPdfSecurityEngine, IPdfVa
 
     private async Task RunExpectSuccessAsync(IReadOnlyList<string> args, string operationName, CancellationToken ct)
     {
-        var (exitCode, output) = await RunAsync(args, ct).ConfigureAwait(false);
+        // --warning-exit-0: qpdf возвращает 3 при УСПЕХЕ с предупреждениями
+        // (обычное дело для реальных слегка некорректных PDF) — без флага
+        // готовый корректный результат отбрасывался бы как ошибка.
+        var fullArgs = new List<string>(args.Count + 1) { "--warning-exit-0" };
+        fullArgs.AddRange(args);
+
+        var (exitCode, output) = await RunAsync(fullArgs, ct).ConfigureAwait(false);
         if (exitCode != 0)
             throw new PdfEngineException($"{operationName}: qpdf завершился с кодом {exitCode}. {Truncate(output)}");
     }
@@ -108,6 +114,12 @@ public sealed class QpdfEngine : IPdfStructureEngine, IPdfSecurityEngine, IPdfVa
     {
         if (!IsAvailable)
             throw new PdfFeatureUnavailableException("qpdf", UnavailableReason!);
+
+        // Аргументы (среди них бывают пароли) передаются через response-файл:
+        // командная строка процесса видна любому приложению пользователя,
+        // а временный файл защищён ACL профиля и удаляется сразу после запуска.
+        var responseFile = Path.Combine(Path.GetTempPath(), "nexusqpdf-" + Guid.NewGuid().ToString("N") + ".args");
+        await File.WriteAllLinesAsync(responseFile, args, new UTF8Encoding(false), ct).ConfigureAwait(false);
 
         var psi = new ProcessStartInfo
         {
@@ -119,12 +131,19 @@ public sealed class QpdfEngine : IPdfStructureEngine, IPdfSecurityEngine, IPdfVa
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
         };
-        foreach (var arg in args)
-            psi.ArgumentList.Add(arg);
+        psi.ArgumentList.Add("@" + responseFile);
 
         using var process = new Process { StartInfo = psi };
-        if (!process.Start())
-            throw new PdfEngineException("Не удалось запустить qpdf.exe.");
+        try
+        {
+            if (!process.Start())
+                throw new PdfEngineException("Не удалось запустить qpdf.exe.");
+        }
+        catch
+        {
+            try { File.Delete(responseFile); } catch { /* лучшая попытка */ }
+            throw;
+        }
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(OperationTimeout);
@@ -139,6 +158,10 @@ public sealed class QpdfEngine : IPdfStructureEngine, IPdfSecurityEngine, IPdfVa
         {
             try { process.Kill(entireProcessTree: true); } catch { /* уже завершился */ }
             throw;
+        }
+        finally
+        {
+            try { File.Delete(responseFile); } catch { /* лучшая попытка */ }
         }
 
         var output = (await stdOut.ConfigureAwait(false)) + "\n" + (await stdErr.ConfigureAwait(false));

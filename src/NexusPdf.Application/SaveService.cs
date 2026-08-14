@@ -13,6 +13,9 @@ public sealed class SaveService
     /// Сохранение по алгоритму «записать во временный файл → проверить → атомарно
     /// подменить цель». Оригинал не изменяется до успешной проверки. После записи
     /// документ переоткрывается из сохранённого файла.
+    /// При сохранении «в себя» дескрипторы, удерживающие целевой файл (memory-mapped),
+    /// освобождаются после проверки и перед подменой: Windows не позволяет заменить
+    /// файл с активным отображением в память.
     /// </summary>
     public async Task SaveAsAsync(OpenedDocument document, string targetPath, bool keepBackup, CancellationToken ct)
     {
@@ -21,19 +24,52 @@ public sealed class SaveService
         if (expectedCount == 0)
             throw new InvalidOperationException("Документ не содержит страниц.");
 
+        var fullTarget = Path.GetFullPath(targetPath);
+        var blockingSources = document.Handles
+            .Where(kv => string.Equals(Path.GetFullPath(kv.Value.FilePath), fullTarget, StringComparison.OrdinalIgnoreCase))
+            .Select(kv => kv.Key)
+            .ToList();
+
         await SafeFileReplace.WriteAndReplaceAsync(
             targetPath,
             tempPath => _engine.ComposeAsync(composition, tempPath, ct),
             tempPath => ValidateAsync(tempPath, expectedCount, ct),
+            beforeReplace: async () =>
+            {
+                // Компоновка и проверка завершены — эти источники больше не нужны;
+                // RebaseToSavedFileAsync ниже переоткроет документ заново.
+                foreach (var sourceId in blockingSources)
+                {
+                    if (document.Handles.Remove(sourceId, out var handle))
+                        await handle.DisposeAsync().ConfigureAwait(false);
+                }
+            },
             keepBackup,
             ct).ConfigureAwait(false);
 
         await document.RebaseToSavedFileAsync(_engine, targetPath, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Копию нельзя записывать поверх файла, открытого этим документом: файл
+    /// отображён в память и Windows не даст его заменить, а «сохранение в себя»
+    /// делается командой «Сохранить». Бросает понятную ошибку заранее.
+    /// </summary>
+    public static void ThrowIfTargetIsOpenSource(OpenedDocument document, string targetPath)
+    {
+        var fullTarget = Path.GetFullPath(targetPath);
+        if (document.Handles.Values.Any(h =>
+                string.Equals(Path.GetFullPath(h.FilePath), fullTarget, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new PdfEngineException(
+                "Этот файл сейчас открыт в NexusPDF. Выберите другое имя, либо используйте «Сохранить», чтобы записать документ в его собственный файл.");
+        }
+    }
+
     /// <summary>Сохранение копии текущего состояния в файл без переключения документа на него.</summary>
     public async Task SaveCopyAsync(OpenedDocument document, string targetPath, CancellationToken ct)
     {
+        ThrowIfTargetIsOpenSource(document, targetPath);
         var composition = document.BuildComposition();
         if (composition.Count == 0)
             throw new InvalidOperationException("Документ не содержит страниц.");
@@ -49,6 +85,7 @@ public sealed class SaveService
     /// <summary>Извлечение выбранных логических страниц в отдельный файл (исходный документ не меняется).</summary>
     public async Task ExtractAsync(OpenedDocument document, IReadOnlyList<int> logicalIndices, string targetPath, CancellationToken ct)
     {
+        ThrowIfTargetIsOpenSource(document, targetPath);
         var all = document.BuildComposition();
         var subset = logicalIndices.Select(i => all[i]).ToList();
         if (subset.Count == 0)

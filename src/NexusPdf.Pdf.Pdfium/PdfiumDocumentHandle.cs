@@ -9,6 +9,12 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
     private readonly PdfiumThread _thread;
     private readonly MemoryMappedFile _mmf;
     private readonly MemoryMappedViewAccessor _accessor;
+
+    // Допуск операции и постановка FPDF_CloseDocument в очередь защищены одним
+    // замком: очередь PdfiumThread — FIFO, поэтому закрытие документа всегда
+    // встаёт ПОСЛЕ всех уже допущенных операций — нативный use-after-free
+    // (рендер после close) исключён даже при гонке Dispose с фоновым рендером.
+    private readonly object _admissionGate = new();
     private bool _disposed;
 
     internal PdfiumDocumentHandle(
@@ -34,14 +40,25 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
 
     public Task<RenderedPageImage> RenderPageAsync(int pageIndex, int pixelWidth, int pixelHeight, int extraQuarterTurns, CancellationToken ct)
     {
-        ThrowIfDisposed();
-        return _thread.InvokeAsync(
-            () => PdfiumRenderEngine.RenderCore(NativeDoc, pageIndex, pixelWidth, pixelHeight, extraQuarterTurns), ct);
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(
+                () => PdfiumRenderEngine.RenderCore(NativeDoc, pageIndex, pixelWidth, pixelHeight, extraQuarterTurns), ct);
+        }
     }
 
     public Task<string> GetPageTextAsync(int pageIndex, CancellationToken ct)
     {
-        ThrowIfDisposed();
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return GetPageTextCore(pageIndex, ct);
+        }
+    }
+
+    private Task<string> GetPageTextCore(int pageIndex, CancellationToken ct)
+    {
         return _thread.InvokeAsync(() =>
         {
             var page = fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
@@ -80,7 +97,15 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
 
     public Task<IReadOnlyList<PdfTextRect>> GetTextRectsAsync(int pageIndex, int startCharIndex, int charCount, CancellationToken ct)
     {
-        ThrowIfDisposed();
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return GetTextRectsCore(pageIndex, startCharIndex, charCount, ct);
+        }
+    }
+
+    private Task<IReadOnlyList<PdfTextRect>> GetTextRectsCore(int pageIndex, int startCharIndex, int charCount, CancellationToken ct)
+    {
         return _thread.InvokeAsync<IReadOnlyList<PdfTextRect>>(() =>
         {
             var page = fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
@@ -117,15 +142,20 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
 
     public async ValueTask DisposeAsync()
     {
-        if (_disposed) return;
-        _disposed = true;
-        await _thread.InvokeAsync(() =>
+        Task closeTask;
+        lock (_admissionGate)
         {
-            fpdfview.FPDF_CloseDocument(NativeDoc);
-            _accessor.SafeMemoryMappedViewHandle.ReleasePointer();
-            _accessor.Dispose();
-            _mmf.Dispose();
-        }, CancellationToken.None).ConfigureAwait(false);
+            if (_disposed) return;
+            _disposed = true;
+            closeTask = _thread.InvokeAsync(() =>
+            {
+                fpdfview.FPDF_CloseDocument(NativeDoc);
+                _accessor.SafeMemoryMappedViewHandle.ReleasePointer();
+                _accessor.Dispose();
+                _mmf.Dispose();
+            }, CancellationToken.None);
+        }
+        await closeTask.ConfigureAwait(false);
     }
 
     private void ThrowIfDisposed()

@@ -73,23 +73,31 @@ public sealed class OpenedDocument : IAsyncDisposable
         var newHandle = await engine.OpenAsync(savedPath, null, ct).ConfigureAwait(false);
         var oldHandles = Handles.Values.ToList();
 
-        var newSourceId = Guid.NewGuid();
-        Handles.Clear();
-        Handles[newSourceId] = newHandle;
-        PrimarySourceId = newSourceId;
+        try
+        {
+            var newSourceId = Guid.NewGuid();
+            Handles.Clear();
+            Handles[newSourceId] = newHandle;
+            PrimarySourceId = newSourceId;
 
-        Session.Model.Sources.Clear();
-        Session.Model.Sources[newSourceId] = savedPath;
-        Session.Model.Pages.Clear();
-        for (var i = 0; i < newHandle.Info.PageCount; i++)
-            Session.Model.Pages.Add(new PageRef(newSourceId, i, 0));
+            Session.Model.Sources.Clear();
+            Session.Model.Sources[newSourceId] = savedPath;
+            Session.Model.Pages.Clear();
+            for (var i = 0; i < newHandle.Info.PageCount; i++)
+                Session.Model.Pages.Add(new PageRef(newSourceId, i, 0));
 
-        Session.FilePath = savedPath;
-        Session.History.Clear();
-        Session.MarkSaved();
-
-        foreach (var handle in oldHandles)
-            await handle.DisposeAsync().ConfigureAwait(false);
+            Session.FilePath = savedPath;
+            Session.History.Clear();
+            Session.MarkSaved();
+        }
+        finally
+        {
+            // Старые дескрипторы (и их memory-mapped файлы) освобождаются даже если
+            // обработчик события Changed выбросил исключение — иначе файл-источник
+            // остался бы заблокированным до конца работы приложения.
+            foreach (var handle in oldHandles)
+                await handle.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     public async ValueTask DisposeAsync()

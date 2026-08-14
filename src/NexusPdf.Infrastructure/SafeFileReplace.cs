@@ -7,10 +7,25 @@ namespace NexusPdf.Infrastructure;
 /// </summary>
 public static class SafeFileReplace
 {
+    public static Task WriteAndReplaceAsync(
+        string targetPath,
+        Func<string, Task> writeToTemp,
+        Func<string, Task> validateTemp,
+        bool keepBackup,
+        CancellationToken ct) =>
+        WriteAndReplaceAsync(targetPath, writeToTemp, validateTemp, beforeReplace: null, keepBackup, ct);
+
+    /// <param name="beforeReplace">
+    /// Вызывается после успешной проверки временного файла и непосредственно перед
+    /// подменой цели. Нужен, когда целевой файл удерживается самим приложением
+    /// (например, отображён в память открытым документом): здесь его можно
+    /// освободить — запись и проверка к этому моменту уже завершены.
+    /// </param>
     public static async Task WriteAndReplaceAsync(
         string targetPath,
         Func<string, Task> writeToTemp,
         Func<string, Task> validateTemp,
+        Func<Task>? beforeReplace,
         bool keepBackup,
         CancellationToken ct)
     {
@@ -27,17 +42,13 @@ public static class SafeFileReplace
             await validateTemp(tempPath).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
 
+            if (beforeReplace != null)
+                await beforeReplace().ConfigureAwait(false);
+
             if (File.Exists(targetPath))
             {
                 var backupPath = keepBackup ? targetPath + ".bak" : null;
-                try
-                {
-                    File.Replace(tempPath, targetPath, backupPath, ignoreMetadataErrors: true);
-                }
-                catch (PlatformNotSupportedException)
-                {
-                    File.Move(tempPath, targetPath, overwrite: true);
-                }
+                File.Replace(tempPath, targetPath, backupPath, ignoreMetadataErrors: true);
             }
             else
             {

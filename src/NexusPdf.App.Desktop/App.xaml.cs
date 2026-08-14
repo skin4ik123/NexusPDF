@@ -78,7 +78,9 @@ public partial class App : System.Windows.Application
         {
             if (_services != null)
             {
-                _services.Settings.LastSessionFiles = WindowManager.CollectOpenFiles().ToList();
+                // Список сессии уже поддерживается актуальным по ходу работы
+                // (UpdateSessionSnapshot/SnapshotBeforeExit) — здесь окна уже
+                // закрыты и пересчитывать его нельзя: получился бы пустой список.
                 _services.SaveSettings();
                 _services.DisposeAsync().AsTask().GetAwaiter().GetResult();
             }
