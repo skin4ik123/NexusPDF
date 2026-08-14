@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSI-пакет NexusPDF (WiX v5+).
+  Сборка (после ./build.ps1, который наполняет artifacts/publish/win-x64):
+    dotnet tool install wix (глобально, версия 5.x; однократно; см. installer/README.md)
+    wix build installer/Msi/NexusPdf.wxs -bindpath publish=artifacts/publish/win-x64 -o artifacts/NexusPdf.msi
+
+  Правила ассоциаций: версионируемый ProgID, Capabilities/RegisteredApplications,
+  OpenWith. UserChoice не подменяется - выбор по умолчанию делает пользователь.
+  При удалении сносятся только собственные ключи.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="NexusPDF"
+           Manufacturer="NexusPDF"
+           Version="0.1.0"
+           UpgradeCode="7C6E2B7A-9A1E-4F2B-B4B0-3E62D8C5A101"
+           Language="1049"
+           Scope="perUserOrMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="Установлена более новая версия NexusPDF."/>
+    <MediaTemplate EmbedCab="yes"/>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="NexusPDF"/>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder"/>
+
+    <!-- Все файлы publish-каталога -->
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="!(bindpath.publish)\**"/>
+    </ComponentGroup>
+
+    <!-- Ярлык в меню Пуск -->
+    <ComponentGroup Id="Shortcuts" Directory="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut">
+        <Shortcut Id="AppShortcut" Name="NexusPDF"
+                  Target="[INSTALLFOLDER]NexusPdf.exe" WorkingDirectory="INSTALLFOLDER"/>
+        <RegistryValue Root="HKCU" Key="Software\NexusPDF" Name="shortcut"
+                       Type="integer" Value="1" KeyPath="yes"/>
+      </Component>
+    </ComponentGroup>
+
+    <!-- Регистрация обработчика PDF (без подмены UserChoice) -->
+    <ComponentGroup Id="FileAssociation" Directory="INSTALLFOLDER">
+      <Component Id="ProgIdRegistration">
+        <RegistryValue Root="HKMU" Key="Software\Classes\NexusPdf.Document.1"
+                       Value="Документ PDF (NexusPDF)" Type="string" KeyPath="yes"/>
+        <RegistryValue Root="HKMU" Key="Software\Classes\NexusPdf.Document.1\DefaultIcon"
+                       Value="[INSTALLFOLDER]NexusPdf.exe,0" Type="string"/>
+        <RegistryValue Root="HKMU" Key="Software\Classes\NexusPdf.Document.1\shell\open\command"
+                       Value="&quot;[INSTALLFOLDER]NexusPdf.exe&quot; &quot;%1&quot;" Type="string"/>
+        <RegistryValue Root="HKMU" Key="Software\Classes\.pdf\OpenWithProgids"
+                       Name="NexusPdf.Document.1" Value="" Type="string"/>
+        <RegistryValue Root="HKMU" Key="Software\NexusPDF\Capabilities"
+                       Name="ApplicationName" Value="NexusPDF" Type="string"/>
+        <RegistryValue Root="HKMU" Key="Software\NexusPDF\Capabilities"
+                       Name="ApplicationDescription"
+                       Value="Просмотр и систематизация PDF" Type="string"/>
+        <RegistryValue Root="HKMU" Key="Software\NexusPDF\Capabilities\FileAssociations"
+                       Name=".pdf" Value="NexusPdf.Document.1" Type="string"/>
+        <RegistryValue Root="HKMU" Key="Software\RegisteredApplications"
+                       Name="NexusPDF" Value="Software\NexusPDF\Capabilities" Type="string"/>
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="NexusPDF" Level="1">
+      <ComponentGroupRef Id="AppFiles"/>
+      <ComponentGroupRef Id="Shortcuts"/>
+      <ComponentGroupRef Id="FileAssociation"/>
+    </Feature>
+  </Package>
+</Wix>
