@@ -64,6 +64,8 @@ public static class Program
                 if (positional.Count != 2)
                     throw new UsageException("export-images: нужны <вход.pdf> и <папка-результата>.");
                 var dpi = ParseDouble(options, "dpi", 150);
+                if (dpi is < 24 or > 1200)
+                    throw new UsageException("--dpi: допустимы значения 24–1200.");
                 var format = Get(options, "format", "png").ToLowerInvariant();
                 if (format is not ("png" or "jpeg" or "jpg"))
                     throw new UsageException("--format: поддерживаются png и jpeg.");
@@ -73,15 +75,38 @@ public static class Program
                     Directory.CreateDirectory(positional[1]);
                     var baseName = Path.GetFileNameWithoutExtension(positional[0]);
                     var extension = format == "png" ? "png" : "jpg";
+                    // Контракт --force распространяется и на файлы страниц.
+                    var mask = $"{baseName}-*.{extension}";
+                    if (!options.ContainsKey("force") &&
+                        Directory.EnumerateFiles(positional[1], mask).Any())
+                        throw new UsageException(
+                            $"В «{positional[1]}» уже есть файлы {mask}. Добавьте --force для перезаписи.");
+                    var dpiWarned = false;
                     var count = await new ConvertService(engine).ExportImagesAsync(
                         document, null, dpi,
-                        async (image, pageIndex, token) =>
+                        async (image, pageIndex, effectiveDpi, token) =>
                         {
+                            if (!dpiWarned && effectiveDpi < dpi - 0.5)
+                            {
+                                dpiWarned = true;
+                                Console.Error.WriteLine(
+                                    $"Предупреждение: гигантские страницы урезаны до {Math.Round(effectiveDpi)} DPI (предел стороны растра).");
+                            }
                             var path = Path.Combine(positional[1], $"{baseName}-{pageIndex + 1:000}.{extension}");
-                            await File.WriteAllBytesAsync(path, Encode(image, format, dpi), token);
+                            await File.WriteAllBytesAsync(path, Encode(image, format, effectiveDpi), token);
                             Console.WriteLine(path);
                         },
                         null, ct);
+                    // Устаревшие остатки прошлого прогона (страниц стало меньше)
+                    // убираются только при --force: без него мы сюда не попадаем
+                    // при существующих файлах.
+                    foreach (var stale in Directory.EnumerateFiles(positional[1], mask))
+                    {
+                        var name = Path.GetFileNameWithoutExtension(stale);
+                        var suffix = name[(baseName.Length + 1)..];
+                        if (int.TryParse(suffix, out var n) && n > count)
+                            File.Delete(stale);
+                    }
                     Console.WriteLine($"Готово: {count} страниц → {positional[1]}");
                 }
                 return 0;
@@ -131,7 +156,8 @@ public static class Program
                 RequireNotExists(positional[1], options);
                 var qpdf = RequireQpdf();
                 var before = new FileInfo(positional[0]).Length;
-                await qpdf.OptimizeAsync(positional[0], positional[1], linearize: true, ct);
+                await RunQpdfSafelyAsync(positional[1],
+                    tmp => qpdf.OptimizeAsync(positional[0], tmp, linearize: true, ct));
                 var after = new FileInfo(positional[1]).Length;
                 Console.WriteLine($"Готово: {before / 1024} КиБ → {after / 1024} КиБ ({positional[1]})");
                 return 0;
@@ -141,14 +167,19 @@ public static class Program
             {
                 if (positional.Count != 2)
                     throw new UsageException("protect: нужны <вход.pdf> и <выход.pdf>.");
-                var password = Get(options, "password", "");
+                // Пароль в командной строке виден в истории и списке процессов —
+                // NEXUSPDF_PASSWORD надёжнее (см. --help).
+                var password = Get(options, "password",
+                    Environment.GetEnvironmentVariable("NEXUSPDF_PASSWORD") ?? "");
                 if (password.Length == 0)
-                    throw new UsageException("protect: обязателен --password <пароль>.");
+                    throw new UsageException(
+                        "protect: укажите --password <пароль> или переменную окружения NEXUSPDF_PASSWORD.");
                 RequireNotExists(positional[1], options);
                 var qpdf = RequireQpdf();
                 var owner = Get(options, "owner-password", "");
-                await qpdf.EncryptAsync(positional[0], positional[1], password,
-                    owner.Length > 0 ? owner : null, ct);
+                await RunQpdfSafelyAsync(positional[1],
+                    tmp => qpdf.EncryptAsync(positional[0], tmp, password,
+                        owner.Length > 0 ? owner : null, ct));
                 Console.WriteLine($"Готово: защищённая копия {positional[1]} (AES-256)");
                 return 0;
             }
@@ -164,6 +195,9 @@ public static class Program
                 var document = await OpenAsync(engine, positional[0], options, ct);
                 await using (document)
                 {
+                    if (await document.PrimaryHandle.GetFormTypeAsync(ct) == 1)
+                        Console.Error.WriteLine(
+                            "Предупреждение: у документа есть формы AcroForm — в копии со слоем OCR они станут статикой.");
                     var service = new OcrService(ocrEngine);
                     var result = await service.RecognizeAsync(document, null,
                         new Progress<OcrProgress>(p =>
@@ -171,6 +205,14 @@ public static class Program
                         ct);
                     if (result.Error != null)
                         throw new InvalidOperationException(result.Error);
+                    if (result.PagesRecognized == 0)
+                    {
+                        // Пересобирать файл без единого нового слоя незачем.
+                        Console.WriteLine(
+                            $"Распознавать нечего (пропущено с текстом: {result.PagesSkippedWithText}, " +
+                            $"без читаемого текста: {result.PagesWithoutWords}) — файл не создан.");
+                        return 0;
+                    }
                     await new SaveService(engine).SaveCopyAsync(document, positional[1], ct);
                     Console.WriteLine(
                         $"Готово: распознано страниц {result.PagesRecognized}, слов {result.WordCount}, " +
@@ -212,6 +254,25 @@ public static class Program
     {
         if (File.Exists(path) && !options.ContainsKey("force"))
             throw new UsageException($"«{path}» уже существует. Добавьте --force для перезаписи.");
+    }
+
+    /// <summary>
+    /// qpdf пишет прямо в целевой путь и при сбое/таймауте оставил бы вместо
+    /// прежнего корректного файла обрубок. Запись идёт во временный файл;
+    /// цель подменяется только при успехе.
+    /// </summary>
+    private static async Task RunQpdfSafelyAsync(string targetPath, Func<string, Task> operation)
+    {
+        var tmp = targetPath + ".nexustmp-qpdf";
+        try
+        {
+            await operation(tmp);
+            File.Move(tmp, targetPath, overwrite: true);
+        }
+        finally
+        {
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* лучшая попытка */ }
+        }
     }
 
     private static (List<string> Positional, Dictionary<string, string> Options) ParseArgs(string[] args)
@@ -267,24 +328,37 @@ public static class Program
         return stream.ToArray();
     }
 
-    /// <summary>Файл изображения → страница PDF (размер по DPI из метаданных, запасной вариант 96).</summary>
+    /// <summary>
+    /// Файл изображения → страница PDF (размер по DPI из метаданных, запасной
+    /// вариант 96). Фото больше 24 Мп ужимаются — как и в приложении.
+    /// </summary>
     private static ImagePageSpec DecodeImage(string path)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        var decoder = BitmapDecoder.Create(stream,
-            BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
-        var frame = decoder.Frames[0];
-        if ((long)frame.PixelWidth * frame.PixelHeight > 24_000_000)
-            throw new InvalidOperationException($"«{Path.GetFileName(path)}» больше 24 мегапикселей.");
-        var converted = new FormatConvertedBitmap(frame, PixelFormats.Bgra32, null, 0);
-        var stride = frame.PixelWidth * 4;
-        var pixels = new byte[stride * frame.PixelHeight];
-        converted.CopyPixels(pixels, stride, 0);
+        var frame = BitmapDecoder.Create(stream,
+            BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad).Frames[0];
         var dpiX = frame.DpiX > 1 ? frame.DpiX : 96;
         var dpiY = frame.DpiY > 1 ? frame.DpiY : 96;
+        var widthPoints = frame.PixelWidth / dpiX * 72.0;
+        var heightPoints = frame.PixelHeight / dpiY * 72.0;
+
+        BitmapSource decoded = frame;
+        var totalPixels = (double)frame.PixelWidth * frame.PixelHeight;
+        const double maxPixels = 24_000_000;
+        if (totalPixels > maxPixels)
+        {
+            var k = Math.Sqrt(maxPixels / totalPixels);
+            var scaled = new TransformedBitmap(frame, new ScaleTransform(k, k));
+            scaled.Freeze();
+            decoded = scaled;
+        }
+
+        var converted = new FormatConvertedBitmap(decoded, PixelFormats.Bgra32, null, 0);
+        var stride = converted.PixelWidth * 4;
+        var pixels = new byte[stride * (long)converted.PixelHeight];
+        converted.CopyPixels(pixels, stride, 0);
         return new ImagePageSpec(
-            pixels, frame.PixelWidth, frame.PixelHeight,
-            frame.PixelWidth / dpiX * 72.0, frame.PixelHeight / dpiY * 72.0);
+            pixels, converted.PixelWidth, converted.PixelHeight, widthPoints, heightPoints);
     }
 
     private static void PrintUsage()
@@ -304,11 +378,16 @@ NexusPdfCli — консольные операции NexusPDF (локально
   optimize      <вход.pdf> <выход.pdf>
       Структурная оптимизация без потерь (qpdf) + линеаризация.
   protect       <вход.pdf> <выход.pdf> --password X [--owner-password Y]
-      Защищённая копия (AES-256).
+      Защищённая копия (AES-256). Пароль в командной строке виден другим
+      процессам и попадает в историю — надёжнее задать его переменной
+      окружения NEXUSPDF_PASSWORD и не указывать --password.
   ocr           <вход.pdf> <выход.pdf> [--password X]
       Распознавание сканов (rus+eng): невидимый текстовый слой.
+      Формы AcroForm в копии становятся статикой (выводится предупреждение).
 
-Общее: --force — перезаписать существующий файл результата.
+Общее: --force — перезаписать существующие файлы результата (в том числе
+картинки страниц у export-images). merge и from-images переносят страницы
+и аннотации, но не закладки/формы/вложения исходников.
 Коды возврата: 0 — успех, 1 — ошибка аргументов, 2 — ошибка операции.
 """);
     }

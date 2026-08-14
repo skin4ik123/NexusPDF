@@ -23,13 +23,15 @@ public sealed class ConvertService
     /// <summary>
     /// Рендерит перечисленные логические страницы (null — все) в растры
     /// заданного DPI и отдаёт каждый в <paramref name="saveAsync"/>
-    /// (номер — логический индекс страницы). Возвращает число страниц.
+    /// (логический индекс страницы, ФАКТИЧЕСКИЙ DPI растра — он ниже
+    /// запрошенного, если гигантскую страницу урезал предел стороны).
+    /// Возвращает число страниц.
     /// </summary>
     public async Task<int> ExportImagesAsync(
         OpenedDocument document,
         IReadOnlyList<int>? logicalIndices,
         double dpi,
-        Func<RenderedPageImage, int, CancellationToken, Task> saveAsync,
+        Func<RenderedPageImage, int, double, CancellationToken, Task> saveAsync,
         IProgress<(int Done, int Total)>? progress,
         CancellationToken ct)
     {
@@ -48,7 +50,7 @@ public sealed class ConvertService
             var width = Math.Max(1, (int)Math.Round(size.WidthPoints * scale));
             var height = Math.Max(1, (int)Math.Round(size.HeightPoints * scale));
             var image = await document.RenderLogicalPageAsync(logicalIndex, width, height, ct).ConfigureAwait(false);
-            await saveAsync(image, logicalIndex, ct).ConfigureAwait(false);
+            await saveAsync(image, logicalIndex, scale * 72.0, ct).ConfigureAwait(false);
             done++;
             progress?.Report((done, targets.Count));
         }

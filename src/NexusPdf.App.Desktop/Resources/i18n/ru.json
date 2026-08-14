@@ -229,6 +229,7 @@
   "BatchNeedFiles": "Добавьте файлы и выберите папку результатов.",
   "BatchPasswordNeed": "Укажите пароль.",
   "BatchSameFolder": "Результат совпал бы с исходным файлом — выберите другую папку.",
+  "BatchTimeout": "операция не уложилась в 5 минут",
   "BatchProtectedInput": "Файл защищён паролем — обработка пропущена.",
   "SignReasonLabel": "Причина: {0}",
   "SignLocationLabel": "Место: {0}",
