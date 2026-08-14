@@ -28,6 +28,9 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     /// <param name="extraQuarterTurns">добавочный поворот при отрисовке: 0..3 четверти по часовой</param>
     Task<RenderedPageImage> RenderPageAsync(int pageIndex, int pixelWidth, int pixelHeight, int extraQuarterTurns, CancellationToken ct);
 
+    /// <summary>Рендер ТОЛЬКО содержимого страницы — без аннотаций и полей форм (растр для OCR).</summary>
+    Task<RenderedPageImage> RenderPageContentOnlyAsync(int pageIndex, int pixelWidth, int pixelHeight, int extraQuarterTurns, CancellationToken ct);
+
     /// <summary>Извлекает весь текст страницы (UTF-16, в порядке текстовых объектов).</summary>
     Task<string> GetPageTextAsync(int pageIndex, CancellationToken ct);
 

@@ -91,19 +91,20 @@ public static class OverlayDisplayMapper
             }
             case OcrTextLayerOverlay ocr:
             {
-                // Каждое слово переносится как текстовый оверлей: базовая
-                // линия в целевую рамку, сам текст доворачивается на -90°·delta
-                // (слова должны остаться поверх повернувшихся глифов скана).
+                // Переносится якорь запекания — левый нижний угол рамки слова
+                // (ровно та же точка, что использует ApplyOcrLayer); сам текст
+                // доворачивается на -90°·delta, чтобы остаться поверх
+                // повернувшихся глифов скана.
                 var words = new List<OcrWordBox>(ocr.Words.Count);
                 foreach (var word in ocr.Words)
                 {
-                    var baseline = RemapPoint(
-                        word.XPt, word.YPt + word.HeightPt * TextBaselineFactor,
+                    var anchor = RemapPoint(
+                        word.XPt, word.YPt + word.HeightPt,
                         delta, finalWidth, finalHeight);
                     words.Add(word with
                     {
-                        XPt = baseline.X,
-                        YPt = baseline.Y - word.HeightPt * TextBaselineFactor,
+                        XPt = anchor.X,
+                        YPt = anchor.Y - word.HeightPt,
                     });
                 }
                 return (ocr with { Words = words }, -90.0 * delta);

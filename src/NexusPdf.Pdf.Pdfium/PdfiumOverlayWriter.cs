@@ -299,21 +299,29 @@ internal static class PdfiumOverlayWriter
 
             fpdf_edit.FPDFTextObjSetTextRenderMode(obj, (FPDF_TEXT_RENDERMODE)TextRenderModeInvisible);
 
-            // Слово растягивается по горизонтали под ширину распознанной рамки,
-            // чтобы прямоугольники выделения совпадали со сканом.
+            // Рамка Tesseract — это ink-бокс чернил скана. Ink-бокс запечённых
+            // глифов растягивается ровно в неё ПО ОБЕИМ осям: иначе слово из
+            // ЗАГЛАВНЫХ (рамка = cap-height) получало бы глифы мельче чернил и
+            // смещённые прямоугольники выделения по вертикали.
             float bl = 0, bb = 0, br = 0, bt = 0;
             if (fpdf_edit.FPDFPageObjGetBounds(obj, ref bl, ref bb, ref br, ref bt) != 0)
             {
-                var measured = br - bl;
-                if (measured > 0.01)
+                var measuredW = br - bl;
+                var measuredH = bt - bb;
+                if (measuredW > 0.01 && measuredH > 0.01)
                 {
-                    var sx = Math.Clamp(word.WidthPt / measured, 0.05, 20.0);
-                    fpdf_edit.FPDFPageObjTransform(obj, sx, 0, 0, 1, 0, 0);
+                    var sx = Math.Clamp(word.WidthPt / measuredW, 0.05, 20.0);
+                    var sy = Math.Clamp(word.HeightPt / measuredH, 0.05, 20.0);
+                    // Ink-бокс к началу координат, затем масштаб до рамки.
+                    fpdf_edit.FPDFPageObjTransform(obj, 1, 0, 0, 1, -bl, -bb);
+                    fpdf_edit.FPDFPageObjTransform(obj, sx, 0, 0, sy, 0, 0);
                 }
             }
 
-            var baselineDisplayed = (X: word.XPt, Y: word.YPt + word.HeightPt * OverlayDisplayMapper.TextBaselineFactor);
-            var (cx, cy) = DisplayedToContent(baselineDisplayed.X, baselineDisplayed.Y, rotation, contentWidth, contentHeight);
+            // Левый нижний угол рамки слова (в отображаемых координатах низ —
+            // это YPt + HeightPt) переносится в координаты содержимого.
+            var anchorDisplayed = (X: word.XPt, Y: word.YPt + word.HeightPt);
+            var (cx, cy) = DisplayedToContent(anchorDisplayed.X, anchorDisplayed.Y, rotation, contentWidth, contentHeight);
             fpdf_edit.FPDFPageObjTransform(obj, cos, sin, -sin, cos, offsetX + cx, offsetY + cy);
 
             fpdf_edit.FPDFPageInsertObject(page, obj); // объект переходит во владение страницы

@@ -95,6 +95,8 @@ public sealed class TesseractOcrEngine : IDisposable
     {
         if (_engine != null)
             return _engine;
+        if (_engineFailed)
+            throw new InvalidOperationException(UnavailableReason);
         try
         {
             _engine = new TesseractEngine(_tessdataPath, Languages, EngineMode.LstmOnly);

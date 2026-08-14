@@ -49,7 +49,17 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
         {
             ThrowIfDisposed();
             return _thread.InvokeAsync(
-                () => RenderCore(pageIndex, pixelWidth, pixelHeight, extraQuarterTurns), ct);
+                () => RenderCore(pageIndex, pixelWidth, pixelHeight, extraQuarterTurns, contentOnly: false), ct);
+        }
+    }
+
+    public Task<RenderedPageImage> RenderPageContentOnlyAsync(int pageIndex, int pixelWidth, int pixelHeight, int extraQuarterTurns, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(
+                () => RenderCore(pageIndex, pixelWidth, pixelHeight, extraQuarterTurns, contentOnly: true), ct);
         }
     }
 
@@ -57,8 +67,10 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
     /// Рендер страницы; при активном окружении форм поверх содержимого
     /// дорисовываются поля (FFLDraw). Активная интерактивная страница формы
     /// переиспользуется без закрытия — иначе каждый ре-рендер убивал бы фокус.
+    /// contentOnly — рендер БЕЗ аннотаций и полей форм (растр для OCR: текст
+    /// штампов/полей не является содержимым страницы и не должен запекаться).
     /// </summary>
-    private RenderedPageImage RenderCore(int pageIndex, int width, int height, int extraQuarterTurns)
+    private RenderedPageImage RenderCore(int pageIndex, int width, int height, int extraQuarterTurns, bool contentOnly)
     {
         if (width < 1 || height < 1)
             throw new ArgumentOutOfRangeException(nameof(width), "Размер растра должен быть положительным.");
@@ -84,10 +96,11 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
                     throw new PdfEngineException("Не удалось создать растровый буфер.");
                 try
                 {
-                    const int flags = RenderFlagAnnot | RenderFlagLcdText;
+                    var flags = contentOnly ? RenderFlagLcdText : RenderFlagAnnot | RenderFlagLcdText;
                     fpdfview.FPDFBitmapFillRect(bitmap, 0, 0, width, height, 0xFFFFFFFFUL);
                     fpdfview.FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, rotate, flags);
-                    _forms?.DrawFields(bitmap, page, width, height, rotate, flags);
+                    if (!contentOnly)
+                        _forms?.DrawFields(bitmap, page, width, height, rotate, flags);
                 }
                 finally
                 {
