@@ -1,0 +1,23 @@
+<Window x:Class="NexusPdf.App.Desktop.Views.ErrorDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:l="clr-namespace:NexusPdf.App.Desktop.Localization"
+        Width="520" SizeToContent="Height" MaxHeight="560" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{DynamicResource PanelBg}">
+  <StackPanel Margin="20">
+    <TextBlock x:Name="MessageText" TextWrapping="Wrap" FontSize="14"
+               Foreground="{DynamicResource TextBrush}"/>
+    <Expander Header="{l:Loc Details}" Margin="0,12,0,0"
+              Foreground="{DynamicResource TextSecondary}">
+      <TextBox x:Name="DetailsText" IsReadOnly="True" TextWrapping="Wrap"
+               MaxHeight="220" VerticalScrollBarVisibility="Auto"
+               Style="{StaticResource ThemedTextBox}" FontFamily="Consolas" FontSize="11"/>
+    </Expander>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+      <Button Content="{l:Loc CopyReport}" Style="{StaticResource LinkButton}" Click="OnCopy"/>
+      <Button Content="{l:Loc OK}" Style="{StaticResource PrimaryButton}" MinWidth="90"
+              Margin="8,0,0,0" IsDefault="True" IsCancel="True"/>
+    </StackPanel>
+  </StackPanel>
+</Window>

@@ -1,0 +1,22 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <SolidColorBrush x:Key="WindowBg" Color="#202124"/>
+  <SolidColorBrush x:Key="PanelBg" Color="#2A2B2F"/>
+  <SolidColorBrush x:Key="ToolbarBg" Color="#26272B"/>
+  <SolidColorBrush x:Key="ViewerBg" Color="#1A1B1E"/>
+  <SolidColorBrush x:Key="PanelBorder" Color="#3C3E44"/>
+  <SolidColorBrush x:Key="TextBrush" Color="#E9EAEC"/>
+  <SolidColorBrush x:Key="TextSecondary" Color="#9BA0A8"/>
+  <SolidColorBrush x:Key="Accent" Color="#4C8DFF"/>
+  <SolidColorBrush x:Key="AccentText" Color="#FFFFFF"/>
+  <SolidColorBrush x:Key="HoverBg" Color="#34363C"/>
+  <SolidColorBrush x:Key="PressedBg" Color="#3E4148"/>
+  <SolidColorBrush x:Key="SelectedBg" Color="#1E3A5F"/>
+  <SolidColorBrush x:Key="SelectedBorder" Color="#4C8DFF"/>
+  <SolidColorBrush x:Key="InputBg" Color="#1E1F23"/>
+  <SolidColorBrush x:Key="PageBg" Color="#FFFFFF"/>
+  <SolidColorBrush x:Key="HighlightBrush" Color="#66FFD54F"/>
+  <SolidColorBrush x:Key="TabActiveBg" Color="#2A2B2F"/>
+  <SolidColorBrush x:Key="TabInactiveBg" Color="#232428"/>
+  <Color x:Key="ShadowColor">#A0000000</Color>
+</ResourceDictionary>
