@@ -63,6 +63,13 @@ public sealed class OpenedDocument : IAsyncDisposable
         return Handles[page.SourceId].RenderPageAsync(page.SourcePageIndex, pixelWidth, pixelHeight, page.RotationOffset, ct);
     }
 
+    /// <summary>Растр только содержимого страницы (без аннотаций/полей форм) — для OCR.</summary>
+    public Task<RenderedPageImage> RenderLogicalPageContentOnlyAsync(int logicalIndex, int pixelWidth, int pixelHeight, CancellationToken ct)
+    {
+        var page = Session.Model.Pages[logicalIndex];
+        return Handles[page.SourceId].RenderPageContentOnlyAsync(page.SourcePageIndex, pixelWidth, pixelHeight, page.RotationOffset, ct);
+    }
+
     public IReadOnlyList<ComposedPage> BuildComposition() =>
         Session.Model.Pages
             .Select(p => new ComposedPage(Handles[p.SourceId], p.SourcePageIndex, p.RotationOffset, p.OverlayList))

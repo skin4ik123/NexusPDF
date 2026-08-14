@@ -16,6 +16,7 @@ public partial class OcrDialog : Window
     private readonly OcrService _service;
     private readonly DocumentViewModel _document;
     private CancellationTokenSource? _cts;
+    private bool _cancelRequested;
 
     private OcrDialog(OcrService service, DocumentViewModel document)
     {
@@ -34,9 +35,18 @@ public partial class OcrDialog : Window
 
     private async void OnStart(object sender, RoutedEventArgs e)
     {
+        if (_document.PageCount == 0)
+        {
+            // Дегенеративный PDF с нулём страниц открывается без ошибки —
+            // честный пустой итог вместо исключения из Math.Clamp.
+            ShowResult(new OcrRunResult(0, 0, 0, 0, 0, false, null));
+            return;
+        }
         IReadOnlyList<int>? targets = null;
         if (ScopeCurrent.IsChecked == true)
-            targets = new[] { Math.Clamp(_document.CurrentPageNumber - 1, 0, _document.PageCount - 1) };
+            targets = new[] { Math.Clamp(_document.CurrentPageNumber - 1, 0, Math.Max(0, _document.PageCount - 1)) };
+        _cancelRequested = false;
+        CancelRunButton.IsEnabled = true;
 
         SetupPanel.Visibility = Visibility.Collapsed;
         ProgressPanel.Visibility = Visibility.Visible;
@@ -72,15 +82,21 @@ public partial class OcrDialog : Window
 
     private void ShowResult(OcrRunResult result)
     {
+        // Итог перечисляет ВСЁ, что реально произошло: отмена и ошибка
+        // середины прогона не скрывают уже применённые страницы.
         var lines = new List<string>();
         if (result.Cancelled)
             lines.Add(Loc.Get("OcrCancelled"));
+        if (result.Error is { } error)
+            lines.Add(Loc.Get("OcrError") + " " + error);
         if (result.PagesRecognized > 0)
             lines.Add(Loc.F("OcrResult", result.PagesRecognized, result.WordCount,
                 Math.Round(result.MeanConfidence)));
         if (result.PagesSkippedWithText > 0)
             lines.Add(Loc.F("OcrResultSkipped", result.PagesSkippedWithText));
-        if (result.PagesRecognized == 0 && !result.Cancelled)
+        if (result.PagesWithoutWords > 0)
+            lines.Add(Loc.F("OcrResultNoWords", result.PagesWithoutWords));
+        if (lines.Count == 0)
             lines.Add(Loc.Get("OcrResultNothing"));
 
         ResultLabel.Text = string.Join(Environment.NewLine, lines);
@@ -91,6 +107,7 @@ public partial class OcrDialog : Window
 
     private void OnCancelRun(object sender, RoutedEventArgs e)
     {
+        _cancelRequested = true;
         CancelRunButton.IsEnabled = false;
         _cts?.Cancel();
     }
@@ -99,11 +116,17 @@ public partial class OcrDialog : Window
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        // Пока идёт распознавание, окно не закрывается — только отмена.
-        if (_cts != null)
+        if (_cts == null)
+            return; // распознавание не идёт — закрытие свободно
+        if (!_cancelRequested)
         {
+            // Первый крестик = отмена: дождёмся конца текущей страницы.
             e.Cancel = true;
             OnCancelRun(sender!, new RoutedEventArgs());
+            return;
         }
+        // Повторный крестик: нативный вызов Tesseract мог подвиснуть, а
+        // прервать его нельзя — окно отпускаем. Новых слоёв уже не будет:
+        // токен отменён, сервис проверяет его перед каждым применением.
     }
 }

@@ -484,7 +484,17 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void RecognizeText()
     {
-        if (ActiveDocument is not { } doc || doc.IsBusy || !_services.Ocr.IsAvailable) return;
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        if (!_services.Ocr.IsAvailable)
+        {
+            // Движок мог отвалиться уже после старта (нет VC++ runtime,
+            // антивирус заблокировал dll): вместо «мёртвого» пункта меню —
+            // честная причина, и пункт скрывается.
+            ErrorDialog.Show(OwnerWindow, Loc.Get("OcrTitle"),
+                _services.Ocr.UnavailableReason ?? Loc.Get("OcrError"), "");
+            OnPropertyChanged(nameof(HasOcr));
+            return;
+        }
         doc.CancelPlacement();
         doc.IsBusy = true; // клики по страницам во время распознавания игнорируются
         try
@@ -494,6 +504,8 @@ public sealed partial class MainViewModel : ObservableObject
         finally
         {
             doc.IsBusy = false;
+            if (!_services.Ocr.IsAvailable)
+                OnPropertyChanged(nameof(HasOcr)); // движок упал во время прогона
         }
     }
 
