@@ -21,6 +21,7 @@ public sealed class AppServices : IAsyncDisposable
         Signatures = new SignatureStore();
         OcrEngine = new NexusPdf.Ocr.TesseractOcrEngine();
         Ocr = new OcrService(OcrEngine);
+        Convert = new ConvertService(engine);
     }
 
     public IPdfRenderEngine Engine { get; }
@@ -34,6 +35,7 @@ public sealed class AppServices : IAsyncDisposable
     public SignatureStore Signatures { get; }
     public NexusPdf.Ocr.TesseractOcrEngine OcrEngine { get; }
     public OcrService Ocr { get; }
+    public ConvertService Convert { get; }
 
     public void SaveSettings()
     {

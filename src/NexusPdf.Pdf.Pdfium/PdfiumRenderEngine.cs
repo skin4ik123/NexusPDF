@@ -176,6 +176,53 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
         }
     }
 
+    public Task CreateImageDocumentAsync(IReadOnlyList<ImagePageSpec> pages, string targetPath, CancellationToken ct) =>
+        _thread.InvokeAsync(() => CreateImageDocumentCore(pages, targetPath), ct);
+
+    private static void CreateImageDocumentCore(IReadOnlyList<ImagePageSpec> pages, string targetPath)
+    {
+        if (pages.Count == 0)
+            throw new PdfEngineException("Нет изображений для сборки PDF.");
+
+        var newDoc = fpdf_edit.FPDF_CreateNewDocument();
+        if (newDoc == null || newDoc.__Instance == IntPtr.Zero)
+            throw new PdfEngineException("Не удалось создать новый документ.");
+
+        try
+        {
+            for (var i = 0; i < pages.Count; i++)
+            {
+                var spec = pages[i];
+                if (spec.PixelWidth < 1 || spec.PixelHeight < 1 ||
+                    !(spec.WidthPoints > 1) || !(spec.HeightPoints > 1) ||
+                    spec.Bgra.Length < (long)spec.PixelWidth * spec.PixelHeight * 4)
+                    throw new PdfEngineException($"Некорректное изображение для страницы {i + 1}.");
+
+                var page = fpdf_edit.FPDFPageNew(newDoc, i, spec.WidthPoints, spec.HeightPoints);
+                if (page == null || page.__Instance == IntPtr.Zero)
+                    throw new PdfEngineException($"Не удалось создать страницу {i + 1}.");
+                try
+                {
+                    var overlay = new ImageOverlay(
+                        spec.Bgra, spec.PixelWidth, spec.PixelHeight,
+                        0, 0, spec.WidthPoints, spec.HeightPoints);
+                    PdfiumOverlayWriter.ApplyOverlays(
+                        newDoc, page, null, new PageOverlay[] { overlay }, 0);
+                }
+                finally
+                {
+                    fpdfview.FPDF_ClosePage(page);
+                }
+            }
+
+            SaveDocument(newDoc, targetPath);
+        }
+        finally
+        {
+            fpdfview.FPDF_CloseDocument(newDoc);
+        }
+    }
+
     internal static void SaveDocument(FpdfDocumentT doc, string targetPath)
     {
         using var output = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None);

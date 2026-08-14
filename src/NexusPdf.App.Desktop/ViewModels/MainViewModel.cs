@@ -509,6 +509,173 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    // ----- Конвертация и пакетная обработка -----
+
+    private bool _convertBusy; // глобальные операции без открытого документа
+
+    [RelayCommand]
+    private async Task ExportImages()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        var request = ExportImagesDialog.Show(OwnerWindow);
+        if (request == null) return;
+        var folder = new OpenFolderDialog { Title = Loc.Get("ExportImagesPickFolder") };
+        if (folder.ShowDialog(OwnerWindow) != true) return;
+
+        IReadOnlyList<int>? targets = request.CurrentOnly && doc.PageCount > 0
+            ? new[] { Math.Clamp(doc.CurrentPageNumber - 1, 0, doc.PageCount - 1) }
+            : null;
+        doc.IsBusy = true;
+        try
+        {
+            var baseName = Path.GetFileNameWithoutExtension(doc.Title);
+            var extension = request.Jpeg ? "jpg" : "png";
+            var count = await _services.Convert.ExportImagesAsync(
+                doc.Document, targets, request.Dpi,
+                async (image, pageIndex, ct) =>
+                {
+                    var path = Path.Combine(folder.FolderName, $"{baseName}-{pageIndex + 1:000}.{extension}");
+                    await File.WriteAllBytesAsync(path, ImageEncoder.Encode(image, request.Jpeg, request.Dpi), ct);
+                },
+                new Progress<(int Done, int Total)>(p =>
+                    doc.StatusText = Loc.F("ExportImagesProgress", p.Done, p.Total)),
+                CancellationToken.None);
+            doc.StatusText = Loc.F("ExportImagesDone", count, folder.FolderName);
+            Log.Information("Экспортировано {Count} страниц в {Folder}", count, folder.FolderName);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка экспорта изображений");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"), Loc.Get("ExportImagesTitle"), ex.ToString());
+            doc.StatusText = Loc.Get("Ready");
+        }
+        finally
+        {
+            doc.IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ExtractText()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        var dialog = new SaveFileDialog
+        {
+            Filter = Loc.Get("TxtFilter"),
+            FileName = Path.GetFileNameWithoutExtension(doc.Title) + ".txt",
+            DefaultExt = ".txt",
+        };
+        if (dialog.ShowDialog(OwnerWindow) != true) return;
+        doc.IsBusy = true;
+        try
+        {
+            var text = await _services.Convert.ExtractTextAsync(doc.Document, CancellationToken.None);
+            await File.WriteAllTextAsync(dialog.FileName, text, System.Text.Encoding.UTF8);
+            doc.StatusText = Loc.F("ExtractTextDone", Path.GetFileName(dialog.FileName));
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка извлечения текста");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"),
+                Loc.F("ErrorSaveFile", Path.GetFileName(dialog.FileName)), ex.ToString());
+            doc.StatusText = Loc.Get("Ready");
+        }
+        finally
+        {
+            doc.IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task CreateFromImages()
+    {
+        if (_convertBusy) return;
+        var open = new OpenFileDialog { Filter = Loc.Get("ImageFilter"), Multiselect = true };
+        if (open.ShowDialog(OwnerWindow) != true || open.FileNames.Length == 0) return;
+        var save = new SaveFileDialog
+        {
+            Filter = Loc.Get("PdfFilter"),
+            FileName = Loc.Get("FromImagesDefaultName"),
+            DefaultExt = ".pdf",
+        };
+        if (save.ShowDialog(OwnerWindow) != true) return;
+        if (RejectIfTargetOpenAnywhere(save.FileName)) return;
+
+        _convertBusy = true;
+        try
+        {
+            var specs = open.FileNames.Select(ImageEncoder.DecodeAsPageSpec).ToList();
+            await _services.Convert.CreateFromImagesAsync(specs, save.FileName, CancellationToken.None);
+            Log.Information("Создан PDF из {Count} изображений: {Path}", specs.Count, save.FileName);
+            await OpenFilesAsync(new[] { save.FileName });
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка сборки PDF из изображений");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"),
+                Loc.F("ErrorSaveFile", Path.GetFileName(save.FileName)), ex.ToString());
+        }
+        finally
+        {
+            _convertBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task MergePdfs()
+    {
+        if (_convertBusy) return;
+        var open = new OpenFileDialog { Filter = Loc.Get("PdfFilter"), Multiselect = true };
+        if (open.ShowDialog(OwnerWindow) != true) return;
+        if (open.FileNames.Length < 2)
+        {
+            ErrorDialog.Show(OwnerWindow, Loc.Get("MergeMenu"), Loc.Get("MergeNeedTwo"), "");
+            return;
+        }
+        var save = new SaveFileDialog
+        {
+            Filter = Loc.Get("PdfFilter"),
+            FileName = Loc.Get("MergeDefaultName"),
+            DefaultExt = ".pdf",
+        };
+        if (save.ShowDialog(OwnerWindow) != true) return;
+        if (RejectIfTargetOpenAnywhere(save.FileName)) return;
+
+        _convertBusy = true;
+        try
+        {
+            var pages = await _services.Convert.MergeAsync(open.FileNames, save.FileName, CancellationToken.None);
+            Log.Information("Объединено {Files} файлов ({Pages} страниц): {Path}",
+                open.FileNames.Length, pages, save.FileName);
+            await OpenFilesAsync(new[] { save.FileName });
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка объединения PDF");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("MergeMenu"),
+                Loc.F("ErrorSaveFile", Path.GetFileName(save.FileName)), ex.ToString());
+        }
+        finally
+        {
+            _convertBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private void ShowBatch() => BatchDialog.Run(OwnerWindow, _services);
+
+    /// <summary>Цель записи не должна быть открыта ни в одной вкладке этого окна.</summary>
+    private bool RejectIfTargetOpenAnywhere(string targetPath)
+    {
+        var full = Path.GetFullPath(targetPath);
+        var isOpen = Documents.Any(d =>
+            d.FilePath is { } p &&
+            string.Equals(Path.GetFullPath(p), full, StringComparison.OrdinalIgnoreCase));
+        if (isOpen)
+            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"), Loc.Get("ConvertTargetIsOpen"), "");
+        return isOpen;
+    }
+
     // ----- Печать и инструменты qpdf -----
 
     [RelayCommand]

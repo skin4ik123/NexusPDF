@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/NexusPdf.App.Desktop/NexusPdf.App.Desktop.csproj" />
     <Project Path="src/NexusPdf.Application/NexusPdf.Application.csproj" />
+    <Project Path="src/NexusPdf.Cli/NexusPdf.Cli.csproj" />
     <Project Path="src/NexusPdf.Domain/NexusPdf.Domain.csproj" />
     <Project Path="src/NexusPdf.Infrastructure/NexusPdf.Infrastructure.csproj" />
     <Project Path="src/NexusPdf.Ocr.Tesseract/NexusPdf.Ocr.Tesseract.csproj" />

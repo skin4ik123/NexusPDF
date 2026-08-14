@@ -86,6 +86,14 @@ public sealed record PdfAnnotationInfo(
     string Author,
     string Value = "");
 
+/// <summary>Страница будущего PDF из изображения: растр BGRA32 и итоговый размер страницы в пунктах.</summary>
+public sealed record ImagePageSpec(
+    byte[] Bgra,
+    int PixelWidth,
+    int PixelHeight,
+    double WidthPoints,
+    double HeightPoints);
+
 /// <summary>Одна страница будущего документа: источник, номер страницы в источнике, добавочный поворот (в четвертях оборота по часовой) и накладываемый контент.</summary>
 public sealed record ComposedPage(
     IPdfDocumentHandle Source,

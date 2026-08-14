@@ -58,6 +58,11 @@ $publishDir = Join-Path $root "artifacts/publish/win-x64"
 dotnet publish src/NexusPdf.App.Desktop -c $Configuration -r win-x64 --self-contained true -o $publishDir
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
+# CLI publishes into the SAME folder: shares the self-contained runtime files
+Write-Host "== Publish CLI win-x64 =="
+dotnet publish src/NexusPdf.Cli -c $Configuration -r win-x64 --self-contained true -o $publishDir
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 # Bundle qpdf + tessdata + notices + license with the app
 New-Item -ItemType Directory -Force (Join-Path $publishDir "tools/qpdf") | Out-Null
 Copy-Item "$root\tools\qpdf\*" (Join-Path $publishDir "tools/qpdf") -Force
