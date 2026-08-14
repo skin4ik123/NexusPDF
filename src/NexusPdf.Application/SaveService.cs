@@ -37,7 +37,8 @@ public sealed class SaveService
             if (page.SourceId != document.PrimarySourceId ||
                 page.SourcePageIndex != i ||
                 page.RotationOffset != 0 ||
-                page.OverlayList.Count > 0)
+                page.OverlayList.Count > 0 ||
+                page.RemovedAnnotationList.Count > 0)
                 return false;
         }
         return true;

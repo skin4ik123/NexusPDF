@@ -400,10 +400,17 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     // ----- Панель комментариев -----
 
     /// <summary>Строка панели: для черновика хранится ссылка на сам оверлей —
-    /// индексы устаревают между изменением сессии и асинхронным обновлением панели.</summary>
+    /// индексы устаревают между изменением сессии и асинхронным обновлением
+    /// панели. Существующая аннотация помнит источник и свой индекс в нём
+    /// (исходный файл не мутируется до сохранения — индекс стабилен).</summary>
     public sealed record CommentItem(
         int PageNumber, string TypeLabel, string Author, string Text,
-        bool IsDraft, NexusPdf.Pdf.Abstractions.PageOverlay? Draft);
+        bool IsDraft, NexusPdf.Pdf.Abstractions.PageOverlay? Draft,
+        Guid SourceId = default, int SourcePageIndex = -1, int AnnotIndex = -1)
+    {
+        /// <summary>Черновики удаляются всегда; существующие — если найден их индекс.</summary>
+        public bool Deletable => IsDraft || AnnotIndex >= 0;
+    }
 
     public ObservableCollection<CommentItem> Comments { get; } = new();
 
@@ -419,25 +426,42 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     }
 
     [RelayCommand]
-    private void DeleteDraftComment(CommentItem? item)
+    private void DeleteComment(CommentItem? item)
     {
-        if (item is not { IsDraft: true, Draft: { } draft }) return;
-        // Актуальные индексы резолвятся по ссылке в момент клика: панель могла
-        // ещё не обновиться после предыдущего изменения сессии.
+        if (item == null) return;
         var pages = Document.Session.Model.Pages;
-        for (var i = 0; i < pages.Count; i++)
+
+        if (item is { IsDraft: true, Draft: { } draft })
         {
-            var list = pages[i].OverlayList;
-            for (var k = 0; k < list.Count; k++)
+            // Актуальные индексы резолвятся по ссылке в момент клика: панель
+            // могла ещё не обновиться после предыдущего изменения сессии.
+            for (var i = 0; i < pages.Count; i++)
             {
-                if (ReferenceEquals(list[k], draft))
+                var list = pages[i].OverlayList;
+                for (var k = 0; k < list.Count; k++)
                 {
-                    Document.Session.Apply(new RemoveOverlayAtOperation(i, k));
-                    return;
+                    if (ReferenceEquals(list[k], draft))
+                    {
+                        Document.Session.Apply(new RemoveOverlayAtOperation(i, k));
+                        return;
+                    }
                 }
             }
+            return; // оверлея уже нет (Undo/устаревшая строка)
         }
-        // Оверлея уже нет (Undo/устаревшая строка) — клик молча игнорируется.
+
+        if (item.AnnotIndex < 0) return;
+        // Существующая аннотация: логическая страница ищется по источнику —
+        // строка панели переживает перестановку страниц.
+        for (var i = 0; i < pages.Count; i++)
+        {
+            if (pages[i].SourceId != item.SourceId ||
+                pages[i].SourcePageIndex != item.SourcePageIndex)
+                continue;
+            if (!pages[i].RemovedAnnotationList.Contains(item.AnnotIndex))
+                Document.Session.Apply(new RemoveExistingAnnotationOperation(i, item.AnnotIndex));
+            return;
+        }
     }
 
     [RelayCommand]
@@ -482,6 +506,9 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
                     .GetAnnotationsAsync(pages[i].SourcePageIndex, CancellationToken.None);
                 foreach (var a in existing)
                 {
+                    // Помеченные к удалению в этой сессии не показываются.
+                    if (pages[i].RemovedAnnotationList.Contains(a.AnnotIndex))
+                        continue;
                     var label = a.Subtype switch
                     {
                         1 => Loc.Get("AnnotNote"),
@@ -490,8 +517,12 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
                         9 => Loc.Get("AnnotHighlight"),
                         _ => Loc.Get("AnnotOther"),
                     };
+                    // Виджеты форм (Subtype 20) — часть AcroForm: их удаление
+                    // сломало бы форму, кнопки удаления у них нет.
+                    var deletableIndex = a.Subtype == 20 ? -1 : a.AnnotIndex;
                     if (a.Contents.Length > 0 || a.Subtype is 1 or 5 or 6 or 9)
-                        items.Add(new CommentItem(i + 1, label, a.Author, a.Contents, false, null));
+                        items.Add(new CommentItem(i + 1, label, a.Author, a.Contents, false, null,
+                            pages[i].SourceId, pages[i].SourcePageIndex, deletableIndex));
                 }
             }
             catch (Exception ex)
