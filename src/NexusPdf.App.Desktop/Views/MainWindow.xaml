@@ -195,6 +195,9 @@
                   <Button Style="{StaticResource LinkButton}" Content="{l:Loc OptimizeCopy}"
                           Command="{Binding OptimizeCopyCommand}" IsEnabled="{Binding HasDocuments}"
                           Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc SignMenu}"
+                          Command="{Binding SignWithCertificateCommand}" IsEnabled="{Binding HasDocuments}"
+                          Click="OnMenuItem"/>
                   <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
                 </StackPanel>
                 <Button Style="{StaticResource LinkButton}" Content="{l:Loc DetachTab}"
@@ -301,6 +304,29 @@
                      Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" Margin="16,0,0,0"/>
           <TextBlock Text="{Binding ActiveDocument.StatusText, FallbackValue=''}"
                      Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" Margin="16,0,0,0"/>
+          <Button Style="{StaticResource ToolButton}" Margin="12,0,0,0"
+                  Command="{Binding ShowSignaturesCommand}" ToolTip="{l:Loc SignaturesTitle}"
+                  Visibility="{Binding ActiveDocument.HasSignatures, FallbackValue=Collapsed, Converter={StaticResource BoolToVis}}">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Style="{StaticResource ToolGlyph}" FontSize="12">
+                <TextBlock.Text>&#xE8D7;</TextBlock.Text>
+              </TextBlock>
+              <TextBlock FontSize="12" Margin="4,0,0,0" VerticalAlignment="Center">
+                <TextBlock.Style>
+                  <Style TargetType="TextBlock">
+                    <Setter Property="Text" Value="{l:Loc SignBadgeProblem}"/>
+                    <Setter Property="Foreground" Value="#D97706"/>
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding ActiveDocument.AllSignaturesValid}" Value="True">
+                        <Setter Property="Text" Value="{l:Loc SignBadgeOk}"/>
+                        <Setter Property="Foreground" Value="#16A34A"/>
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </TextBlock.Style>
+              </TextBlock>
+            </StackPanel>
+          </Button>
         </StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
           <Button Style="{StaticResource ToolButton}" Command="{Binding ZoomOutActiveCommand}"

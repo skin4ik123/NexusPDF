@@ -66,6 +66,11 @@ public sealed class QpdfEngine : IPdfStructureEngine, IPdfSecurityEngine, IPdfVa
     public Task LinearizeAsync(string sourcePath, string targetPath, CancellationToken ct) =>
         RunExpectSuccessAsync(new[] { "--linearize", sourcePath, targetPath }, "Линеаризация", ct);
 
+    public Task NormalizeAsync(string sourcePath, string targetPath, CancellationToken ct) =>
+        RunExpectSuccessAsync(
+            new[] { "--qdf", "--object-streams=disable", sourcePath, targetPath },
+            "Нормализация", ct);
+
     public Task OptimizeAsync(string sourcePath, string targetPath, bool linearize, CancellationToken ct)
     {
         var args = new List<string>
