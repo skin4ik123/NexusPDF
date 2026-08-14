@@ -89,7 +89,7 @@ public sealed record InstallResult(int ExitCode, string LogPath);
 
 public static class SetupEngine
 {
-    public const string ProductVersion = "0.7.0";
+    public const string ProductVersion = "0.8.0";
 
     /// <summary>Распаковывает встроенный MSI во временный каталог и возвращает путь.</summary>
     public static string ExtractMsi()

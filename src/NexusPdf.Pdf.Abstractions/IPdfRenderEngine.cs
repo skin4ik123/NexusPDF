@@ -18,6 +18,9 @@ public interface IPdfRenderEngine : IAsyncDisposable
     /// и записывает его в <paramref name="targetPath"/>. Исходные документы не изменяются.
     /// </summary>
     Task ComposeAsync(IReadOnlyList<ComposedPage> pages, string targetPath, CancellationToken ct);
+
+    /// <summary>Создаёт новый PDF, где каждая страница — одно изображение, растянутое на всю страницу.</summary>
+    Task CreateImageDocumentAsync(IReadOnlyList<ImagePageSpec> pages, string targetPath, CancellationToken ct);
 }
 
 public interface IPdfDocumentHandle : IAsyncDisposable
