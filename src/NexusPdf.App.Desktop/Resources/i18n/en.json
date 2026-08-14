@@ -233,7 +233,7 @@
   "BatchProtectedInput": "The file is password-protected — skipped.",
   "CompareMenu": "Compare documents…",
   "CompareTitle": "Compare documents",
-  "CompareIntro": "Pick two PDF files and press Compare: pages are compared visually, differences are highlighted in red.",
+  "CompareIntro": "Pick two PDF files and press Compare: pages are compared visually, differences are highlighted in red. Files are compared AS SAVED on disk — unsaved edits are not included.",
   "ComparePickFirst": "First file…",
   "ComparePickSecond": "Second file…",
   "CompareRun": "Compare",

@@ -20,6 +20,7 @@ public partial class CompareDialog : Window
     private sealed record Row(PageCompareInfo Info, string Label, Brush Brush);
 
     private readonly IPdfRenderEngine _engine;
+    private readonly CancellationTokenSource _closeCts = new();
     private string? _firstPath;
     private string? _secondPath;
     private CompareSession? _session;
@@ -75,7 +76,12 @@ public partial class CompareDialog : Window
 
         _running = true;
         RunButton.IsEnabled = false;
+        FirstButton.IsEnabled = false;
+        SecondButton.IsEnabled = false;
         PageList.ItemsSource = null;
+        // Висящий запрос картинок старой пары не должен дорисоваться под
+        // именами новых файлов.
+        _imageRequestId++;
         ClearImages();
         try
         {
@@ -87,7 +93,7 @@ public partial class CompareDialog : Window
             try
             {
                 _session = await CompareSession.OpenAsync(
-                    _engine, _firstPath, null, _secondPath, null, CancellationToken.None);
+                    _engine, _firstPath, null, _secondPath, null, _closeCts.Token);
             }
             catch (PdfPasswordRequiredException)
             {
@@ -99,7 +105,7 @@ public partial class CompareDialog : Window
             SecondLabel.Text = Path.GetFileName(_secondPath);
             var progress = new Progress<(int Done, int Total)>(p =>
                 SummaryLabel.Text = Loc.F("CompareProgress", p.Done, p.Total));
-            var summary = await _session.AnalyzeAsync(progress, CancellationToken.None);
+            var summary = await _session.AnalyzeAsync(progress, _closeCts.Token);
 
             var rows = summary.Pages.Select(info => new Row(
                 info,
@@ -114,6 +120,10 @@ public partial class CompareDialog : Window
             if (firstDiff != null)
                 PageList.SelectedItem = firstDiff;
         }
+        catch (OperationCanceledException)
+        {
+            // Окно закрыли во время сравнения — молча выходим.
+        }
         catch (Exception ex)
         {
             Log.Error(ex, "Ошибка сравнения документов");
@@ -123,6 +133,15 @@ public partial class CompareDialog : Window
         {
             _running = false;
             RunButton.IsEnabled = true;
+            FirstButton.IsEnabled = true;
+            SecondButton.IsEnabled = true;
+            // Окно закрылось, пока шло сравнение: сессию освобождаем здесь —
+            // OnClosing не имел права дисозить её под работающим анализом.
+            if (_closeCts.IsCancellationRequested && _session is { } orphan)
+            {
+                _session = null;
+                await orphan.DisposeAsync();
+            }
         }
     }
 
@@ -197,7 +216,11 @@ public partial class CompareDialog : Window
 
     private async void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (_session is { } session)
+        _closeCts.Cancel();
+        _imageRequestId++;
+        // Пока идёт открытие/анализ, сессию освободит finally в OnRun —
+        // дисозить её под работающим AnalyzeAsync нельзя.
+        if (!_running && _session is { } session)
         {
             _session = null;
             await session.DisposeAsync();

@@ -673,13 +673,16 @@ public sealed partial class MainViewModel : ObservableObject
     private void ShowBatch() => BatchDialog.Run(OwnerWindow, _services);
 
     [RelayCommand]
-    private void CompareDocuments() =>
+    private void CompareDocuments()
+    {
+        if (ActiveDocument is { IsBusy: true }) return; // идёт сохранение: файл на диске в переходном состоянии
         CompareDialog.Run(OwnerWindow, _services.Engine, ActiveDocument?.FilePath);
+    }
 
     [RelayCommand]
     private async Task ShowProperties()
     {
-        if (ActiveDocument is { } doc)
+        if (ActiveDocument is { IsBusy: false } doc)
             await DocPropertiesDialog.ShowAsync(OwnerWindow, doc);
     }
 

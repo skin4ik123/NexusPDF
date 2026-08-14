@@ -42,13 +42,16 @@ public partial class DocPropertiesDialog : Window
 
             if (path != null)
             {
-                var claim = PdfAClaimDetector.DetectClaim(path);
+                // Скан до 8 МиБ — не на UI-потоке.
+                var claim = await Task.Run(() => PdfAClaimDetector.DetectClaim(path));
                 rows.Add(new Row(Loc.Get("PropsPdfA"),
                     claim != null ? Loc.F("PropsPdfAClaimed", claim) : Loc.Get("PropsPdfANo")));
             }
 
+            // По security handler'у файла: «да» и для файла с одним
+            // owner-паролем, открытого без ввода пароля.
             rows.Add(new Row(Loc.Get("PropsEncrypted"),
-                document.Document.Password != null ? Loc.Get("PropsYes") : Loc.Get("PropsNo")));
+                meta.IsEncrypted ? Loc.Get("PropsYes") : Loc.Get("PropsNo")));
             rows.Add(new Row(Loc.Get("PropsForms"),
                 document.HasAcroForm ? Loc.Get("PropsYes") : Loc.Get("PropsNo")));
             rows.Add(new Row(Loc.Get("PropsSignatures"),
