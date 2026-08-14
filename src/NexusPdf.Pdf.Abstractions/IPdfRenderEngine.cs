@@ -33,4 +33,7 @@ public interface IPdfDocumentHandle : IAsyncDisposable
 
     /// <summary>Прямоугольники, покрывающие диапазон символов страницы (для подсветки найденного).</summary>
     Task<IReadOnlyList<PdfTextRect>> GetTextRectsAsync(int pageIndex, int startCharIndex, int charCount, CancellationToken ct);
+
+    /// <summary>Существующие аннотации страницы (без Link/Popup) — для панели комментариев.</summary>
+    Task<IReadOnlyList<PdfAnnotationInfo>> GetAnnotationsAsync(int pageIndex, CancellationToken ct);
 }

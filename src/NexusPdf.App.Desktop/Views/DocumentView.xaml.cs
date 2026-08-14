@@ -43,30 +43,75 @@ public partial class DocumentView : UserControl
     private void UpdatePlacementCursor() =>
         PagesList.Cursor = _vm?.PendingOverlay != null ? Cursors.Cross : null;
 
-    private void OnPagesPreviewMouseDown(object sender, MouseButtonEventArgs e)
-    {
-        if (_vm?.PendingOverlay == null) return;
-        if (e.OriginalSource is not DependencyObject source) return;
+    private PageViewModel? _dragPage;
+    private FrameworkElement? _dragElement;
+    private Point _dragStartPt;
 
-        // Ищем контейнер страницы (Border с DataContext = PageViewModel) вверх по дереву.
-        FrameworkElement? pageElement = null;
+    private (PageViewModel Page, FrameworkElement Element)? FindPageAt(object originalSource)
+    {
+        if (originalSource is not DependencyObject source) return null;
         for (DependencyObject? node = source; node != null; node = VisualTreeHelper.GetParent(node))
         {
-            if (node is FrameworkElement { DataContext: PageViewModel } fe && fe is Border)
-            {
-                pageElement = fe;
-                break;
-            }
+            if (node is Border { DataContext: PageViewModel page } border)
+                return (page, border);
             if (node is ListBox)
                 break;
         }
-        if (pageElement?.DataContext is not PageViewModel page) return;
+        return null;
+    }
 
-        var position = e.GetPosition(pageElement);
+    private void OnPagesPreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_vm?.PendingOverlay == null) return;
+        var hit = FindPageAt(e.OriginalSource);
+        if (hit == null) return;
+        var (page, element) = hit.Value;
         var scale = page.DisplayScale;
         if (scale <= 0) return;
-        _vm.PlacePendingOverlay(page, position.X / scale, position.Y / scale);
+        var position = e.GetPosition(element);
+
+        if (_vm.PendingOverlay.RectFactory != null)
+        {
+            // Начало растягивания рамки.
+            _dragPage = page;
+            _dragElement = element;
+            _dragStartPt = new Point(position.X / scale, position.Y / scale);
+            PagesList.CaptureMouse();
+        }
+        else
+        {
+            _vm.PlacePendingOverlay(page, position.X / scale, position.Y / scale);
+        }
         e.Handled = true;
+    }
+
+    private void OnPagesPreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_dragPage == null || _dragElement == null) return;
+        _dragPage.DragPreviewRect = DragRectPt(e);
+    }
+
+    private void OnPagesPreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_dragPage == null || _dragElement == null) return;
+        var page = _dragPage;
+        var rect = DragRectPt(e);
+        page.DragPreviewRect = null;
+        _dragPage = null;
+        _dragElement = null;
+        PagesList.ReleaseMouseCapture();
+        _vm?.PlacePendingRect(page, rect);
+        e.Handled = true;
+    }
+
+    private Rect DragRectPt(MouseEventArgs e)
+    {
+        var scale = _dragPage!.DisplayScale;
+        var position = e.GetPosition(_dragElement);
+        var current = new Point(
+            Math.Clamp(position.X / scale, 0, _dragPage.SizePt.WidthPoints),
+            Math.Clamp(position.Y / scale, 0, _dragPage.SizePt.HeightPoints));
+        return new Rect(_dragStartPt, current);
     }
 
     private void HookScroller()

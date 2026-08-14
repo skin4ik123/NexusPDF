@@ -180,6 +180,32 @@ public sealed class AddOverlaysOperation : DocumentOperationBase
     }
 }
 
+/// <summary>Удаление одного черновика (аннотации/оверлея) со страницы — из панели комментариев.</summary>
+public sealed class RemoveOverlayAtOperation : DocumentOperationBase
+{
+    private readonly int _pageIndex;
+    private readonly int _overlayIndex;
+
+    public RemoveOverlayAtOperation(int pageIndex, int overlayIndex)
+    {
+        _pageIndex = pageIndex;
+        _overlayIndex = overlayIndex;
+    }
+
+    public override string Name => "Удаление комментария";
+
+    protected override void ApplyCore(DocumentModel model)
+    {
+        ValidateIndices(model, new[] { _pageIndex });
+        var page = model.Pages[_pageIndex];
+        if (_overlayIndex < 0 || _overlayIndex >= page.OverlayList.Count)
+            throw new ArgumentOutOfRangeException(nameof(_overlayIndex));
+        var list = new List<Pdf.Abstractions.PageOverlay>(page.OverlayList);
+        list.RemoveAt(_overlayIndex);
+        model.Pages[_pageIndex] = page with { Overlays = list.Count == 0 ? null : list };
+    }
+}
+
 /// <summary>Удаление всего наложенного контента с выбранных страниц.</summary>
 public sealed class RemoveOverlaysOperation : DocumentOperationBase
 {

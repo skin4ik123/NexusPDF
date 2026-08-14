@@ -43,6 +43,33 @@ public sealed record ImageOverlay(
     double WidthPt,
     double HeightPt) : PageOverlay;
 
+/// <summary>Черновик заметки-комментария (значок с текстом). Точка — в отображаемых координатах на момент размещения.</summary>
+public sealed record NoteAnnotationDraft(
+    double XPt,
+    double YPt,
+    string Contents,
+    string Author) : PageOverlay;
+
+/// <summary>Черновик фигурной аннотации: рамка/овал/маркер-выделение (прямоугольник с полупрозрачной заливкой).</summary>
+public sealed record ShapeAnnotationDraft(
+    double XPt,
+    double YPt,
+    double WidthPt,
+    double HeightPt,
+    uint StrokeArgb,
+    uint FillArgb,
+    double BorderWidthPt,
+    bool IsEllipse,
+    string Contents,
+    string Author) : PageOverlay;
+
+/// <summary>Существующая аннотация документа (для панели комментариев; только чтение).</summary>
+public sealed record PdfAnnotationInfo(
+    int AnnotIndex,
+    int Subtype,
+    string Contents,
+    string Author);
+
 /// <summary>Одна страница будущего документа: источник, номер страницы в источнике, добавочный поворот (в четвертях оборота по часовой) и накладываемый контент.</summary>
 public sealed record ComposedPage(
     IPdfDocumentHandle Source,

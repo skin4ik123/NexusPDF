@@ -76,6 +76,7 @@ internal static class PdfiumOverlayWriter
         var displayWidth = rotation % 2 == 0 ? contentWidth : contentHeight;
         var displayHeight = rotation % 2 == 0 ? contentHeight : contentWidth;
 
+        var contentAdded = false;
         foreach (var overlay in overlays)
         {
             var delta = ((extraQuarterTurns - overlay.PlacedRotation) % 4 + 4) % 4;
@@ -85,19 +86,139 @@ internal static class PdfiumOverlayWriter
                     ApplyText(document, page, font,
                         RemapText(text, delta, displayWidth, displayHeight),
                         rotation, left, bottom, contentWidth, contentHeight);
+                    contentAdded = true;
                     break;
                 case ImageOverlay image:
                 {
                     var (remapped, extraAngle) = RemapImage(image, delta, displayWidth, displayHeight);
                     ApplyImage(document, page, remapped, extraAngle,
                         rotation, left, bottom, contentWidth, contentHeight);
+                    contentAdded = true;
                     break;
                 }
+                case NoteAnnotationDraft note:
+                    ApplyNote(page, RemapNote(note, delta, displayWidth, displayHeight),
+                        rotation, left, bottom, contentWidth, contentHeight);
+                    break;
+                case ShapeAnnotationDraft shape:
+                    ApplyShape(page, RemapShape(shape, delta, displayWidth, displayHeight),
+                        rotation, left, bottom, contentWidth, contentHeight);
+                    break;
             }
         }
 
-        if (fpdf_edit.FPDFPageGenerateContent(page) == 0)
+        // GenerateContent нужен только когда менялись объекты содержимого;
+        // аннотации живут отдельно от content stream.
+        if (contentAdded && fpdf_edit.FPDFPageGenerateContent(page) == 0)
             throw new PdfEngineException("Не удалось сгенерировать содержимое страницы с наложенным контентом.");
+    }
+
+    private static NoteAnnotationDraft RemapNote(NoteAnnotationDraft note, int delta, double finalWidth, double finalHeight)
+    {
+        if (delta == 0) return note;
+        var point = RemapPoint(note.XPt, note.YPt, delta, finalWidth, finalHeight);
+        return note with { XPt = point.X, YPt = point.Y };
+    }
+
+    private static ShapeAnnotationDraft RemapShape(ShapeAnnotationDraft shape, int delta, double finalWidth, double finalHeight)
+    {
+        if (delta == 0) return shape;
+        var p1 = RemapPoint(shape.XPt, shape.YPt, delta, finalWidth, finalHeight);
+        var p2 = RemapPoint(shape.XPt + shape.WidthPt, shape.YPt + shape.HeightPt, delta, finalWidth, finalHeight);
+        return shape with
+        {
+            XPt = Math.Min(p1.X, p2.X),
+            YPt = Math.Min(p1.Y, p2.Y),
+            WidthPt = Math.Abs(p2.X - p1.X),
+            HeightPt = Math.Abs(p2.Y - p1.Y),
+        };
+    }
+
+    // Подтипы аннотаций по PDF 1.7 (fpdf_annot.h)
+    private const int AnnotText = 1;
+    private const int AnnotSquare = 5;
+    private const int AnnotCircle = 6;
+    private const int ColorTypeStroke = 0;
+    private const int ColorTypeInterior = 1;
+
+    /// <summary>Прямоугольник аннотации в координатах содержимого из отображаемого прямоугольника.</summary>
+    private static FS_RECTF_ ToContentRect(
+        double dx, double dy, double w, double h,
+        int rotation, double offsetX, double offsetY, double contentWidth, double contentHeight)
+    {
+        var p1 = DisplayedToContent(dx, dy, rotation, contentWidth, contentHeight);
+        var p2 = DisplayedToContent(dx + w, dy + h, rotation, contentWidth, contentHeight);
+        return new FS_RECTF_
+        {
+            Left = (float)(offsetX + Math.Min(p1.X, p2.X)),
+            Right = (float)(offsetX + Math.Max(p1.X, p2.X)),
+            Bottom = (float)(offsetY + Math.Min(p1.Y, p2.Y)),
+            Top = (float)(offsetY + Math.Max(p1.Y, p2.Y)),
+        };
+    }
+
+    private static void SetAnnotString(FpdfAnnotationT annot, string key, string value)
+    {
+        var buffer = new ushort[value.Length + 1];
+        for (var i = 0; i < value.Length; i++)
+            buffer[i] = value[i];
+        fpdf_annot.FPDFAnnotSetStringValue(annot, key, ref buffer[0]);
+    }
+
+    private static void ApplyNote(
+        FpdfPageT page, NoteAnnotationDraft note,
+        int rotation, double offsetX, double offsetY, double contentWidth, double contentHeight)
+    {
+        var annot = fpdf_annot.FPDFPageCreateAnnot(page, AnnotText);
+        if (annot == null || annot.__Instance == IntPtr.Zero)
+            throw new PdfEngineException("Не удалось создать заметку.");
+        try
+        {
+            const double iconSize = 20;
+            var rect = ToContentRect(note.XPt, note.YPt, iconSize, iconSize,
+                rotation, offsetX, offsetY, contentWidth, contentHeight);
+            fpdf_annot.FPDFAnnotSetRect(annot, rect);
+            fpdf_annot.FPDFAnnotSetColor(annot, (FPDFANNOT_COLORTYPE)ColorTypeStroke, 0xF5, 0xC5, 0x18, 0xFF);
+            SetAnnotString(annot, "Contents", note.Contents);
+            if (note.Author.Length > 0)
+                SetAnnotString(annot, "T", note.Author);
+        }
+        finally
+        {
+            fpdf_annot.FPDFPageCloseAnnot(annot);
+        }
+    }
+
+    private static void ApplyShape(
+        FpdfPageT page, ShapeAnnotationDraft shape,
+        int rotation, double offsetX, double offsetY, double contentWidth, double contentHeight)
+    {
+        var annot = fpdf_annot.FPDFPageCreateAnnot(page, shape.IsEllipse ? AnnotCircle : AnnotSquare);
+        if (annot == null || annot.__Instance == IntPtr.Zero)
+            throw new PdfEngineException("Не удалось создать фигурную аннотацию.");
+        try
+        {
+            var rect = ToContentRect(shape.XPt, shape.YPt, shape.WidthPt, shape.HeightPt,
+                rotation, offsetX, offsetY, contentWidth, contentHeight);
+            fpdf_annot.FPDFAnnotSetRect(annot, rect);
+
+            var sa = (byte)(shape.StrokeArgb >> 24);
+            fpdf_annot.FPDFAnnotSetColor(annot, (FPDFANNOT_COLORTYPE)ColorTypeStroke,
+                (byte)(shape.StrokeArgb >> 16), (byte)(shape.StrokeArgb >> 8), (byte)shape.StrokeArgb, sa);
+            var fa = (byte)(shape.FillArgb >> 24);
+            if (fa > 0)
+                fpdf_annot.FPDFAnnotSetColor(annot, (FPDFANNOT_COLORTYPE)ColorTypeInterior,
+                    (byte)(shape.FillArgb >> 16), (byte)(shape.FillArgb >> 8), (byte)shape.FillArgb, fa);
+            fpdf_annot.FPDFAnnotSetBorder(annot, 0, 0, (float)shape.BorderWidthPt);
+            if (shape.Contents.Length > 0)
+                SetAnnotString(annot, "Contents", shape.Contents);
+            if (shape.Author.Length > 0)
+                SetAnnotString(annot, "T", shape.Author);
+        }
+        finally
+        {
+            fpdf_annot.FPDFPageCloseAnnot(annot);
+        }
     }
 
     /// <summary>Перевод точки из рамки размещения в итоговую отображаемую рамку (страницу довернули на delta четвертей).</summary>
