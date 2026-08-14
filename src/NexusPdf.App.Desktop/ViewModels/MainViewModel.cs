@@ -428,10 +428,17 @@ public sealed partial class MainViewModel : ObservableObject
     private async Task SignWithCertificate()
     {
         if (ActiveDocument is not { } doc || doc.IsBusy || !_services.Tools.IsAvailable) return;
+
+        // Фоновая инспекция подписей на больших файлах идёт секунды —
+        // отказ «уже подписан» не должен зависеть от гонки с ней.
+        doc.IsBusy = true;
+        try { await doc.SignaturesLoaded; }
+        finally { doc.IsBusy = false; }
         if (doc.HasSignatures)
         {
             // Наш конвейер нормализует файл перед подписью — существующие
             // подписи при этом были бы разрушены. Честно отказываем.
+            // (SignCopyAsync дополнительно перепроверяет исходный файл сам.)
             ErrorDialog.Show(OwnerWindow, Loc.Get("SignTitle"),
                 Loc.Get("SignAlreadySigned"), "");
             return;

@@ -246,15 +246,30 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSignatures))]
     [NotifyPropertyChangedFor(nameof(AllSignaturesValid))]
+    [NotifyPropertyChangedFor(nameof(SignaturesValidButUntrusted))]
     private IReadOnlyList<NexusPdf.Signing.PdfSignatureInfo> _signatures =
         Array.Empty<NexusPdf.Signing.PdfSignatureInfo>();
 
     public bool HasSignatures => Signatures.Count > 0;
 
+    // Зелёный статус — только полный порядок, ВКЛЮЧАЯ доверие к цепочке:
+    // криптографически верная подпись самодельного сертификата с громким
+    // именем не должна выглядеть доверенной (поведение как у Adobe).
     public bool AllSignaturesValid =>
-        Signatures.Count > 0 && Signatures.All(s => s.IsCryptoValid && s.CoversWholeDocument);
+        Signatures.Count > 0 &&
+        Signatures.All(s => s.IsCryptoValid && s.CoversWholeDocument && s.IsTrusted);
 
-    public async Task LoadSignaturesAsync()
+    public bool SignaturesValidButUntrusted =>
+        Signatures.Count > 0 &&
+        Signatures.All(s => s.IsCryptoValid && s.CoversWholeDocument) &&
+        Signatures.Any(s => !s.IsTrusted);
+
+    /// <summary>Задача текущей инспекции: перед подписанием на неё нужно дождаться.</summary>
+    public Task SignaturesLoaded { get; private set; } = Task.CompletedTask;
+
+    public Task LoadSignaturesAsync() => SignaturesLoaded = LoadSignaturesCoreAsync();
+
+    private async Task LoadSignaturesCoreAsync()
     {
         if (FilePath is not { } path) return;
         try

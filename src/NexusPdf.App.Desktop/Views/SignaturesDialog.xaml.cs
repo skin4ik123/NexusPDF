@@ -11,9 +11,13 @@ public partial class SignaturesDialog : Window
     private sealed class Row
     {
         public required PdfSignatureInfo Info { get; init; }
-        public bool IsOk => Info.IsCryptoValid && Info.CoversWholeDocument;
+        private bool CryptoOk => Info.IsCryptoValid && Info.CoversWholeDocument;
+        // Зелёная галочка — только при доверенной цепочке; криптографически
+        // верная, но недоверенная подпись — жёлтое предупреждение.
+        public bool IsOk => CryptoOk && Info.IsTrusted;
         public string StatusGlyph => IsOk ? "\uE73E" : "\uE7BA"; // галочка / предупреждение
-        public Brush StatusBrush => IsOk ? Brushes.SeaGreen : Brushes.DarkOrange;
+        public Brush StatusBrush => IsOk ? Brushes.SeaGreen
+            : CryptoOk ? Brushes.DarkOrange : Brushes.IndianRed;
 
         public string Title =>
             Info.SignerName.Length > 0 ? Info.SignerName : Loc.Get("SignUnknownSigner");

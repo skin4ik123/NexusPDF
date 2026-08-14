@@ -63,12 +63,13 @@ public static class PdfIncrementalSigner
             // AcroForm — отдельный объект: каталог не трогаем, дополняем его.
             var acro = GetObject(text, acroFormRef.Value)
                 ?? throw new PdfSigningException("Объект AcroForm не найден.");
-            newObjects.Add((acroFormRef.Value, AmendAcroForm(acro.Dict, sigFieldNum)));
+            var amendedAcro = AppendRefToArray(text, acro.Dict, "/Fields", sigFieldNum, newObjects, out _);
+            newObjects.Add((acroFormRef.Value, EnsureSigFlags(amendedAcro)));
         }
         else if (catalog.Dict.Contains("/AcroForm", StringComparison.Ordinal))
         {
             // Инлайновый словарь AcroForm внутри каталога.
-            newObjects.Add((rootRef, AmendCatalogInlineAcroForm(catalog.Dict, sigFieldNum)));
+            newObjects.Add((rootRef, AmendCatalogInlineAcroForm(text, catalog.Dict, sigFieldNum, newObjects)));
         }
         else
         {
@@ -77,7 +78,9 @@ public static class PdfIncrementalSigner
             newObjects.Add((rootRef, amended));
         }
 
-        newObjects.Add((pageRef, AmendPageAnnots(page.Dict, sigFieldNum)));
+        var amendedPage = AppendRefToArray(text, page.Dict, "/Annots", sigFieldNum, newObjects, out var pageChanged);
+        if (pageChanged)
+            newObjects.Add((pageRef, amendedPage));
 
         var signName = certificate.GetNameInfo(X509NameType.SimpleName, forIssuer: false);
         var mDate = "D:" + DateTimeOffset.Now.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture) + "Z";
@@ -163,31 +166,53 @@ public static class PdfIncrementalSigner
 
     // ----- Правки словарей (текстовые, по нормализованному QDF-выводу) -----
 
-    private static string AmendAcroForm(string acroDict, int sigFieldNum)
-    {
-        var withField = AppendToFieldsArray(acroDict, sigFieldNum);
-        return EnsureSigFlags(withField);
-    }
-
-    private static string AmendCatalogInlineAcroForm(string catalogDict, int sigFieldNum)
+    private static string AmendCatalogInlineAcroForm(
+        string text, string catalogDict, int sigFieldNum, List<(int Num, string Body)> newObjects)
     {
         var start = catalogDict.IndexOf("/AcroForm", StringComparison.Ordinal);
         var dictStart = catalogDict.IndexOf("<<", start, StringComparison.Ordinal);
         var dictEnd = FindBalancedDictEnd(catalogDict, dictStart);
         var inner = catalogDict[dictStart..dictEnd];
-        var amended = EnsureSigFlags(AppendToFieldsArray(inner, sigFieldNum));
+        var amended = EnsureSigFlags(AppendRefToArray(text, inner, "/Fields", sigFieldNum, newObjects, out _));
         return catalogDict[..dictStart] + amended + catalogDict[dictEnd..];
     }
 
-    private static string AppendToFieldsArray(string dict, int sigFieldNum)
+    /// <summary>
+    /// Дописывает ссылку на sig-поле в массив-значение ключа словаря.
+    /// Скобка массива берётся строго ЗА ключом (а не первая «[» дальше по
+    /// тексту — так ссылка попадала бы в чужой массив вроде /MediaBox).
+    /// Косвенная ссылка на массив переопределяется отдельным объектом
+    /// инкремента; сам словарь тогда не меняется (dictChanged=false).
+    /// </summary>
+    private static string AppendRefToArray(
+        string text, string dict, string key, int sigFieldNum,
+        List<(int Num, string Body)> newObjects, out bool dictChanged)
     {
-        var fields = dict.IndexOf("/Fields", StringComparison.Ordinal);
-        if (fields < 0)
-            return InsertBeforeDictEnd(dict, $" /Fields [{sigFieldNum} 0 R]");
-        var open = dict.IndexOf('[', fields);
-        if (open < 0)
-            throw new PdfSigningException("Массив /Fields не разобран.");
-        return dict[..(open + 1)] + $"{sigFieldNum} 0 R " + dict[(open + 1)..];
+        var match = Regex.Match(dict, Regex.Escape(key) + @"\s*(\[|(\d+)\s+\d+\s+R)");
+        if (!match.Success)
+        {
+            if (dict.Contains(key, StringComparison.Ordinal))
+                throw new PdfSigningException($"Значение {key} не разобрано (не массив и не ссылка).");
+            dictChanged = true;
+            return InsertBeforeDictEnd(dict, $" {key} [{sigFieldNum} 0 R]");
+        }
+        if (match.Groups[1].Value == "[")
+        {
+            dictChanged = true;
+            var open = match.Groups[1].Index;
+            return dict[..(open + 1)] + $"{sigFieldNum} 0 R " + dict[(open + 1)..];
+        }
+
+        // Косвенный массив. /Fields AcroForm и /Annots страницы могут указывать
+        // на один и тот же объект (merged-виджеты) — второй раз не переопределяем.
+        var arrayRef = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+        dictChanged = false;
+        if (newObjects.Any(o => o.Num == arrayRef))
+            return dict;
+        var body = GetArrayObjectBody(text, arrayRef)
+            ?? throw new PdfSigningException($"Косвенный массив {key} ({arrayRef} 0 R) не разобран.");
+        newObjects.Add((arrayRef, "[" + $"{sigFieldNum} 0 R " + body[1..]));
+        return dict;
     }
 
     private static string EnsureSigFlags(string dict)
@@ -195,17 +220,6 @@ public static class PdfIncrementalSigner
         if (dict.Contains("/SigFlags", StringComparison.Ordinal))
             return Regex.Replace(dict, @"/SigFlags\s+\d+", "/SigFlags 3");
         return InsertBeforeDictEnd(dict, " /SigFlags 3");
-    }
-
-    private static string AmendPageAnnots(string pageDict, int sigFieldNum)
-    {
-        var annots = pageDict.IndexOf("/Annots", StringComparison.Ordinal);
-        if (annots < 0)
-            return InsertBeforeDictEnd(pageDict, $" /Annots [{sigFieldNum} 0 R]");
-        var open = pageDict.IndexOf('[', annots);
-        if (open < 0)
-            throw new PdfSigningException("Массив /Annots страницы не разобран (косвенный массив не поддержан).");
-        return pageDict[..(open + 1)] + $"{sigFieldNum} 0 R " + pageDict[(open + 1)..];
     }
 
     private static string InsertBeforeDictEnd(string dict, string insertion)
@@ -241,31 +255,139 @@ public static class PdfIncrementalSigner
 
     private static (string Dict, int Position)? GetObject(string text, int objectNumber)
     {
-        var match = Regex.Match(text, $@"(?<=^|\n){objectNumber} 0 obj\b");
-        if (!match.Success)
+        foreach (var index in FindObjectHeaders(text, objectNumber))
+        {
+            var dictStart = text.IndexOf("<<", index, StringComparison.Ordinal);
+            if (dictStart < 0 ||
+                text.IndexOf("endobj", index, dictStart - index, StringComparison.Ordinal) >= 0)
+                continue; // у объекта нет словаря — это не тот, кого ищут
+            var dictEnd = FindBalancedDictEnd(text, dictStart);
+            return (text[dictStart..dictEnd], index);
+        }
+        return null;
+    }
+
+    private static string? GetArrayObjectBody(string text, int objectNumber)
+    {
+        foreach (var index in FindObjectHeaders(text, objectNumber))
+        {
+            var open = text.IndexOf('[', index);
+            if (open < 0 ||
+                text.IndexOf("endobj", index, open - index, StringComparison.Ordinal) >= 0)
+                return null;
+            var depth = 0;
+            for (var i = open; i < text.Length; i++)
+            {
+                if (text[i] == '[') depth++;
+                else if (text[i] == ']' && --depth == 0)
+                    return text[open..(i + 1)];
+            }
             return null;
-        var dictStart = text.IndexOf("<<", match.Index, StringComparison.Ordinal);
-        if (dictStart < 0)
-            return null;
-        var dictEnd = FindBalancedDictEnd(text, dictStart);
-        return (text[dictStart..dictEnd], match.Index);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Заголовки «N 0 obj» на верхнем уровне файла. Совпадения внутри данных
+    /// потоков (QDF распаковывает всё, и вложенный PDF в /EmbeddedFiles
+    /// содержит собственные «N 0 obj») — не объекты и пропускаются.
+    /// </summary>
+    private static IEnumerable<int> FindObjectHeaders(string text, int objectNumber)
+    {
+        var streams = GetStreamRanges(text);
+        foreach (Match match in Regex.Matches(text, $@"(?<=^|\n){objectNumber} 0 obj\b"))
+        {
+            var inStream = false;
+            foreach (var (start, end) in streams)
+            {
+                if (match.Index >= start && match.Index < end) { inStream = true; break; }
+                if (start > match.Index) break; // диапазоны отсортированы
+            }
+            if (!inStream)
+                yield return match.Index;
+        }
+    }
+
+    [ThreadStatic] private static string? _streamRangesText;
+    [ThreadStatic] private static List<(int Start, int End)>? _streamRanges;
+
+    private static List<(int Start, int End)> GetStreamRanges(string text)
+    {
+        if (ReferenceEquals(_streamRangesText, text) && _streamRanges != null)
+            return _streamRanges;
+        var ranges = new List<(int Start, int End)>();
+        var i = 0;
+        while (true)
+        {
+            var s = text.IndexOf("stream", i, StringComparison.Ordinal);
+            if (s < 0) break;
+            // Отсеять суффикс «endstream» и имена вроде /AppStream.
+            if (s > 0 && (char.IsLetterOrDigit(text[s - 1]) || text[s - 1] == '/'))
+            {
+                i = s + 6;
+                continue;
+            }
+            var dataStart = s + 6;
+            if (dataStart < text.Length && text[dataStart] == '\r') dataStart++;
+            if (dataStart < text.Length && text[dataStart] == '\n') dataStart++;
+            else { i = s + 6; continue; } // за ключевым словом stream обязан идти конец строки
+            var e = text.IndexOf("endstream", dataStart, StringComparison.Ordinal);
+            if (e < 0) break;
+            ranges.Add((dataStart, e));
+            i = e + 9;
+        }
+        _streamRangesText = text;
+        _streamRanges = ranges;
+        return ranges;
     }
 
     private static int FindBalancedDictEnd(string text, int dictStart)
     {
         if (dictStart < 0)
             throw new PdfSigningException("Словарь не найден.");
+        // «<<»/«>>» считаются только вне литеральных строк, hex-строк и
+        // комментариев: строка вида (a >> 2) внутри значения ключа иначе
+        // преждевременно «закрывала» словарь и обрезала его.
         var depth = 0;
-        for (var i = dictStart; i < text.Length - 1; i++)
+        var i = dictStart;
+        while (i < text.Length)
         {
-            if (text[i] == '<' && text[i + 1] == '<') { depth++; i++; }
-            else if (text[i] == '>' && text[i + 1] == '>')
+            var ch = text[i];
+            if (ch == '(')
+            {
+                i++;
+                var strDepth = 1;
+                while (i < text.Length && strDepth > 0)
+                {
+                    if (text[i] == '\\') i++;
+                    else if (text[i] == '(') strDepth++;
+                    else if (text[i] == ')') strDepth--;
+                    i++;
+                }
+                continue;
+            }
+            if (ch == '%')
+            {
+                while (i < text.Length && text[i] != '\n' && text[i] != '\r') i++;
+                continue;
+            }
+            if (ch == '<' && i + 1 < text.Length && text[i + 1] == '<') { depth++; i += 2; continue; }
+            if (ch == '<')
+            {
+                i++;
+                while (i < text.Length && text[i] != '>') i++;
+                i++;
+                continue;
+            }
+            if (ch == '>' && i + 1 < text.Length && text[i + 1] == '>')
             {
                 depth--;
-                i++;
+                i += 2;
                 if (depth == 0)
-                    return i + 1;
+                    return i;
+                continue;
             }
+            i++;
         }
         throw new PdfSigningException("Несбалансированный словарь.");
     }

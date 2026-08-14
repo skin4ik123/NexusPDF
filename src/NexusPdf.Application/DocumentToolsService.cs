@@ -77,6 +77,17 @@ public sealed class DocumentToolsService
         if (document.Password != null)
             throw new PdfEngineException(
                 "Подписание защищённых паролем документов пока не поддерживается: сначала сохраните копию без пароля.");
+
+        // Конвейер пересобирает файл и разрушил бы существующие подписи.
+        // UI тоже отказывает, но его сведения асинхронные — здесь последний
+        // рубеж с проверкой самого исходного файла.
+        var existing = await PdfSignatureInspector.InspectAsync(document.PrimaryHandle.FilePath, ct)
+            .ConfigureAwait(false);
+        if (existing.Count > 0)
+            throw new PdfEngineException(
+                "Документ уже содержит цифровые подписи. Повторное подписание пересобрало бы файл и разрушило их — " +
+                "сохраните изменённую копию под другим именем и подпишите её.");
+
         await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
 
         var composition = document.BuildComposition();
@@ -110,8 +121,11 @@ public sealed class DocumentToolsService
                         throw new PdfEngineException("Проверка подписанной копии: число страниц не совпало.");
                 }
                 var signatures = await PdfSignatureInspector.InspectAsync(tempPath, ct).ConfigureAwait(false);
-                var own = signatures.LastOrDefault();
-                if (own == null || !own.IsCryptoValid || !own.CoversWholeDocument)
+                if (signatures.Count != 1)
+                    throw new PdfEngineException(
+                        $"Проверка подписанной копии: ожидалась ровно одна подпись, найдено {signatures.Count}.");
+                var own = signatures[0];
+                if (!own.IsCryptoValid || !own.CoversWholeDocument)
                     throw new PdfEngineException("Созданная подпись не прошла собственную проверку.");
             },
             keepBackup: false,
