@@ -80,6 +80,32 @@ public sealed class QpdfEngineTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Direct_Save_Of_Password_Protected_Document_Works_And_Keeps_Protection()
+    {
+        if (!_qpdf.IsAvailable) return;
+        var source = PdfFixture.WriteToTemp("locked-src.pdf",
+            new PdfFixture.PageSpec(612, 792, Text: "secret data"));
+        var encrypted = Path.Combine(Path.GetDirectoryName(source)!, "locked-in.pdf");
+        await _qpdf.EncryptAsync(source, encrypted, "pw123", null, CancellationToken.None);
+
+        // Открыт с паролем, без правок → прямое сохранение (шифрование сохраняется).
+        var document = await NexusPdf.Application.OpenedDocument.OpenAsync(
+            _pdfium, encrypted, "pw123", CancellationToken.None);
+        await using (document)
+        {
+            Assert.True(NexusPdf.Application.SaveService.CanSaveDirect(document));
+            var target = Path.Combine(Path.GetDirectoryName(source)!, "locked-out.pdf");
+            await new NexusPdf.Application.SaveService(_pdfium)
+                .SaveAsAsync(document, target, keepBackup: false, CancellationToken.None);
+
+            await Assert.ThrowsAsync<PdfPasswordRequiredException>(
+                () => _pdfium.OpenAsync(target, null, CancellationToken.None));
+            await using var reopened = await _pdfium.OpenAsync(target, "pw123", CancellationToken.None);
+            Assert.Contains("secret data", await reopened.GetPageTextAsync(0, CancellationToken.None));
+        }
+    }
+
+    [Fact]
     public async Task Optimize_Preserves_Content()
     {
         if (!_qpdf.IsAvailable) return;

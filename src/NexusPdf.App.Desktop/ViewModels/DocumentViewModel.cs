@@ -47,7 +47,12 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     public string Title => Document.DisplayName;
     public string? FilePath => Document.Session.FilePath;
-    public bool IsDirty => Document.Session.IsDirty;
+
+    /// <summary>Правки форм идут напрямую в pdfium-документ мимо DocumentSession —
+    /// без этого флага закрытие вкладки тихо теряло бы введённые значения.</summary>
+    private bool _formModified;
+
+    public bool IsDirty => Document.Session.IsDirty || _formModified;
     public int PageCount => Pages.Count;
     public bool CanUndo => Document.Session.History.CanUndo;
     public bool CanRedo => Document.Session.History.CanRedo;
@@ -261,13 +266,17 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         }
     }
 
+    public bool HasActiveFormPage => _formActivePage != null;
+
     [RelayCommand]
     private async Task ToggleFormMode()
     {
         if (!HasAcroForm || IsBusy) return;
         if (IsFormMode)
         {
-            await Document.PrimaryHandle.FormKillFocusAsync(CancellationToken.None);
+            // Полное завершение окружения: значения зафиксированы, подсветка
+            // полей уходит из рендеров (в т.ч. из печати).
+            await Document.PrimaryHandle.FormEndAsync(CancellationToken.None);
             IsFormMode = false;
             _formActivePage = null;
             StatusText = Loc.Get("Ready");
@@ -301,6 +310,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         await Document.PrimaryHandle.FormClickAsync(
             page.PageRef.SourcePageIndex, page.PageRef.RotationOffset, xPt, yPt, CancellationToken.None);
         _formActivePage = page;
+        MarkFormModified();
         await RefreshFormPageAsync(page, dpiScale);
     }
 
@@ -308,6 +318,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     {
         if (!IsFormMode || IsBusy || _formActivePage is not { } page) return;
         await Document.PrimaryHandle.FormCharAsync(character, CancellationToken.None);
+        MarkFormModified();
         await RefreshFormPageAsync(page, dpiScale);
     }
 
@@ -315,13 +326,22 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     {
         if (!IsFormMode || IsBusy || _formActivePage is not { } page) return;
         await Document.PrimaryHandle.FormKeyDownAsync(virtualKey, CancellationToken.None);
+        MarkFormModified();
         await RefreshFormPageAsync(page, dpiScale);
+    }
+
+    private void MarkFormModified()
+    {
+        if (_formModified) return;
+        _formModified = true;
+        OnPropertyChanged(nameof(IsDirty));
     }
 
     private Task RefreshFormPageAsync(PageViewModel page, double dpiScale)
     {
         FormRenderVersion++;
         page.ForceRefresh(dpiScale);
+        page.ForceRefreshThumbnail();
         return Task.CompletedTask;
     }
 
@@ -330,6 +350,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     {
         IsFormMode = false;
         _formActivePage = null;
+        _formModified = false;
+        OnPropertyChanged(nameof(IsDirty));
         FormRenderVersion++;
         _ = DetectFormsAsync();
     }
@@ -687,6 +709,15 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     private void OnSessionChanged()
     {
         RebuildPages();
+        // Ссылка на активную страницу формы указывает на пересозданный список.
+        if (_formActivePage is { } stale)
+        {
+            _formActivePage = Pages.FirstOrDefault(p =>
+                p.PageRef.SourceId == stale.PageRef.SourceId &&
+                p.PageRef.SourcePageIndex == stale.PageRef.SourcePageIndex);
+            if (_formActivePage == null)
+                _ = Document.PrimaryHandle.FormKillFocusAsync(CancellationToken.None);
+        }
         OnPropertyChanged(nameof(IsDirty));
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(FilePath));

@@ -30,6 +30,7 @@ public sealed class DocumentToolsService
         OpenedDocument document, string targetPath, string userPassword, string? ownerPassword, CancellationToken ct)
     {
         SaveService.ThrowIfTargetIsOpenSource(document, targetPath);
+        await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
         var composition = document.BuildComposition();
         await SafeFileReplace.WriteAndReplaceAsync(
             targetPath,
@@ -64,6 +65,7 @@ public sealed class DocumentToolsService
     public async Task<OptimizeResult> OptimizeCopyAsync(OpenedDocument document, string targetPath, CancellationToken ct)
     {
         SaveService.ThrowIfTargetIsOpenSource(document, targetPath);
+        await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
         var composition = document.BuildComposition();
         long bytesBefore = 0;
 
