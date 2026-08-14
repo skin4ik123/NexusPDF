@@ -89,7 +89,9 @@
                PreviewMouseLeftButtonDown="OnPagesPreviewMouseDown"
                PreviewMouseMove="OnPagesPreviewMouseMove"
                PreviewMouseLeftButtonUp="OnPagesPreviewMouseUp"
-               LostMouseCapture="OnPagesLostCapture">
+               LostMouseCapture="OnPagesLostCapture"
+               PreviewTextInput="OnPagesTextInput"
+               PreviewKeyDown="OnPagesKeyDown">
         <ListBox.ItemTemplate>
           <DataTemplate>
             <Border Margin="0,12" Background="{DynamicResource PageBg}"

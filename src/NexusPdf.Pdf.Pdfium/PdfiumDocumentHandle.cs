@@ -16,6 +16,11 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
     // (рендер после close) исключён даже при гонке Dispose с фоновым рендером.
     private readonly object _admissionGate = new();
     private bool _disposed;
+    private PdfiumFormSession? _forms; // читается/меняется только на PDFium-потоке
+
+    private const int FpdfBitmapBgra = 4;
+    private const int RenderFlagAnnot = 0x01;
+    private const int RenderFlagLcdText = 0x02;
 
     internal PdfiumDocumentHandle(
         PdfiumRenderEngine engine,
@@ -44,7 +49,145 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
         {
             ThrowIfDisposed();
             return _thread.InvokeAsync(
-                () => PdfiumRenderEngine.RenderCore(NativeDoc, pageIndex, pixelWidth, pixelHeight, extraQuarterTurns), ct);
+                () => RenderCore(pageIndex, pixelWidth, pixelHeight, extraQuarterTurns), ct);
+        }
+    }
+
+    /// <summary>
+    /// Рендер страницы; при активном окружении форм поверх содержимого
+    /// дорисовываются поля (FFLDraw). Активная интерактивная страница формы
+    /// переиспользуется без закрытия — иначе каждый ре-рендер убивал бы фокус.
+    /// </summary>
+    private RenderedPageImage RenderCore(int pageIndex, int width, int height, int extraQuarterTurns)
+    {
+        if (width < 1 || height < 1)
+            throw new ArgumentOutOfRangeException(nameof(width), "Размер растра должен быть положительным.");
+
+        var rotate = ((extraQuarterTurns % 4) + 4) % 4;
+        var activePage = _forms?.TryGetActivePage(pageIndex);
+        var page = activePage ?? fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
+        if (page == null || page.__Instance == IntPtr.Zero)
+            throw new PdfEngineException($"Не удалось открыть страницу {pageIndex + 1}.");
+        var transient = activePage == null;
+        if (transient && _forms is { IsActive: true })
+            _forms.OnTransientPageLoaded(page);
+
+        try
+        {
+            var stride = width * 4;
+            var pixels = new byte[stride * height];
+            var pin = System.Runtime.InteropServices.GCHandle.Alloc(pixels, System.Runtime.InteropServices.GCHandleType.Pinned);
+            try
+            {
+                var bitmap = fpdfview.FPDFBitmapCreateEx(width, height, FpdfBitmapBgra, pin.AddrOfPinnedObject(), stride);
+                if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
+                    throw new PdfEngineException("Не удалось создать растровый буфер.");
+                try
+                {
+                    const int flags = RenderFlagAnnot | RenderFlagLcdText;
+                    fpdfview.FPDFBitmapFillRect(bitmap, 0, 0, width, height, 0xFFFFFFFFUL);
+                    fpdfview.FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, rotate, flags);
+                    _forms?.DrawFields(bitmap, page, width, height, rotate, flags);
+                }
+                finally
+                {
+                    fpdfview.FPDFBitmapDestroy(bitmap);
+                }
+            }
+            finally
+            {
+                pin.Free();
+            }
+            return new RenderedPageImage(width, height, stride, pixels);
+        }
+        finally
+        {
+            if (transient)
+            {
+                if (_forms is { IsActive: true })
+                    _forms.OnTransientPageClosing(page);
+                fpdfview.FPDF_ClosePage(page);
+            }
+        }
+    }
+
+    // ----- Формы -----
+
+    public Task<int> GetFormTypeAsync(CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() => fpdf_formfill.FPDF_GetFormType(NativeDoc), ct);
+        }
+    }
+
+    public Task<bool> InitFormsAsync(CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() =>
+            {
+                _forms ??= PdfiumFormSession.Create(NativeDoc);
+                return _forms != null;
+            }, ct);
+        }
+    }
+
+    public Task FormClickAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() =>
+            {
+                if (_forms == null) return;
+                var size = Info.Pages[pageIndex];
+                var displayedW = extraQuarterTurns % 2 == 0 ? size.WidthPoints : size.HeightPoints;
+                var displayedH = extraQuarterTurns % 2 == 0 ? size.HeightPoints : size.WidthPoints;
+                _forms.Click(pageIndex, extraQuarterTurns, xPt, yPt, displayedW, displayedH);
+            }, ct);
+        }
+    }
+
+    public Task FormCharAsync(char character, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() => _forms?.Char(character), ct);
+        }
+    }
+
+    public Task FormKeyDownAsync(int virtualKeyCode, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() => _forms?.KeyDown(virtualKeyCode), ct);
+        }
+    }
+
+    public Task FormKillFocusAsync(CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() => _forms?.KillFocus(), ct);
+        }
+    }
+
+    public Task SaveCurrentAsync(string targetPath, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() =>
+            {
+                _forms?.KillFocus(); // зафиксировать значение редактируемого поля
+                PdfiumRenderEngine.SaveDocument(NativeDoc, targetPath);
+            }, ct);
         }
     }
 
@@ -176,7 +319,8 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
                         result.Add(new PdfAnnotationInfo(
                             i, subtype,
                             GetAnnotString(annot, "Contents"),
-                            GetAnnotString(annot, "T")));
+                            GetAnnotString(annot, "T"),
+                            GetAnnotString(annot, "V")));
                     }
                     finally
                     {
@@ -218,6 +362,8 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
             _disposed = true;
             closeTask = _thread.InvokeAsync(() =>
             {
+                _forms?.Dispose();
+                _forms = null;
                 fpdfview.FPDF_CloseDocument(NativeDoc);
                 _accessor.SafeMemoryMappedViewHandle.ReleasePointer();
                 _accessor.Dispose();

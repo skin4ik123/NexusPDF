@@ -107,7 +107,8 @@ public sealed partial class PageViewModel : ObservableObject
         if (_renderedPixelWidth == pixelWidth && Image != null)
             return;
 
-        var key = RenderCache.MakeKey(PageRef.SourceId, PageRef.SourcePageIndex, PageRef.RotationOffset, pixelWidth);
+        var key = RenderCache.MakeKey(PageRef.SourceId, PageRef.SourcePageIndex, PageRef.RotationOffset, pixelWidth)
+                  + ":f" + _owner.FormRenderVersion;
         if (_owner.Cache.TryGet(key) is { } cached)
         {
             Image = cached;
@@ -178,6 +179,13 @@ public sealed partial class PageViewModel : ObservableObject
         {
             _thumbCts = null;
         }
+    }
+
+    /// <summary>Принудительный ре-рендер (ввод в поле формы): кэш-ключ уже сменился версией формы.</summary>
+    public void ForceRefresh(double dpiScale)
+    {
+        _renderedPixelWidth = 0;
+        EnsureImage(dpiScale);
     }
 
     /// <summary>Страница ушла из видимой области — полноразмерный растр отпускаем (кэш решает, хранить ли его).</summary>

@@ -126,6 +126,16 @@
                         IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc CommentsPanel}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8BD;"/>
           </ToggleButton>
+          <ToggleButton Style="{StaticResource ToolButton}"
+                        IsChecked="{Binding ActiveDocument.IsFormMode, Mode=OneWay}"
+                        Command="{Binding ToggleFormModeActiveCommand}"
+                        ToolTip="{l:Loc FormMode}"
+                        Visibility="{Binding ActiveDocument.HasAcroForm, FallbackValue=Collapsed, Converter={StaticResource BoolToVis}}">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE70F;"/>
+              <TextBlock Text="{l:Loc FormModeShort}" Margin="6,0,0,0"/>
+            </StackPanel>
+          </ToggleButton>
         </StackPanel>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">

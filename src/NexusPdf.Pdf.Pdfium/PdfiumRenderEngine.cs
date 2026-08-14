@@ -218,47 +218,8 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
         output.Flush(flushToDisk: true);
     }
 
-    internal static RenderedPageImage RenderCore(FpdfDocumentT doc, int pageIndex, int width, int height, int extraQuarterTurns)
-    {
-        if (width < 1 || height < 1)
-            throw new ArgumentOutOfRangeException(nameof(width), "Размер растра должен быть положительным.");
-
-        var page = fpdfview.FPDF_LoadPage(doc, pageIndex);
-        if (page == null || page.__Instance == IntPtr.Zero)
-            throw new PdfEngineException($"Не удалось открыть страницу {pageIndex + 1}.");
-
-        try
-        {
-            var stride = width * 4;
-            var pixels = new byte[stride * height];
-            var pin = GCHandle.Alloc(pixels, GCHandleType.Pinned);
-            try
-            {
-                var bitmap = fpdfview.FPDFBitmapCreateEx(width, height, FpdfBitmapBgra, pin.AddrOfPinnedObject(), stride);
-                if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
-                    throw new PdfEngineException("Не удалось создать растровый буфер.");
-                try
-                {
-                    fpdfview.FPDFBitmapFillRect(bitmap, 0, 0, width, height, 0xFFFFFFFFUL);
-                    fpdfview.FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height,
-                        ((extraQuarterTurns % 4) + 4) % 4, RenderFlagAnnot | RenderFlagLcdText);
-                }
-                finally
-                {
-                    fpdfview.FPDFBitmapDestroy(bitmap);
-                }
-            }
-            finally
-            {
-                pin.Free();
-            }
-            return new RenderedPageImage(width, height, stride, pixels);
-        }
-        finally
-        {
-            fpdfview.FPDF_ClosePage(page);
-        }
-    }
+    // Рендер выполняется на уровне PdfiumDocumentHandle.RenderCore: он же
+    // отвечает за дорисовку полей форм и жизненный цикл активной страницы.
 
     public ValueTask DisposeAsync()
     {

@@ -236,6 +236,104 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         Document.Session.Apply(new AddOverlayOperation(page.LogicalIndex, overlay));
     }
 
+    // ----- Заполнение форм (AcroForm) -----
+
+    [ObservableProperty]
+    private bool _hasAcroForm;
+
+    [ObservableProperty]
+    private bool _isFormMode;
+
+    /// <summary>Версия форм-рендера: входит в ключ кэша, каждый ввод обновляет растр страницы.</summary>
+    public int FormRenderVersion { get; private set; }
+
+    private PageViewModel? _formActivePage;
+
+    public async Task DetectFormsAsync()
+    {
+        try
+        {
+            HasAcroForm = await Document.PrimaryHandle.GetFormTypeAsync(CancellationToken.None) == 1;
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Не удалось определить тип формы");
+        }
+    }
+
+    [RelayCommand]
+    private async Task ToggleFormMode()
+    {
+        if (!HasAcroForm || IsBusy) return;
+        if (IsFormMode)
+        {
+            await Document.PrimaryHandle.FormKillFocusAsync(CancellationToken.None);
+            IsFormMode = false;
+            _formActivePage = null;
+            StatusText = Loc.Get("Ready");
+            BumpFormRender();
+            return;
+        }
+
+        if (!await Document.PrimaryHandle.InitFormsAsync(CancellationToken.None))
+        {
+            HasAcroForm = false;
+            return;
+        }
+        CancelPlacement();
+        IsFormMode = true;
+        StatusText = Loc.Get("FormModeHint");
+        BumpFormRender();
+    }
+
+    private void BumpFormRender()
+    {
+        FormRenderVersion++;
+        RebuildPages(); // растры перечитываются с полями/новыми значениями
+    }
+
+    public async Task FormClickAsync(PageViewModel page, double xPt, double yPt, double dpiScale)
+    {
+        if (!IsFormMode || IsBusy) return;
+        // Формы принадлежат первичному источнику; вставленные чужие страницы не интерактивны.
+        if (page.PageRef.SourceId != Document.PrimarySourceId) return;
+
+        await Document.PrimaryHandle.FormClickAsync(
+            page.PageRef.SourcePageIndex, page.PageRef.RotationOffset, xPt, yPt, CancellationToken.None);
+        _formActivePage = page;
+        await RefreshFormPageAsync(page, dpiScale);
+    }
+
+    public async Task FormCharAsync(char character, double dpiScale)
+    {
+        if (!IsFormMode || IsBusy || _formActivePage is not { } page) return;
+        await Document.PrimaryHandle.FormCharAsync(character, CancellationToken.None);
+        await RefreshFormPageAsync(page, dpiScale);
+    }
+
+    public async Task FormKeyAsync(int virtualKey, double dpiScale)
+    {
+        if (!IsFormMode || IsBusy || _formActivePage is not { } page) return;
+        await Document.PrimaryHandle.FormKeyDownAsync(virtualKey, CancellationToken.None);
+        await RefreshFormPageAsync(page, dpiScale);
+    }
+
+    private Task RefreshFormPageAsync(PageViewModel page, double dpiScale)
+    {
+        FormRenderVersion++;
+        page.ForceRefresh(dpiScale);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>После сохранения документ переоткрыт новым дескриптором — форм-окружение потеряно.</summary>
+    public void ResetFormStateAfterSave()
+    {
+        IsFormMode = false;
+        _formActivePage = null;
+        FormRenderVersion++;
+        _ = DetectFormsAsync();
+    }
+
     // ----- Панель комментариев -----
 
     /// <summary>Строка панели: для черновика хранится ссылка на сам оверлей —
