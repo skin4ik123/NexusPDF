@@ -48,7 +48,15 @@ public partial class MainWindow : Window
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape && WindowStyle == WindowStyle.None)
+        if (e.Key != Key.Escape) return;
+
+        if (ViewModel.ActiveDocument is { PendingOverlay: not null } doc)
+        {
+            doc.CancelPlacement();
+            e.Handled = true;
+            return;
+        }
+        if (WindowStyle == WindowStyle.None)
         {
             ToggleFullScreen();
             e.Handled = true;

@@ -84,7 +84,8 @@
                VirtualizingPanel.ScrollUnit="Pixel"
                VirtualizingPanel.CacheLength="1,1"
                VirtualizingPanel.CacheLengthUnit="Page"
-               PreviewMouseWheel="OnPagesMouseWheel">
+               PreviewMouseWheel="OnPagesMouseWheel"
+               PreviewMouseLeftButtonDown="OnPagesPreviewMouseDown">
         <ListBox.ItemTemplate>
           <DataTemplate>
             <Border Margin="0,12" Background="{DynamicResource PageBg}"
@@ -115,6 +116,40 @@
                     <DataTemplate>
                       <Rectangle Width="{Binding Width}" Height="{Binding Height}"
                                  Fill="{DynamicResource HighlightBrush}"/>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- Предпросмотр нового контента (до сохранения) -->
+                <ItemsControl ItemsSource="{Binding OverlayPreviews}" IsHitTestVisible="False">
+                  <ItemsControl.LayoutTransform>
+                    <ScaleTransform ScaleX="{Binding DisplayScale}" ScaleY="{Binding DisplayScale}"/>
+                  </ItemsControl.LayoutTransform>
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <Canvas/>
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemContainerStyle>
+                    <Style TargetType="ContentPresenter">
+                      <Setter Property="Canvas.Left" Value="{Binding XPt}"/>
+                      <Setter Property="Canvas.Top" Value="{Binding YPt}"/>
+                    </Style>
+                  </ItemsControl.ItemContainerStyle>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid>
+                        <TextBlock Text="{Binding Text}" FontSize="{Binding FontSizePt}"
+                                   FontFamily="Segoe UI" Foreground="{Binding Fill}"
+                                   RenderTransformOrigin="0,0"
+                                   Visibility="{Binding IsText, Converter={StaticResource BoolToVis}}">
+                          <TextBlock.RenderTransform>
+                            <RotateTransform Angle="{Binding AngleDeg}"/>
+                          </TextBlock.RenderTransform>
+                        </TextBlock>
+                        <Image Source="{Binding Image}" Width="{Binding WidthPt}" Height="{Binding HeightPt}"
+                               Stretch="Fill"/>
+                      </Grid>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>

@@ -18,6 +18,7 @@ public sealed class AppServices : IAsyncDisposable
         Qpdf = new QpdfEngine();
         Tools = new DocumentToolsService(engine, Qpdf, Qpdf);
         Print = new PrintService();
+        Signatures = new SignatureStore();
     }
 
     public IPdfRenderEngine Engine { get; }
@@ -28,6 +29,7 @@ public sealed class AppServices : IAsyncDisposable
     public QpdfEngine Qpdf { get; }
     public DocumentToolsService Tools { get; }
     public PrintService Print { get; }
+    public SignatureStore Signatures { get; }
 
     public void SaveSettings()
     {

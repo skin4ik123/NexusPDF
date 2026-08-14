@@ -135,6 +135,67 @@ public sealed class MovePagesOperation : DocumentOperationBase
     }
 }
 
+/// <summary>Добавление нового контента (текст/изображение) на одну страницу.</summary>
+public sealed class AddOverlayOperation : DocumentOperationBase
+{
+    private readonly int _pageIndex;
+    private readonly Pdf.Abstractions.PageOverlay _overlay;
+
+    public AddOverlayOperation(int pageIndex, Pdf.Abstractions.PageOverlay overlay)
+    {
+        _pageIndex = pageIndex;
+        _overlay = overlay;
+    }
+
+    public override string Name => "Добавление содержимого";
+
+    protected override void ApplyCore(DocumentModel model)
+    {
+        ValidateIndices(model, new[] { _pageIndex });
+        model.Pages[_pageIndex] = model.Pages[_pageIndex].WithOverlay(_overlay);
+    }
+}
+
+/// <summary>Пакетное добавление контента (колонтитулы, номера, водяной знак) — одна операция Undo.</summary>
+public sealed class AddOverlaysOperation : DocumentOperationBase
+{
+    private readonly IReadOnlyList<(int PageIndex, Pdf.Abstractions.PageOverlay Overlay)> _items;
+    private readonly string _name;
+
+    public AddOverlaysOperation(
+        IReadOnlyList<(int PageIndex, Pdf.Abstractions.PageOverlay Overlay)> items,
+        string name = "Оформление страниц")
+    {
+        _items = items;
+        _name = name;
+    }
+
+    public override string Name => _name;
+
+    protected override void ApplyCore(DocumentModel model)
+    {
+        ValidateIndices(model, _items.Select(i => i.PageIndex).Distinct().ToArray());
+        foreach (var (pageIndex, overlay) in _items)
+            model.Pages[pageIndex] = model.Pages[pageIndex].WithOverlay(overlay);
+    }
+}
+
+/// <summary>Удаление всего наложенного контента с выбранных страниц.</summary>
+public sealed class RemoveOverlaysOperation : DocumentOperationBase
+{
+    private readonly IReadOnlyList<int> _indices;
+
+    public RemoveOverlaysOperation(IReadOnlyList<int> indices) => _indices = indices;
+
+    public override string Name => "Удаление наложенного содержимого";
+
+    protected override void ApplyCore(DocumentModel model)
+    {
+        foreach (var i in ValidateIndices(model, _indices))
+            model.Pages[i] = model.Pages[i].WithoutOverlays();
+    }
+}
+
 public sealed class DuplicatePagesOperation : DocumentOperationBase
 {
     private readonly IReadOnlyList<int> _indices;
