@@ -1,0 +1,74 @@
+using System.Globalization;
+using System.Text;
+
+namespace NexusPdf.PdfEngineTests;
+
+/// <summary>
+/// Генератор миниатюрных, но структурно корректных PDF для тестов движка:
+/// произвольные размеры страниц, /Rotate и простой текст стандартным шрифтом.
+/// </summary>
+public static class PdfFixture
+{
+    public sealed record PageSpec(double Width, double Height, int Rotate = 0, string Text = "Hello NexusPDF");
+
+    public static byte[] Build(params PageSpec[] pages)
+    {
+        if (pages.Length == 0)
+            throw new ArgumentException("Нужна хотя бы одна страница.");
+
+        var objects = new List<string>();
+        var fontObjNumber = 3 + pages.Length * 2;
+
+        var kids = string.Join(" ", Enumerable.Range(0, pages.Length).Select(i => $"{3 + i * 2} 0 R"));
+        objects.Add("<< /Type /Catalog /Pages 2 0 R >>");
+        objects.Add($"<< /Type /Pages /Kids [{kids}] /Count {pages.Length} >>");
+
+        for (var i = 0; i < pages.Length; i++)
+        {
+            var p = pages[i];
+            var contentObj = 4 + i * 2;
+            var w = p.Width.ToString("0.##", CultureInfo.InvariantCulture);
+            var h = p.Height.ToString("0.##", CultureInfo.InvariantCulture);
+            objects.Add(
+                $"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w} {h}] /Rotate {p.Rotate} " +
+                $"/Contents {contentObj} 0 R /Resources << /Font << /F1 {fontObjNumber} 0 R >> >> >>");
+
+            var text = p.Text.Replace("\\", "\\\\").Replace("(", "\\(").Replace(")", "\\)");
+            var stream = $"BT /F1 24 Tf 72 72 Td ({text}) Tj ET";
+            objects.Add($"<< /Length {stream.Length} >>\nstream\n{stream}\nendstream");
+        }
+
+        objects.Add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+
+        var buffer = new MemoryStream();
+        void WriteRaw(string s) => buffer.Write(Encoding.ASCII.GetBytes(s));
+
+        WriteRaw("%PDF-1.4\n");
+        buffer.Write(new byte[] { (byte)'%', 0xE2, 0xE3, 0xCF, 0xD3, (byte)'\n' });
+
+        var offsets = new long[objects.Count + 1];
+        for (var i = 0; i < objects.Count; i++)
+        {
+            offsets[i + 1] = buffer.Position;
+            WriteRaw($"{i + 1} 0 obj\n{objects[i]}\nendobj\n");
+        }
+
+        var xrefPosition = buffer.Position;
+        WriteRaw($"xref\n0 {objects.Count + 1}\n");
+        WriteRaw("0000000000 65535 f \n");
+        for (var i = 1; i <= objects.Count; i++)
+            WriteRaw($"{offsets[i]:0000000000} 00000 n \n");
+        WriteRaw($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xrefPosition}\n%%EOF\n");
+
+        return buffer.ToArray();
+    }
+
+    public static string WriteToTemp(string fileName, params PageSpec[] pages)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, fileName);
+        File.WriteAllBytes(path, Build(pages));
+        return path;
+    }
+}

@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\NexusPdf.Application\NexusPdf.Application.csproj" />
+    <ProjectReference Include="..\NexusPdf.Domain\NexusPdf.Domain.csproj" />
+    <ProjectReference Include="..\NexusPdf.Infrastructure\NexusPdf.Infrastructure.csproj" />
+    <ProjectReference Include="..\NexusPdf.Pdf.Pdfium\NexusPdf.Pdf.Pdfium.csproj" />
+    <ProjectReference Include="..\NexusPdf.Pdf.Qpdf\NexusPdf.Pdf.Qpdf.csproj" />
+    <ProjectReference Include="..\NexusPdf.Pdf.Abstractions\NexusPdf.Pdf.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="gong-wpf-dragdrop" Version="4.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,153 @@
+namespace NexusPdf.Domain;
+
+/// <summary>Обратимая операция над логической структурой документа.</summary>
+public interface IDocumentOperation
+{
+    /// <summary>Название для журнала операций и меню «Отменить …».</summary>
+    string Name { get; }
+
+    void Apply(DocumentModel model);
+    void Revert(DocumentModel model);
+}
+
+/// <summary>
+/// База: перед применением снимает снимок порядка страниц, чем гарантирует
+/// байт-в-байт точный откат независимо от сложности операции.
+/// Список PageRef — лёгкие ссылки, поэтому снимок дёшев даже на тысячах страниц.
+/// </summary>
+public abstract class DocumentOperationBase : IDocumentOperation
+{
+    private List<PageRef>? _before;
+
+    public abstract string Name { get; }
+
+    public void Apply(DocumentModel model)
+    {
+        _before = new List<PageRef>(model.Pages);
+        ApplyCore(model);
+    }
+
+    public void Revert(DocumentModel model)
+    {
+        if (_before is null)
+            throw new InvalidOperationException("Revert вызван до Apply.");
+        model.Pages.Clear();
+        model.Pages.AddRange(_before);
+    }
+
+    protected abstract void ApplyCore(DocumentModel model);
+
+    protected static int[] ValidateIndices(DocumentModel model, IReadOnlyList<int> indices)
+    {
+        var result = indices.Distinct().OrderBy(i => i).ToArray();
+        if (result.Length == 0)
+            throw new ArgumentException("Не выбрано ни одной страницы.");
+        if (result[0] < 0 || result[^1] >= model.Pages.Count)
+            throw new ArgumentOutOfRangeException(nameof(indices), "Номер страницы вне документа.");
+        return result;
+    }
+}
+
+public sealed class RotatePagesOperation : DocumentOperationBase
+{
+    private readonly IReadOnlyList<int> _indices;
+    private readonly int _quarterTurns;
+
+    public RotatePagesOperation(IReadOnlyList<int> indices, int quarterTurns)
+    {
+        _indices = indices;
+        _quarterTurns = quarterTurns;
+    }
+
+    public override string Name => "Поворот страниц";
+
+    protected override void ApplyCore(DocumentModel model)
+    {
+        foreach (var i in ValidateIndices(model, _indices))
+            model.Pages[i] = model.Pages[i].Rotated(_quarterTurns);
+    }
+}
+
+public sealed class DeletePagesOperation : DocumentOperationBase
+{
+    private readonly IReadOnlyList<int> _indices;
+
+    public DeletePagesOperation(IReadOnlyList<int> indices) => _indices = indices;
+
+    public override string Name => "Удаление страниц";
+
+    protected override void ApplyCore(DocumentModel model)
+    {
+        var sorted = ValidateIndices(model, _indices);
+        if (sorted.Length == model.Pages.Count)
+            throw new InvalidOperationException("Нельзя удалить все страницы документа.");
+        for (var k = sorted.Length - 1; k >= 0; k--)
+            model.Pages.RemoveAt(sorted[k]);
+    }
+}
+
+public sealed class InsertPagesOperation : DocumentOperationBase
+{
+    private readonly int _insertIndex;
+    private readonly IReadOnlyList<PageRef> _pages;
+
+    public InsertPagesOperation(int insertIndex, IReadOnlyList<PageRef> pages)
+    {
+        _insertIndex = insertIndex;
+        _pages = pages;
+    }
+
+    public override string Name => "Вставка страниц";
+
+    protected override void ApplyCore(DocumentModel model)
+    {
+        if (_insertIndex < 0 || _insertIndex > model.Pages.Count)
+            throw new ArgumentOutOfRangeException(nameof(_insertIndex));
+        model.Pages.InsertRange(_insertIndex, _pages);
+    }
+}
+
+/// <summary>Перемещение выбранных страниц к позиции вставки (позиция считается до изъятия выбранных).</summary>
+public sealed class MovePagesOperation : DocumentOperationBase
+{
+    private readonly IReadOnlyList<int> _indices;
+    private readonly int _insertIndex;
+
+    public MovePagesOperation(IReadOnlyList<int> indices, int insertIndex)
+    {
+        _indices = indices;
+        _insertIndex = insertIndex;
+    }
+
+    public override string Name => "Перемещение страниц";
+
+    protected override void ApplyCore(DocumentModel model)
+    {
+        var sorted = ValidateIndices(model, _indices);
+        if (_insertIndex < 0 || _insertIndex > model.Pages.Count)
+            throw new ArgumentOutOfRangeException(nameof(_insertIndex));
+
+        var moved = sorted.Select(i => model.Pages[i]).ToList();
+        var adjustedInsert = _insertIndex - sorted.Count(i => i < _insertIndex);
+        for (var k = sorted.Length - 1; k >= 0; k--)
+            model.Pages.RemoveAt(sorted[k]);
+        model.Pages.InsertRange(adjustedInsert, moved);
+    }
+}
+
+public sealed class DuplicatePagesOperation : DocumentOperationBase
+{
+    private readonly IReadOnlyList<int> _indices;
+
+    public DuplicatePagesOperation(IReadOnlyList<int> indices) => _indices = indices;
+
+    public override string Name => "Дублирование страниц";
+
+    protected override void ApplyCore(DocumentModel model)
+    {
+        var sorted = ValidateIndices(model, _indices);
+        // Вставляем копию сразу после каждой исходной страницы, идя с конца.
+        for (var k = sorted.Length - 1; k >= 0; k--)
+            model.Pages.Insert(sorted[k] + 1, model.Pages[sorted[k]]);
+    }
+}
