@@ -13,6 +13,7 @@
     <Project Path="src/NexusPdf.Printing/NexusPdf.Printing.csproj" />
     <Project Path="src/NexusPdf.Printing.Windows/NexusPdf.Printing.Windows.csproj" />
     <Project Path="src/NexusPdf.Signing/NexusPdf.Signing.csproj" />
+    <Project Path="src/NexusPdf.Ux/NexusPdf.Ux.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/NexusPdf.PdfEngineTests/NexusPdf.PdfEngineTests.csproj" />
