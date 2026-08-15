@@ -1,6 +1,7 @@
 # Базовая линия состояния (аудит)
 
-Дата: 2026-08-15. Commit на момент фиксации: `121c736`. Версия: 0.15.0.
+Дата фиксации: 2026-08-15, commit `121c736`, версия 0.15.0.
+Обновлено 2026-08-15 под 0.17.0 (движки, состав решения).
 Машина: Windows 11 Pro 26200, .NET SDK 10.0.400 (пользовательская установка
 `C:\Users\yurch\.dotnet`).
 
@@ -23,9 +24,16 @@
 
 Активные (собираются и используются): `NexusPdf.App.Desktop`,
 `NexusPdf.Application`, `NexusPdf.Cli`, `NexusPdf.Domain`,
-`NexusPdf.Infrastructure`, `NexusPdf.Ocr`, `NexusPdf.Pdf.Abstractions`,
-`NexusPdf.Pdf.Pdfium`, `NexusPdf.Pdf.Qpdf`, `NexusPdf.Signing`,
-`NexusPdf.Setup`, тесты `NexusPdf.UnitTests`, `NexusPdf.PdfEngineTests`.
+`NexusPdf.Infrastructure`, `NexusPdf.Ocr`, `NexusPdf.Ocr.Paddle`,
+`NexusPdf.Pdf.Abstractions`, `NexusPdf.Pdf.Pdfium`, `NexusPdf.Pdf.Qpdf`,
+`NexusPdf.Signing`, `NexusPdf.Setup`, тесты `NexusPdf.UnitTests`,
+`NexusPdf.PdfEngineTests`.
+
+Все, кроме `NexusPdf.Setup` (он собирается отдельно установочным шагом),
+перечислены в `NexusPdf.slnx`. Это не формальность: проект вне решения
+собирается в конфигурации Debug и в таком виде попадает в Release-поставку —
+так туда утекали `NexusPdf.Ocr.Paddle` и `NexusPdf.Signing` (исправлено
+2026-08-15).
 
 **Мёртвые проекты (найдены аудитом, ранее не значились ни в одном отчёте):**
 
@@ -47,7 +55,10 @@
   потоке процесса (`PdfiumThread.Shared`).
 - **qpdf 12.4.0** (внешний exe в поставке) — структурная проверка,
   линеаризация, оптимизация, шифрование AES-256, нормализация QDF.
-- **Tesseract 5.2.0** + `tessdata_fast` rus/eng — OCR.
+- **PaddleOCR PP-OCRv6** через **RapidOcrNet 3.1.0** (ONNX Runtime 1.27) —
+  распознавание по умолчанию, 16 языковых пакетов из `tools/ocrmodels`
+  (пины и SHA-256 — `tools/ocrmodels.lock.json`).
+- **Tesseract 5.2.0** + `tessdata_fast` rus/eng — запасной OCR.
 - **System.Security.Cryptography.Pkcs** — PKCS#7-подписи.
 
 Второго независимого движка для перекрёстной проверки результата нет:

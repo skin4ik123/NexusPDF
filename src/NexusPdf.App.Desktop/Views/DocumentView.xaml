@@ -409,8 +409,8 @@
               <TextBlock Text="{l:Loc ExtractPages}" Margin="6,0,0,0"/>
             </StackPanel>
           </Button>
-          <TextBlock Text="{l:Loc OrganizeHint}" Foreground="{DynamicResource TextSecondary}"
-                     FontSize="11" VerticalAlignment="Center" Margin="16,0,0,0"/>
+          <!-- Подсказка живёт в контекстной полосе группы «Страницы»;
+               здесь она была вторым экземпляром той же фразы на экране. -->
         </StackPanel>
       </Border>
 
