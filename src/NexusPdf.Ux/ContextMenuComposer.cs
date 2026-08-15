@@ -51,6 +51,36 @@ public sealed class ContextMenuComposer
         {
             CommandIds.OpenLink, CommandIds.CopyLinkAddress,
         },
+        [SelectionKind.TextObject] = new[]
+        {
+            CommandIds.EditText,
+            CommandIds.DuplicateObject,
+            CommandIds.BringForward, CommandIds.SendBackward,
+            CommandIds.ObjectProperties,
+            CommandIds.Delete,
+        },
+        [SelectionKind.Image] = new[]
+        {
+            CommandIds.EditImageInPaint,
+            CommandIds.DuplicateObject,
+            CommandIds.BringForward, CommandIds.SendBackward,
+            CommandIds.ObjectProperties,
+            CommandIds.Delete,
+        },
+        [SelectionKind.Shape] = new[]
+        {
+            CommandIds.DuplicateObject,
+            CommandIds.BringForward, CommandIds.SendBackward,
+            CommandIds.ObjectProperties,
+            CommandIds.Delete,
+        },
+        [SelectionKind.Annotation] = new[]
+        {
+            CommandIds.DuplicateObject,
+            CommandIds.BringForward, CommandIds.SendBackward,
+            CommandIds.ObjectProperties,
+            CommandIds.Delete,
+        },
         [SelectionKind.Page] = new[]
         {
             CommandIds.RotateRight, CommandIds.RotateLeft, CommandIds.Rotate180,

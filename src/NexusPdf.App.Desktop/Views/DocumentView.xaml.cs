@@ -252,6 +252,37 @@ public partial class DocumentView : UserControl
             var readScale = readPage.DisplayScale;
             if (readScale <= 0) return;
             var readPos = e.GetPosition(readElement);
+            var readPt = new Point(readPos.X / readScale, readPos.Y / readScale);
+
+            // Выбранный объект перехватывает клик первым: иначе его нельзя
+            // ни подвинуть, ни растянуть — рамка была бы украшением.
+            var handle = _vm.HitObjectHandle(readPage, readPt.X, readPt.Y);
+            if (handle != NexusPdf.Ux.ResizeHandle.None)
+            {
+                _objectPage = readPage;
+                _objectElement = readElement;
+                _objectStartPt = readPt;
+                _vm.BeginObjectDrag(handle);
+                PagesList.CaptureMouse();
+                e.Handled = true;
+                return;
+            }
+
+            if (_vm.SelectObjectAt(readPage, readPt.X, readPt.Y))
+            {
+                _objectPage = readPage;
+                _objectElement = readElement;
+                _objectStartPt = readPt;
+                _vm.BeginObjectDrag(NexusPdf.Ux.ResizeHandle.Move);
+                PagesList.CaptureMouse();
+                PagesList.Focus();      // Delete и стрелки должны дойти до документа
+                e.Handled = true;
+                return;
+            }
+
+            // Клик мимо объектов снимает выделение: рамка не должна висеть
+            // на объекте, о котором пользователь уже забыл.
+            _vm.ClearObjectSelection();
 
             if (_vm.LinkAt(readPage, readPos.X, readPos.Y) is { } link)
             {
@@ -304,8 +335,32 @@ public partial class DocumentView : UserControl
             _vm.ClearTextSelection(); // клик по пустому месту снимает прежнее выделение
     }
 
+    // Перетаскивание выбранного объекта
+    private PageViewModel? _objectPage;
+    private FrameworkElement? _objectElement;
+    private Point _objectStartPt;
+
     private void OnPagesPreviewMouseMove(object sender, MouseEventArgs e)
     {
+        // Перетаскивание выбранного объекта — раньше всего остального:
+        // мышь захвачена именно им.
+        if (_objectPage != null && _objectElement != null && _vm != null)
+        {
+            if (e.LeftButton != MouseButtonState.Pressed || !PagesList.IsMouseCaptured)
+            {
+                EndObjectDrag(e, commit: false);
+                return;
+            }
+            var scale = _objectPage.DisplayScale;
+            if (scale > 0)
+            {
+                var pos = e.GetPosition(_objectElement);
+                _vm.UpdateObjectDrag(pos.X / scale - _objectStartPt.X, pos.Y / scale - _objectStartPt.Y);
+            }
+            e.Handled = true;
+            return;
+        }
+
         // Протяжка выделения текста.
         if (_selectionPage != null && _selectionElement != null && _vm != null)
         {
@@ -373,6 +428,13 @@ public partial class DocumentView : UserControl
 
     private void OnPagesPreviewMouseUp(object sender, MouseButtonEventArgs e)
     {
+        if (_objectPage != null)
+        {
+            EndObjectDrag(e, commit: true);
+            e.Handled = true;
+            return;
+        }
+
         if (_drawPage != null && _vm != null)
         {
             var strokePage = _drawPage;
@@ -400,6 +462,38 @@ public partial class DocumentView : UserControl
         PagesList.ReleaseMouseCapture();
         _vm?.PlacePendingRect(page, rect);
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// Завершение перетаскивания объекта. Правка применяется ОДНОЙ операцией
+    /// на отпускание кнопки: применять её на каждое движение мыши значило бы
+    /// перерисовывать страницу движком по десять раз в секунду и заваливать
+    /// историю отмены.
+    /// </summary>
+    private void EndObjectDrag(MouseEventArgs e, bool commit)
+    {
+        var page = _objectPage;
+        var element = _objectElement;
+        _objectPage = null;
+        _objectElement = null;
+        if (PagesList.IsMouseCaptured)
+            PagesList.ReleaseMouseCapture();
+        if (_vm == null || page == null || element == null) return;
+
+        if (!commit)
+        {
+            _vm.CancelObjectDrag();
+            return;
+        }
+
+        var scale = page.DisplayScale;
+        if (scale <= 0)
+        {
+            _vm.CancelObjectDrag();
+            return;
+        }
+        var pos = e.GetPosition(element);
+        _vm.CommitObjectDrag(pos.X / scale - _objectStartPt.X, pos.Y / scale - _objectStartPt.Y);
     }
 
     private Rect DragRectPt(MouseEventArgs e)
@@ -503,7 +597,14 @@ public partial class DocumentView : UserControl
         var kind = NexusPdf.Ux.SelectionKind.Nothing;
         NexusPdf.Pdf.Abstractions.PdfPageLink? link = null;
 
-        if (_vm.LinkAt(page, position.X, position.Y) is { } hitLink)
+        var scale = page.DisplayScale;
+        if (scale > 0 && _vm.SelectObjectAt(page, position.X / scale, position.Y / scale))
+        {
+            // Щелчок по объекту сначала выбирает его: меню обязано относиться
+            // к тому, по чему щёлкнули, а не к прошлому выделению.
+            kind = _vm.SelectedObjectKind;
+        }
+        else if (_vm.LinkAt(page, position.X, position.Y) is { } hitLink)
         {
             kind = NexusPdf.Ux.SelectionKind.Link;
             link = hitLink;
@@ -752,6 +853,36 @@ public partial class DocumentView : UserControl
             _vm.ClearTextSelection();
             e.Handled = true;
             return;
+        }
+
+        // Выбранный объект: Delete удаляет, Esc снимает выделение, стрелки
+        // двигают точнее мыши (с Ctrl — по одному пункту).
+        if (_vm.HasObjectSelection)
+        {
+            var step = (Keyboard.Modifiers & ModifierKeys.Control) != 0 ? 1.0 : 5.0;
+            switch (e.Key)
+            {
+                case Key.Delete or Key.Back:
+                    _vm.DeleteSelectedObject();
+                    e.Handled = true;
+                    return;
+                case Key.Escape:
+                    _vm.ClearObjectSelection();
+                    e.Handled = true;
+                    return;
+                case Key.Left:
+                    e.Handled = _vm.NudgeSelectedObject(-step, 0);
+                    return;
+                case Key.Right:
+                    e.Handled = _vm.NudgeSelectedObject(step, 0);
+                    return;
+                case Key.Up:
+                    e.Handled = _vm.NudgeSelectedObject(0, -step);
+                    return;
+                case Key.Down:
+                    e.Handled = _vm.NudgeSelectedObject(0, step);
+                    return;
+            }
         }
 
         // Дальше — ввод в поля формы; до первого клика в поле клавиатура

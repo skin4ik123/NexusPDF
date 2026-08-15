@@ -194,6 +194,45 @@ public sealed class ReplaceOverlayOperation : DocumentOperationBase
     }
 }
 
+/// <summary>
+/// Перемещение наложенного объекта по порядку отрисовки — «на передний план» и
+/// «на задний план». Порядок в списке и есть порядок рисования, поэтому
+/// операция просто переставляет элемент.
+/// </summary>
+public sealed class ReorderOverlayOperation : DocumentOperationBase
+{
+    private readonly int _pageIndex;
+    private readonly int _fromIndex;
+    private readonly int _toIndex;
+
+    public ReorderOverlayOperation(int pageIndex, int fromIndex, int toIndex)
+    {
+        _pageIndex = pageIndex;
+        _fromIndex = fromIndex;
+        _toIndex = toIndex;
+    }
+
+    public override string Name => "Порядок содержимого";
+
+    protected override void ApplyCore(DocumentModel model)
+    {
+        ValidateIndices(model, new[] { _pageIndex });
+        var page = model.Pages[_pageIndex];
+        var list = page.OverlayList.ToList();
+        if (_fromIndex < 0 || _fromIndex >= list.Count)
+            throw new ArgumentOutOfRangeException(nameof(_fromIndex));
+
+        var target = Math.Clamp(_toIndex, 0, list.Count - 1);
+        if (target == _fromIndex)
+            return;
+
+        var item = list[_fromIndex];
+        list.RemoveAt(_fromIndex);
+        list.Insert(target, item);
+        model.Pages[_pageIndex] = page.WithOverlays(list);
+    }
+}
+
 /// <summary>Пакетное добавление контента (колонтитулы, номера, водяной знак) — одна операция Undo.</summary>
 public sealed class AddOverlaysOperation : DocumentOperationBase
 {

@@ -97,6 +97,44 @@ public static class AppCommands
             Unavailable = NeedsEditableDocument,
         };
 
+        // ---------- Выбранный объект ----------
+        yield return new CommandDescriptor
+        {
+            Id = CommandIds.Delete, TitleKey = "UxDeleteObject", Glyph = "",
+            Category = CommandCategory.Edit, Group = MenuGroup.Dangerous, Shortcut = "Delete",
+            Keywords = new[] { "удалить объект", "стереть", "delete" },
+            Unavailable = c => !c.HasObjectSelection ? "UxNoObjectSelection" : null,
+        };
+        yield return new CommandDescriptor
+        {
+            Id = CommandIds.DuplicateObject, TitleKey = "UxDuplicateObject", Glyph = "",
+            Category = CommandCategory.Edit, Group = MenuGroup.Editing,
+            Keywords = new[] { "дублировать объект", "копия объекта" },
+            Unavailable = c => !c.HasObjectSelection ? "UxNoObjectSelection" : null,
+        };
+        yield return new CommandDescriptor
+        {
+            Id = CommandIds.BringForward, TitleKey = "UxBringForward", Glyph = "",
+            Category = CommandCategory.Content, Group = MenuGroup.Arrange,
+            Keywords = new[] { "вперёд", "поверх", "на передний план" },
+            Unavailable = c => !c.HasObjectSelection ? "UxNoObjectSelection" : null,
+        };
+        yield return new CommandDescriptor
+        {
+            Id = CommandIds.SendBackward, TitleKey = "UxSendBackward", Glyph = "",
+            Category = CommandCategory.Content, Group = MenuGroup.Arrange,
+            Keywords = new[] { "назад", "под низ", "на задний план" },
+            Unavailable = c => !c.HasObjectSelection ? "UxNoObjectSelection" : null,
+        };
+        yield return new CommandDescriptor
+        {
+            Id = CommandIds.ObjectProperties, TitleKey = "UxObjectProperties", Glyph = "",
+            Category = CommandCategory.Edit, Group = MenuGroup.Properties,
+            Danger = CommandDanger.Safe, OpensDialog = true,
+            Keywords = new[] { "свойства объекта", "размер объекта", "положение" },
+            Unavailable = c => !c.HasObjectSelection ? "UxNoObjectSelection" : null,
+        };
+
         // ---------- Просмотр ----------
         yield return Safe(CommandIds.ZoomIn, "ZoomIn", "\uE8A3", CommandCategory.View,
             "Ctrl++", new[] { "крупнее", "увеличить", "zoom in", "приблизить", "масштаб" });

@@ -97,6 +97,7 @@ public sealed class UxCommandHub
             CurrentPageNumber = doc.CurrentPageNumber,
             PageCount = doc.PageCount,
             HasTextSelection = doc.HasSelection,
+            HasSelectedObject = doc.HasObjectSelection,
             HasUnsavedChanges = doc.IsDirty,
             CanUndo = doc.CanUndo,
             CanRedo = doc.CanRedo,
@@ -201,6 +202,17 @@ public sealed class UxCommandHub
         [CommandIds.Copy] = t => t.Document?.CopySelectionCommand.Execute(null),
         [CommandIds.SelectAllOnPage] = t => t.Document?.SelectAllOnPageCommand.Execute(null),
         [CommandIds.Duplicate] = t => t.Document?.DuplicateSelectedCommand.Execute(PagesOf(t)),
+
+        // Выбранный объект
+        [CommandIds.Delete] = t => t.Document?.DeleteSelectedObject(),
+        [CommandIds.DuplicateObject] = t => t.Document?.DuplicateSelectedObject(),
+        [CommandIds.BringForward] = t => t.Document?.MoveSelectedObjectInOrder(forward: true),
+        [CommandIds.SendBackward] = t => t.Document?.MoveSelectedObjectInOrder(forward: false),
+        [CommandIds.ObjectProperties] = t =>
+        {
+            if (t.Document is not { } doc) return;
+            InfoDialog.Show(Owner, Loc.Get("UxObjectProperties"), doc.DescribeSelectedObject());
+        },
 
         // Просмотр
         [CommandIds.ZoomIn] = _ => _main.ZoomInActiveCommand.Execute(null),
