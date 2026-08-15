@@ -33,6 +33,9 @@ public sealed class AppSettings
     /// <summary>Показывать подписи рядом со значками быстрой панели.</summary>
     public bool QuickPanelLabels { get; set; } = true;
 
+    /// <summary>Рабочее пространство: reading | editing | reviewing | pages.</summary>
+    public string Workspace { get; set; } = "reading";
+
     public bool KeepBackupOnSave { get; set; }
     public double LastZoom { get; set; } = 1.0;
 

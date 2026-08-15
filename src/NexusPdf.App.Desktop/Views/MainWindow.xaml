@@ -306,6 +306,22 @@
                   <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeSystem}"
                           Command="{Binding SetThemeCommand}" CommandParameter="system" Click="OnMenuItem"/>
                 </StackPanel>
+                <TextBlock Text="{l:Loc UxWorkspace}" Foreground="{DynamicResource TextSecondary}"
+                           FontSize="11" Margin="6,4" ToolTip="{l:Loc UxWorkspaceHint}"/>
+                <StackPanel Orientation="Horizontal" Margin="4,0">
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxWorkspaceReading}"
+                          Margin="0,0,10,0" Command="{Binding ApplyWorkspaceCommand}"
+                          CommandParameter="reading" Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxWorkspaceEditing}"
+                          Margin="0,0,10,0" Command="{Binding ApplyWorkspaceCommand}"
+                          CommandParameter="editing" Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxWorkspaceReviewing}"
+                          Margin="0,0,10,0" Command="{Binding ApplyWorkspaceCommand}"
+                          CommandParameter="reviewing" Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxWorkspacePages}"
+                          Command="{Binding ApplyWorkspaceCommand}"
+                          CommandParameter="pages" Click="OnMenuItem"/>
+                </StackPanel>
                 <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxQuickPanelMenu}"
                         HorizontalAlignment="Left" Margin="6,4,0,0"
                         Command="{Binding ConfigureQuickPanelCommand}" Click="OnMenuItem"/>

@@ -700,5 +700,12 @@
   "UxObjectWidth": "Width, mm",
   "UxObjectHeight": "Height, mm",
   "UxObjectOrder": "Drawing order: {0} of {1}",
-  "UxObjectFixedSize": "This object has a fixed size: it can be moved but not resized."
+  "UxObjectFixedSize": "This object has a fixed size: it can be moved but not resized.",
+  "UxWorkspace": "Workspace",
+  "UxWorkspaceReading": "Reading",
+  "UxWorkspaceEditing": "Editing",
+  "UxWorkspaceReviewing": "Reviewing",
+  "UxWorkspacePages": "Pages",
+  "UxWorkspaceApplied": "Workspace: {0}",
+  "UxWorkspaceHint": "A set of panels for the task: reading, editing, reviewing and arranging pages all want different ones."
 }

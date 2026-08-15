@@ -700,5 +700,12 @@
   "UxObjectWidth": "Ширина, мм",
   "UxObjectHeight": "Высота, мм",
   "UxObjectOrder": "Порядок отрисовки: {0} из {1}",
-  "UxObjectFixedSize": "У этого объекта фиксированный размер: его можно двигать, но не растягивать."
+  "UxObjectFixedSize": "У этого объекта фиксированный размер: его можно двигать, но не растягивать.",
+  "UxWorkspace": "Рабочее пространство",
+  "UxWorkspaceReading": "Чтение",
+  "UxWorkspaceEditing": "Правка",
+  "UxWorkspaceReviewing": "Рецензирование",
+  "UxWorkspacePages": "Страницы",
+  "UxWorkspaceApplied": "Рабочее пространство: {0}",
+  "UxWorkspaceHint": "Набор панелей под задачу: читать, править, рецензировать и собирать страницы удобно по-разному."
 }
