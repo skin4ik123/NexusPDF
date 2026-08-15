@@ -6,7 +6,8 @@ using NexusPdf.Signing;
 
 namespace NexusPdf.App.Desktop.Views;
 
-public sealed record SignRequest(X509Certificate2 Certificate, string Reason, string Location);
+public sealed record SignRequest(
+    X509Certificate2 Certificate, string Reason, string Location, bool VisibleStamp);
 
 public partial class SignDialog : Window
 {
@@ -87,7 +88,8 @@ public partial class SignDialog : Window
             ErrorLabel.Visibility = Visibility.Visible;
             return;
         }
-        _result = new SignRequest(row.Certificate, ReasonBox.Text.Trim(), LocationBox.Text.Trim());
+        _result = new SignRequest(row.Certificate, ReasonBox.Text.Trim(), LocationBox.Text.Trim(),
+            VisibleStampCheck.IsChecked == true);
         DialogResult = true;
     }
 }

@@ -150,6 +150,8 @@
   "SignReason": "Reason (optional)",
   "SignLocation": "Location (optional)",
   "SignAction": "Sign a copy…",
+  "SignVisibleStamp": "Visible stamp at the bottom of the first page",
+  "SignVisibleStampHint": "The signer name and date are baked into the page and covered by the signature. For documents with forms the fields become static.",
   "SignNoCertSelected": "Select a certificate.",
   "SignNoPrivateKey": "The certificate has no private key — nothing to sign with.",
   "SignPfxError": "Could not open the PFX file:",
