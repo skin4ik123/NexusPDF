@@ -106,6 +106,20 @@ public sealed class OverlayPreview
                     HeightPt = shape.HeightPt,
                 };
             }
+            case RedactionDraft redaction:
+                // Предпросмотр вымарки: чёрная заливка с красной рамкой —
+                // видно и «что скроется», и что это именно вымарка.
+                return new OverlayPreview
+                {
+                    IsRectShape = true,
+                    Stroke = MakeBrush(0xFFDC2626),
+                    Fill = MakeBrush(0xE6000000),
+                    StrokeThickness = 1.5,
+                    XPt = redaction.XPt,
+                    YPt = redaction.YPt,
+                    WidthPt = redaction.WidthPt,
+                    HeightPt = redaction.HeightPt,
+                };
             default:
                 return null;
         }

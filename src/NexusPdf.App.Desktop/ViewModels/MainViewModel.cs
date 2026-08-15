@@ -222,15 +222,19 @@ public sealed partial class MainViewModel : ObservableObject
         try
         {
             var savedDirect = SaveService.CanSaveDirect(doc.Document);
+            var hadRedactions = doc.Document.Session.Model.Pages
+                .Any(p => p.OverlayList.Any(o => o is NexusPdf.Pdf.Abstractions.RedactionDraft));
             await _services.SaveService.SaveAsAsync(
                 doc.Document, targetPath, _services.Settings.KeepBackupOnSave, CancellationToken.None);
             var hadForms = doc.HasAcroForm;
             doc.ResetFormStateAfterSave();
             _ = doc.LoadSignaturesAsync();
             // Перекомпоновка не переносит AcroForm: поля становятся статикой.
-            doc.StatusText = hadForms && !savedDirect
-                ? Loc.Get("FormFlattenedWarning")
-                : Loc.F("SavedStatus", Path.GetFileName(targetPath));
+            doc.StatusText = hadRedactions
+                ? Loc.Get("RedactionApplied")
+                : hadForms && !savedDirect
+                    ? Loc.Get("FormFlattenedWarning")
+                    : Loc.F("SavedStatus", Path.GetFileName(targetPath));
             _services.Settings.TouchRecent(targetPath);
             _services.SaveSettings();
             SyncRecent();
@@ -404,6 +408,16 @@ public sealed partial class MainViewModel : ObservableObject
                 rect.X, rect.Y, rect.Width, rect.Height,
                 StrokeArgb: 0xFFDC2626, FillArgb: 0x00000000, BorderWidthPt: 2,
                 IsEllipse: true, Contents: "", Author: Environment.UserName));
+    }
+
+    [RelayCommand]
+    private void AddRedaction()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        doc.StatusText = Loc.Get("RedactHint");
+        doc.BeginRectPlacement((_, rect) =>
+            new NexusPdf.Pdf.Abstractions.RedactionDraft(
+                rect.X, rect.Y, rect.Width, rect.Height));
     }
 
     [RelayCommand]

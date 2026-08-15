@@ -120,6 +120,10 @@
                   IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc EllipseTool}">
             <TextBlock Text="◯" FontSize="13"/>
           </Button>
+          <Button Style="{StaticResource ToolButton}" Command="{Binding AddRedactionCommand}"
+                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc RedactTool}">
+            <TextBlock Text="▮" FontSize="14" Foreground="#DC2626"/>
+          </Button>
           <ToggleButton Style="{StaticResource ToolButton}"
                         IsChecked="{Binding ActiveDocument.IsCommentsVisible, Mode=OneWay}"
                         Command="{Binding ToggleCommentsActiveCommand}"

@@ -70,6 +70,18 @@ public sealed class OpenedDocument : IAsyncDisposable
         return Handles[page.SourceId].RenderPageContentOnlyAsync(page.SourcePageIndex, pixelWidth, pixelHeight, page.RotationOffset, ct);
     }
 
+    /// <summary>
+    /// Композиция с ПРИМЕНЁННЫМИ вымарками: страницы с RedactionDraft заменены
+    /// растровыми. Возвращённый объект держит временный источник — освобождать
+    /// (await using) ПОСЛЕ компоновки результата.
+    /// </summary>
+    public async Task<RedactionBaker.BakeResult> BuildCompositionBakedAsync(
+        IPdfRenderEngine engine, CancellationToken ct)
+    {
+        var composition = BuildComposition();
+        return await RedactionBaker.BakeAsync(engine, this, composition, ct).ConfigureAwait(false);
+    }
+
     public IReadOnlyList<ComposedPage> BuildComposition() =>
         Session.Model.Pages
             .Select(p => new ComposedPage(
