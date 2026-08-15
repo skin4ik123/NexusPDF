@@ -29,6 +29,49 @@ public sealed class PrintLayoutEngine
         };
     }
 
+    /// <summary>
+    /// Добавляет к готовым листам типографские метки и печатные наложения.
+    /// Отдельным шагом, потому что и то и другое зависит от ОБЩЕГО числа
+    /// листов («лист 3 из 7»), которое до конца раскладки неизвестно.
+    /// </summary>
+    public IReadOnlyList<SheetPlan> ApplyMarksAndOverlays(
+        IReadOnlyList<SheetPlan> sheets, LayoutSettings settings, OverlayContext context)
+    {
+        if (settings.Marks.Marks == PrinterMarks.None && settings.Overlays.Count == 0)
+            return sheets;
+
+        var result = new List<SheetPlan>(sheets.Count);
+        for (var i = 0; i < sheets.Count; i++)
+        {
+            var sheet = sheets[i];
+            var sheetContext = context with { SheetNumber = i + 1, SheetCount = sheets.Count };
+
+            var marks = new List<SheetMark>(sheet.Marks);
+            marks.AddRange(MarkBuilder.Build(sheet, settings.Marks, sheetContext));
+
+            foreach (var overlay in settings.Overlays)
+            {
+                if (!overlay.AppliesTo(i, sheets.Count)) continue;
+                var text = OverlayTemplate.Render(overlay.Template, sheetContext);
+                if (text.Length == 0) continue;
+                marks.Add(new SheetMark("overlay", OverlayArea(sheet, overlay), text));
+            }
+
+            result.Add(sheet with { Marks = marks });
+        }
+        return result;
+    }
+
+    /// <summary>Место наложения на листе по выбранному углу и отступу.</summary>
+    private static RectPt OverlayArea(SheetPlan sheet, PrintOverlay overlay)
+    {
+        var area = sheet.PrintableAreaPt.Deflate(MarginsPt.Uniform(overlay.MarginPt));
+        var height = overlay.FontSizePt * 1.3;
+        var top = overlay.Position is OverlayPosition.TopLeft
+            or OverlayPosition.TopCenter or OverlayPosition.TopRight;
+        return new RectPt(area.XPt, top ? area.YPt : area.BottomPt - height, area.WidthPt, height);
+    }
+
     // ----- Общая геометрия листа -----
 
     /// <summary>
