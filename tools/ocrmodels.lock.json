@@ -1,26 +1,257 @@
 {
-  "comment": "Модели PaddleOCR в формате ONNX для движка RapidOcrNet. Ссылки и SHA-256 сверены с default_models.yaml проекта RapidOCR (ветка main, набор v3.9.2) и ПРОВЕРЕНЫ фактической загрузкой. Лицензия моделей Apache-2.0. ВАЖНО: ModelScope отвечает 403 без заголовка User-Agent — загрузчик обязан его слать.",
-  "files": [
-    {
-      "name": "PP-OCRv6_det_medium.onnx",
-      "role": "detection",
-      "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv6/det/PP-OCRv6_det_medium.onnx",
-      "sha256": "92078b7355007ccfffcd4c8cd441a3afd4538904d06881b29a155e1e679907c2",
-      "note": "Поиск строк на странице, 59 МБ. Детекция от языка не зависит, поэтому здесь берётся самая новая версия — v6. Хеш сверен с default_models.yaml и подтверждён загрузкой."
-    },
-    {
-      "name": "cyrillic_PP-OCRv5_rec_mobile.onnx",
-      "role": "recognition",
-      "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/cyrillic_PP-OCRv5_rec_mobile.onnx",
-      "sha256": "90f761b4bfcce0c8c561c0cb5c887b0971d3ec01c32164bdf7374a35b0982711",
-      "note": "Самый новый распознаватель, умеющий кириллицу. Распознаватели PP-OCRv6 для русского НЕ годятся: их словарь ppocrv6_dict.txt содержит 18708 символов — 15565 иероглифов, 53 латинских, 10 цифр и НОЛЬ кириллических (проверено загрузкой). Server-варианты есть только для китайского, для кириллицы mobile — единственный."
-    },
-    {
-      "name": "ppocrv5_cyrillic_dict.txt",
-      "role": "recognition-dict",
-      "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv5/rec/cyrillic_PP-OCRv5_rec_mobile/ppocrv5_cyrillic_dict.txt",
-      "sha256": "db40aa52ceb112055be80c694afdf655d5d2c4f7873704524cc16a447ca913ba",
-      "note": "Словарь ИМЕННО модели v5: 850 символов, из них 66 кириллических, 52 латинских, 10 цифр. Не путать с cyrillic_dict.txt (163 символа) — это словарь модели v3, и с ним v5 выдаёт мусор: набор символов задаётся словарём, а не моделью."
-    }
-  ]
+    "comment":  "Модели PaddleOCR (ONNX) для движка RapidOcrNet. Ссылки и SHA-256 взяты из default_models.yaml проекта RapidOCR, релиз v3.9.2 от 21.07.2026 — самый свежий на 15.08.2026. Лицензия Apache-2.0. ВАЖНО: ModelScope отвечает 403 без заголовка User-Agent.",
+    "shared":  [
+                   {
+                       "name":  "PP-OCRv6_det_medium.onnx",
+                       "role":  "detection",
+                       "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv6/det/PP-OCRv6_det_medium.onnx",
+                       "sha256":  "92078b7355007ccfffcd4c8cd441a3afd4538904d06881b29a155e1e679907c2",
+                       "note":  "Поиск строк, 59 МБ. Общая для всех языков: детекция от письма не зависит, поэтому здесь самая новая версия v6. Хеш подтверждён загрузкой."
+                   }
+               ],
+    "packs":  [
+                  {
+                      "id":  "cyrillic",
+                      "title":  "Кириллица, латиница и греческий",
+                      "languages":  "русский, украинский, белорусский, сербский, болгарский, македонский, английский, немецкий, французский, польский, чешский, турецкий, греческий",
+                      "isDefault":  true,
+                      "model":  {
+                                    "name":  "cyrillic_PP-OCRv5_rec_mobile.onnx",
+                                    "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/cyrillic_PP-OCRv5_rec_mobile.onnx",
+                                    "sha256":  "90f761b4bfcce0c8c561c0cb5c887b0971d3ec01c32164bdf7374a35b0982711"
+                                },
+                      "dict":  {
+                                   "name":  "ppocrv5_cyrillic_dict.txt",
+                                   "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv5/rec/cyrillic_PP-OCRv5_rec_mobile/ppocrv5_cyrillic_dict.txt"
+                               }
+                  },
+                  {
+                      "id":  "eslav",
+                      "title":  "Восточнославянские (специализированная)",
+                      "languages":  "русский, украинский, белорусский",
+                      "isDefault":  false,
+                      "model":  {
+                                    "name":  "eslav_PP-OCRv5_rec_mobile.onnx",
+                                    "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/eslav_PP-OCRv5_rec_mobile.onnx",
+                                    "sha256":  "08705d6721849b1347d26187f15a5e362c431963a2a62bfff4feac578c489aab"
+                                },
+                      "dict":  {
+                                   "name":  "ppocrv5_eslav_dict.txt",
+                                   "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv5/rec/eslav_PP-OCRv5_rec_mobile/ppocrv5_eslav_dict.txt"
+                               }
+                  },
+                  {
+                      "id":  "latin",
+                      "title":  "Латиница",
+                      "languages":  "английский, немецкий, французский, испанский, итальянский, польский, чешский, венгерский, румынский и другие европейские",
+                      "isDefault":  false,
+                      "model":  {
+                                    "name":  "latin_PP-OCRv5_rec_mobile.onnx",
+                                    "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/latin_PP-OCRv5_rec_mobile.onnx",
+                                    "sha256":  "b20bd37c168a570f583afbc8cd7925603890efbcdc000a59e22c269d160b5f5a"
+                                },
+                      "dict":  {
+                                   "name":  "ppocrv5_latin_dict.txt",
+                                   "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv5/rec/latin_PP-OCRv5_rec_mobile/ppocrv5_latin_dict.txt"
+                               }
+                  },
+                  {
+                      "id":  "en",
+                      "title":  "Только английский",
+                      "languages":  "английский",
+                      "isDefault":  false,
+                      "model":  {
+                                    "name":  "en_PP-OCRv5_rec_mobile.onnx",
+                                    "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/en_PP-OCRv5_rec_mobile.onnx",
+                                    "sha256":  "c3461add59bb4323ecba96a492ab75e06dda42467c9e3d0c18db5d1d21924be8"
+                                },
+                      "dict":  {
+                                   "name":  "ppocrv5_en_dict.txt",
+                                   "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv5/rec/en_PP-OCRv5_rec_mobile/ppocrv5_en_dict.txt"
+                               }
+                  },
+                  {
+                      "id":  "el",
+                      "title":  "Греческий",
+                      "languages":  "греческий",
+                      "isDefault":  false,
+                      "model":  {
+                                    "name":  "el_PP-OCRv5_rec_mobile.onnx",
+                                    "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/el_PP-OCRv5_rec_mobile.onnx",
+                                    "sha256":  "b4368bccd557123c702b7549fee6cd1e94b581337d1c9b65310f109131542b7f"
+                                },
+                      "dict":  {
+                                   "name":  "ppocrv5_el_dict.txt",
+                                   "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv5/rec/el_PP-OCRv5_rec_mobile/ppocrv5_el_dict.txt"
+                               }
+                  },
+                  {
+                      "id":  "arabic",
+                      "title":  "Арабское письмо",
+                      "languages":  "арабский, персидский, урду",
+                      "isDefault":  false,
+                      "model":  {
+                                    "name":  "arabic_PP-OCRv5_rec_mobile.onnx",
+                                    "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/arabic_PP-OCRv5_rec_mobile.onnx",
+                                    "sha256":  "c1192e632d0baa9146ae5b756a0e635e3dc63c1733737ebfd1629e87144e9295"
+                                },
+                      "dict":  {
+                                   "name":  "ppocrv5_arabic_dict.txt",
+                                   "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv5/rec/arabic_PP-OCRv5_rec_mobile/ppocrv5_arabic_dict.txt"
+                               }
+                  },
+                  {
+                      "id":  "devanagari",
+                      "title":  "Деванагари",
+                      "languages":  "хинди, маратхи, непальский, санскрит",
+                      "isDefault":  false,
+                      "model":  {
+                                    "name":  "devanagari_PP-OCRv5_rec_mobile.onnx",
+                                    "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/devanagari_PP-OCRv5_rec_mobile.onnx",
+                                    "sha256":  "d6f0a906580e3fa6b324a318718f1f31f268b6ea8ef985f91c2012a37f52c91e"
+                                },
+                      "dict":  {
+                                   "name":  "ppocrv5_devanagari_dict.txt",
+                                   "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv5/rec/devanagari_PP-OCRv5_rec_mobile/ppocrv5_devanagari_dict.txt"
+                               }
+                  },
+                  {
+                      "id":  "korean",
+                      "title":  "Корейский",
+                      "languages":  "корейский",
+                      "isDefault":  false,
+                      "model":  {
+                                    "name":  "korean_PP-OCRv5_rec_mobile.onnx",
+                                    "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/korean_PP-OCRv5_rec_mobile.onnx",
+                                    "sha256":  "cd6e2ea50f6943ca7271eb8c56a877a5a90720b7047fe9c41a2e541a25773c9b"
+                                },
+                      "dict":  {
+                                   "name":  "ppocrv5_korean_dict.txt",
+                                   "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv5/rec/korean_PP-OCRv5_rec_mobile/ppocrv5_korean_dict.txt"
+                               }
+                  },
+                  {
+                      "id":  "thai",
+                      "title":  "Тайский",
+                      "languages":  "тайский",
+                      "isDefault":  false,
+                      "model":  {
+                                    "name":  "th_PP-OCRv5_rec_mobile.onnx",
+                                    "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/th_PP-OCRv5_rec_mobile.onnx",
+                                    "sha256":  "de541dd83161c241ff426f7ecfd602a0ba77d686cf3ab9a6c255ea82fd08006e"
+                                },
+                      "dict":  {
+                                   "name":  "ppocrv5_th_dict.txt",
+                                   "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv5/rec/th_PP-OCRv5_rec_mobile/ppocrv5_th_dict.txt"
+                               }
+                  },
+                  {
+                      "id":  "tamil",
+                      "title":  "Тамильский",
+                      "languages":  "тамильский",
+                      "isDefault":  false,
+                      "model":  {
+                                    "name":  "ta_PP-OCRv5_rec_mobile.onnx",
+                                    "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/ta_PP-OCRv5_rec_mobile.onnx",
+                                    "sha256":  "a42448808b7dea87597336f12438935f40353f1949e8360acd9e06b4da21bfe1"
+                                },
+                      "dict":  {
+                                   "name":  "ppocrv5_ta_dict.txt",
+                                   "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv5/rec/ta_PP-OCRv5_rec_mobile/ppocrv5_ta_dict.txt"
+                               }
+                  },
+                  {
+                      "id":  "telugu",
+                      "title":  "Телугу",
+                      "languages":  "телугу",
+                      "isDefault":  false,
+                      "model":  {
+                                    "name":  "te_PP-OCRv5_rec_mobile.onnx",
+                                    "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/te_PP-OCRv5_rec_mobile.onnx",
+                                    "sha256":  "a3690451b50028a09a3316a1274f7c05728151ea3f8fd392696397a7fefcbd92"
+                                },
+                      "dict":  {
+                                   "name":  "ppocrv5_te_dict.txt",
+                                   "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv5/rec/te_PP-OCRv5_rec_mobile/ppocrv5_te_dict.txt"
+                               }
+                  },
+                  {
+                      "id":  "chinese",
+                      "title":  "Китайский упрощённый (точный)",
+                      "languages":  "китайский упрощённый, английский",
+                      "isDefault":  false,
+                      "model":  {
+                                    "name":  "ch_PP-OCRv5_rec_server.onnx",
+                                    "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/ch_PP-OCRv5_rec_server.onnx",
+                                    "sha256":  "e09385400eaaaef34ceff54aeb7c4f0f1fe014c27fa8b9905d4709b65746562a"
+                                },
+                      "dict":  {
+                                   "name":  "ppocrv5_dict.txt",
+                                   "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv5/rec/ch_PP-OCRv5_rec_server/ppocrv5_dict.txt"
+                               }
+                  },
+                  {
+                      "id":  "chinese-fast",
+                      "title":  "Китайский упрощённый (быстрый)",
+                      "languages":  "китайский упрощённый, английский",
+                      "isDefault":  false,
+                      "model":  {
+                                    "name":  "ch_PP-OCRv5_rec_mobile.onnx",
+                                    "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/ch_PP-OCRv5_rec_mobile.onnx",
+                                    "sha256":  "5825fc7ebf84ae7a412be049820b4d86d77620f204a041697b0494669b1742c5"
+                                },
+                      "dict":  {
+                                   "name":  "ppocrv5_dict.txt",
+                                   "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv5/rec/ch_PP-OCRv5_rec_mobile/ppocrv5_dict.txt"
+                               }
+                  },
+                  {
+                      "id":  "japanese",
+                      "title":  "Японский",
+                      "languages":  "японский",
+                      "isDefault":  false,
+                      "model":  {
+                                    "name":  "japan_PP-OCRv4_rec_mobile.onnx",
+                                    "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv4/rec/japan_PP-OCRv4_rec_mobile.onnx",
+                                    "sha256":  "e1075a67dba758ecfc7ebc78a10ae61c95ac8fb66a9c86fab5541e33f085cb7a"
+                                },
+                      "dict":  {
+                                   "name":  "japan_dict.txt",
+                                   "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv4/rec/japan_PP-OCRv4_rec_mobile/japan_dict.txt"
+                               },
+                      "note":  "Версии v5 для японского не существует, v4 — самая новая."
+                  },
+                  {
+                      "id":  "chinese-traditional",
+                      "title":  "Китайский традиционный",
+                      "languages":  "китайский традиционный",
+                      "isDefault":  false,
+                      "model":  {
+                                    "name":  "chinese_cht_PP-OCRv3_rec_mobile.onnx",
+                                    "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv4/rec/chinese_cht_PP-OCRv3_rec_mobile.onnx",
+                                    "sha256":  "779656d044ce388045e02ea9244724616194e63928606436cdfc6dc3c9528cc6"
+                                },
+                      "dict":  {
+                                   "name":  "chinese_cht_dict.txt",
+                                   "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv4/rec/chinese_cht_PP-OCRv3_rec_mobile/chinese_cht_dict.txt"
+                               },
+                      "note":  "Новее v3 не выпускалось."
+                  },
+                  {
+                      "id":  "kannada",
+                      "title":  "Каннада",
+                      "languages":  "каннада",
+                      "isDefault":  false,
+                      "model":  {
+                                    "name":  "ka_PP-OCRv4_rec_mobile.onnx",
+                                    "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv4/rec/ka_PP-OCRv4_rec_mobile.onnx",
+                                    "sha256":  "9c1e186ea1d13cf6c853e57b42d382c3961fdd6acc2409e0d0dc44defc9f152b"
+                                },
+                      "dict":  {
+                                   "name":  "ka_dict.txt",
+                                   "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv4/rec/kannada_PP-OCRv4_rec_mobile/ka_dict.txt"
+                               },
+                      "note":  "Версии v5 не существует, v4 — самая новая."
+                  }
+              ]
 }
