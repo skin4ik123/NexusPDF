@@ -33,6 +33,10 @@ public sealed record PageRef(
     public PageRef Rotated(int quarterTurns) =>
         this with { RotationOffset = NormalizeQuarterTurns(RotationOffset + quarterTurns) };
 
+    /// <summary>Полная замена списка правок (используется при правке уже добавленного).</summary>
+    public PageRef WithOverlays(IReadOnlyList<PageOverlay> overlays) =>
+        this with { Overlays = overlays.ToList() };
+
     public PageRef WithOverlay(PageOverlay overlay)
     {
         // Фиксируем ориентацию страницы на момент размещения: при последующем

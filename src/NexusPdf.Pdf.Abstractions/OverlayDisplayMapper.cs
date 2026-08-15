@@ -119,6 +119,17 @@ public static class OverlayDisplayMapper
                 }
                 return (ink with { Strokes = strokes }, 0);
             }
+            case OcrEditableTextOverlay editable:
+            {
+                var lines = new List<OcrTextLine>(editable.Lines.Count);
+                foreach (var line in editable.Lines)
+                {
+                    var anchor = RemapPoint(
+                        line.XPt, line.YPt + line.HeightPt, delta, finalWidth, finalHeight);
+                    lines.Add(line with { XPt = anchor.X, YPt = anchor.Y - line.HeightPt });
+                }
+                return (editable with { Lines = lines }, -90.0 * delta);
+            }
             case OcrTextLayerOverlay ocr:
             {
                 // Переносится якорь запекания — левый нижний угол рамки слова

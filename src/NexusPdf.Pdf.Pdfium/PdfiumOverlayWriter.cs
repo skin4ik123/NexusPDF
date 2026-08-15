@@ -145,6 +145,11 @@ internal static class PdfiumOverlayWriter
                         rotation, left, bottom, contentWidth, contentHeight);
                     contentAdded = true;
                     break;
+                case OcrEditableTextOverlay editable:
+                    ApplyOcrEditableLayer(document, page, font, editable, extraAngle,
+                        rotation, left, bottom, contentWidth, contentHeight);
+                    contentAdded = true;
+                    break;
             }
         }
 
@@ -456,6 +461,110 @@ internal static class PdfiumOverlayWriter
             fpdf_edit.FPDFPageObjTransform(obj, cos, sin, -sin, cos, offsetX + cx, offsetY + cy);
 
             fpdf_edit.FPDFPageInsertObject(page, obj); // объект переходит во владение страницы
+        }
+    }
+
+    /// <summary>
+    /// Закрашенный прямоугольник как ОБЪЕКТ СОДЕРЖИМОГО страницы (не
+    /// аннотация): порядок отрисовки такой же, как у остальных объектов,
+    /// поэтому вставленный следом текст ляжет поверх заплатки.
+    /// </summary>
+    private static void InsertFilledRect(
+        FpdfPageT page, double xPt, double yPt, double widthPt, double heightPt, uint argb,
+        int rotation, double offsetX, double offsetY, double contentWidth, double contentHeight)
+    {
+        var rect = ToContentRect(xPt, yPt, widthPt, heightPt,
+            rotation, offsetX, offsetY, contentWidth, contentHeight);
+        var left = Math.Min(rect.Left, rect.Right);
+        var bottom = Math.Min(rect.Top, rect.Bottom);
+        var width = Math.Abs(rect.Right - rect.Left);
+        var height = Math.Abs(rect.Top - rect.Bottom);
+        if (!(width > 0) || !(height > 0))
+            return;
+
+        var obj = fpdf_edit.FPDFPageObjCreateNewRect(left, bottom, width, height);
+        if (obj == null || obj.__Instance == IntPtr.Zero)
+            throw new PdfEngineException("Не удалось создать подложку под текст.");
+
+        fpdf_edit.FPDFPageObjSetFillColor(obj,
+            (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb, (byte)(argb >> 24));
+        // FPDF_FILLMODE_WINDING = 1, обводки нет.
+        fpdf_edit.FPDFPathSetDrawMode(obj, 1, 0);
+        fpdf_edit.FPDFPageInsertObject(page, obj);
+    }
+
+    /// <summary>
+    /// РЕДАКТИРУЕМЫЙ текст вместо скана: под строкой закрашивается
+    /// прямоугольник цветом бумаги, а поверх ставится обычный видимый текст.
+    /// Закраска обязательна — иначе поверх букв скана легли бы вторые буквы и
+    /// строка двоилась бы.
+    /// </summary>
+    private static void ApplyOcrEditableLayer(
+        FpdfDocumentT document, FpdfPageT page, FpdfFontT? font, OcrEditableTextOverlay layer,
+        double extraAngleDeg, int rotation, double offsetX, double offsetY,
+        double contentWidth, double contentHeight)
+    {
+        if (font == null)
+            throw new PdfEngineException(
+                "Для редактируемого текста нужен системный шрифт TTF (Segoe UI/Arial), но он не найден.");
+
+        var angle = (extraAngleDeg + 90.0 * rotation) * Math.PI / 180.0;
+        var cos = Math.Cos(angle);
+        var sin = Math.Sin(angle);
+
+        foreach (var line in layer.Lines)
+        {
+            if (line.Text.Length == 0 ||
+                !double.IsFinite(line.XPt) || !double.IsFinite(line.YPt) ||
+                !(line.WidthPt > 0) || !(line.HeightPt > 0))
+                continue;
+
+            // 1. Заплатка цветом бумаги с небольшим запасом: у букв есть
+            //    выносные элементы, вылезающие за рамку строки.
+            //    Именно ОБЪЕКТ СТРАНИЦЫ, а не аннотация: аннотации рисуются
+            //    поверх всего содержимого и закрыли бы собственный текст.
+            var pad = line.HeightPt * 0.18;
+            InsertFilledRect(page,
+                line.XPt - pad, line.YPt - pad,
+                line.WidthPt + pad * 2, line.HeightPt + pad * 2,
+                line.BackgroundArgb, rotation, offsetX, offsetY, contentWidth, contentHeight);
+
+            // 2. Настоящий видимый текст в той же рамке.
+            var obj = fpdf_edit.FPDFPageObjCreateTextObj(document, font, (float)line.HeightPt);
+            if (obj == null || obj.__Instance == IntPtr.Zero)
+                throw new PdfEngineException("Не удалось создать редактируемый текстовый объект.");
+
+            var buffer = new ushort[line.Text.Length + 1];
+            for (var i = 0; i < line.Text.Length; i++)
+                buffer[i] = line.Text[i];
+            if (fpdf_edit.FPDFTextSetText(obj, ref buffer[0]) == 0)
+            {
+                fpdf_edit.FPDFPageObjDestroy(obj);
+                continue;
+            }
+
+            fpdf_edit.FPDFPageObjSetFillColor(obj,
+                (byte)(line.InkArgb >> 16), (byte)(line.InkArgb >> 8), (byte)line.InkArgb,
+                (byte)(line.InkArgb >> 24));
+
+            float bl = 0, bb = 0, br = 0, bt = 0;
+            if (fpdf_edit.FPDFPageObjGetBounds(obj, ref bl, ref bb, ref br, ref bt) != 0)
+            {
+                var measuredW = br - bl;
+                var measuredH = bt - bb;
+                if (measuredW > 0.01 && measuredH > 0.01)
+                {
+                    var sx = Math.Clamp(line.WidthPt / measuredW, 0.05, 20.0);
+                    var sy = Math.Clamp(line.HeightPt / measuredH, 0.05, 20.0);
+                    fpdf_edit.FPDFPageObjTransform(obj, 1, 0, 0, 1, -bl, -bb);
+                    fpdf_edit.FPDFPageObjTransform(obj, sx, 0, 0, sy, 0, 0);
+                }
+            }
+
+            var (cx, cy) = DisplayedToContent(
+                line.XPt, line.YPt + line.HeightPt, rotation, contentWidth, contentHeight);
+            fpdf_edit.FPDFPageObjTransform(obj, cos, sin, -sin, cos, offsetX + cx, offsetY + cy);
+            fpdf_edit.FPDFPageInsertObject(page, obj);
         }
     }
 

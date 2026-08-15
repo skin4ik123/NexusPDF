@@ -156,6 +156,44 @@ public sealed class AddOverlayOperation : DocumentOperationBase
     }
 }
 
+/// <summary>
+/// Замена одного оверлея страницы другим — правка уже добавленного содержимого
+/// (например строки распознанного текста) без потери остальных правок.
+/// </summary>
+public sealed class ReplaceOverlayOperation : DocumentOperationBase
+{
+    private readonly int _pageIndex;
+    private readonly Pdf.Abstractions.PageOverlay _old;
+    private readonly Pdf.Abstractions.PageOverlay _new;
+
+    public ReplaceOverlayOperation(
+        int pageIndex, Pdf.Abstractions.PageOverlay oldOverlay, Pdf.Abstractions.PageOverlay newOverlay)
+    {
+        _pageIndex = pageIndex;
+        _old = oldOverlay;
+        _new = newOverlay;
+    }
+
+    public override string Name => "Правка содержимого";
+
+    protected override void ApplyCore(DocumentModel model)
+    {
+        ValidateIndices(model, new[] { _pageIndex });
+        var page = model.Pages[_pageIndex];
+        var index = -1;
+        for (var i = 0; i < page.OverlayList.Count; i++)
+        {
+            if (ReferenceEquals(page.OverlayList[i], _old)) { index = i; break; }
+        }
+        if (index < 0)
+            throw new InvalidOperationException("Правимое содержимое больше не найдено на странице.");
+
+        var overlays = page.OverlayList.ToList();
+        overlays[index] = _new;
+        model.Pages[_pageIndex] = page.WithOverlays(overlays);
+    }
+}
+
 /// <summary>Пакетное добавление контента (колонтитулы, номера, водяной знак) — одна операция Undo.</summary>
 public sealed class AddOverlaysOperation : DocumentOperationBase
 {

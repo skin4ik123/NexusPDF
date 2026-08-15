@@ -62,8 +62,10 @@ public partial class OcrDialog : Window
                 Bar.Value = p.PagesDone;
                 ProgressLabel.Text = Loc.F("OcrProgressLabel", p.PagesDone, p.TotalPages, p.WordsSoFar);
             });
-            var result = await _service.RecognizeAsync(_document.Document, targets, progress, _cts.Token);
-            ShowResult(result);
+            var editable = ModeEditable.IsChecked == true;
+            var result = await _service.RecognizeAsync(
+                _document.Document, targets, progress, _cts.Token, editable);
+            ShowResult(result, editable);
         }
         catch (Exception ex)
         {
@@ -80,7 +82,7 @@ public partial class OcrDialog : Window
         }
     }
 
-    private void ShowResult(OcrRunResult result)
+    private void ShowResult(OcrRunResult result, bool editable = false)
     {
         // Итог перечисляет ВСЁ, что реально произошло: отмена и ошибка
         // середины прогона не скрывают уже применённые страницы.
@@ -100,6 +102,9 @@ public partial class OcrDialog : Window
             lines.Add(Loc.Get("OcrResultNothing"));
 
         ResultLabel.Text = string.Join(Environment.NewLine, lines);
+        // В режиме редактируемого текста подсказка другая: там главное — что
+        // строку можно править кликом, а не что она стала искаться.
+        HintLabel.Text = Loc.Get(editable ? "OcrEditableHint" : "OcrSaveHint");
         HintLabel.Visibility = result.PagesRecognized > 0 ? Visibility.Visible : Visibility.Collapsed;
         ProgressPanel.Visibility = Visibility.Collapsed;
         ResultPanel.Visibility = Visibility.Visible;

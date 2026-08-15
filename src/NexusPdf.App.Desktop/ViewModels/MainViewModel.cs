@@ -785,6 +785,12 @@ public sealed partial class MainViewModel : ObservableObject
     {
         try
         {
+            // Сначала — распознанные строки: они лежат в правках страницы,
+            // попадание считается на месте, без обращения к движку. Иначе
+            // «редактируемый текст» пришлось бы сперва сохранять.
+            if (TryEditRecognizedLine(doc, page, xPt, yPt))
+                return;
+
             var handle = doc.Document.Handles[page.PageRef.SourceId];
             var target = await handle.GetTextObjectAtAsync(
                 page.PageRef.SourcePageIndex, page.PageRef.RotationOffset, xPt, yPt,
@@ -821,6 +827,55 @@ public sealed partial class MainViewModel : ObservableObject
             ErrorDialog.Show(OwnerWindow, Loc.Get("TextEditTitle"), ex.Message, ex.ToString());
             doc.StatusText = Loc.Get("Ready");
         }
+    }
+
+    /// <summary>
+    /// Правка строки, полученной распознаванием в режиме редактируемого текста.
+    /// Возвращает true, если строка под курсором нашлась и была обработана.
+    /// </summary>
+    private bool TryEditRecognizedLine(
+        DocumentViewModel doc, PageViewModel page, double xPt, double yPt)
+    {
+        var overlays = doc.Document.Session.Model.Pages[page.LogicalIndex].OverlayList;
+        for (var i = overlays.Count - 1; i >= 0; i--)
+        {
+            if (overlays[i] is not NexusPdf.Pdf.Abstractions.OcrEditableTextOverlay layer)
+                continue;
+
+            var mapped = NexusPdf.Pdf.Abstractions.OverlayDisplayMapper.ToFrame(
+                layer, page.PageRef.RotationOffset,
+                page.SizePt.WidthPoints, page.SizePt.HeightPoints).Overlay
+                as NexusPdf.Pdf.Abstractions.OcrEditableTextOverlay;
+            if (mapped == null)
+                continue;
+
+            for (var j = 0; j < mapped.Lines.Count; j++)
+            {
+                var line = mapped.Lines[j];
+                if (xPt < line.XPt || xPt > line.XPt + line.WidthPt ||
+                    yPt < line.YPt || yPt > line.YPt + line.HeightPt)
+                    continue;
+
+                var edited = TextEditDialog.Edit(OwnerWindow, line.Text,
+                    Loc.Get("OcrRecognizedLine"), false, line.HeightPt,
+                    _ => Task.FromResult(true)); // системный шрифт рисует всё, что введут
+                if (edited == null || edited == line.Text)
+                {
+                    doc.StatusText = Loc.Get("Ready");
+                    return true;
+                }
+
+                var lines = layer.Lines.ToList();
+                lines[j] = lines[j] with { Text = edited };
+                doc.Document.Session.Apply(new NexusPdf.Domain.ReplaceOverlayOperation(
+                    page.LogicalIndex, layer, layer with { Lines = lines }));
+                doc.StatusText = Loc.Get("TextEditDone");
+                Log.Information("Изменена распознанная строка {Line} на странице {Page}",
+                    j + 1, page.LogicalIndex + 1);
+                return true;
+            }
+        }
+        return false;
     }
 
     // ----- Рельс инструментов (левая колонка) -----
