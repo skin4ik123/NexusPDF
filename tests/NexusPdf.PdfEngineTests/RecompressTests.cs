@@ -85,6 +85,155 @@ public sealed class RecompressTests : IAsyncLifetime
         Assert.False(isWhite, "Центр страницы не должен быть белым — изображение обязано остаться.");
     }
 
+    /// <summary>Минимальный PDF с одним изображением, заданным сырыми объектами (для /SMask, ImageMask, матриц).</summary>
+    private static string WriteRawImagePdf(string dir, string name, string imageObjects, string contentOps, string resources)
+    {
+        var raw = "%PDF-1.4\n" +
+                  "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" +
+                  "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n" +
+                  "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] " +
+                  $"/Contents 4 0 R /Resources << /XObject << {resources} >> >> >>\nendobj\n" +
+                  $"4 0 obj\n<< /Length {contentOps.Length} >>\nstream\n{contentOps}\nendstream\nendobj\n" +
+                  imageObjects +
+                  "trailer\n<< /Size 9 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n";
+        var path = Path.Combine(dir, name);
+        File.WriteAllBytes(path, System.Text.Encoding.Latin1.GetBytes(raw));
+        return path;
+    }
+
+    private static string FlateImageObject(int number, int width, int height, byte[] rgb, string extraKeys)
+    {
+        var compressed = Compress(rgb);
+        var body = $"<< /Type /XObject /Subtype /Image /Width {width} /Height {height} " +
+                   "/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode " +
+                   $"/Length {compressed.Length} {extraKeys} >>";
+        return $"{number} 0 obj\n{body}\nstream\n{System.Text.Encoding.Latin1.GetString(compressed)}\nendstream\nendobj\n";
+    }
+
+    private static byte[] Compress(byte[] data)
+    {
+        using var output = new MemoryStream();
+        using (var deflate = new System.IO.Compression.ZLibStream(
+                   output, System.IO.Compression.CompressionLevel.Fastest, leaveOpen: true))
+            deflate.Write(data);
+        return output.ToArray();
+    }
+
+    private static byte[] NoisyRgb(int width, int height)
+    {
+        var rgb = new byte[width * height * 3];
+        uint seed = 777;
+        for (var i = 0; i < rgb.Length; i++)
+        {
+            seed = seed * 1664525 + 1013904223;
+            rgb[i] = (byte)seed;
+        }
+        return rgb;
+    }
+
+    [Fact]
+    public async Task Image_With_SMask_Is_Skipped_Not_Flattened()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        // Красный RGB 600x600 (300 DPI на 144pt) с ПОЛНОСТЬЮ прозрачной /SMask.
+        var red = new byte[600 * 600 * 3];
+        for (var i = 0; i < red.Length; i += 3) red[i] = 0xFF;
+        var smask = Compress(new byte[600 * 600]); // альфа 0 всюду
+        var images =
+            FlateImageObject(5, 600, 600, red, "/SMask 6 0 R") +
+            $"6 0 obj\n<< /Type /XObject /Subtype /Image /Width 600 /Height 600 " +
+            $"/ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length {smask.Length} >>\n" +
+            $"stream\n{System.Text.Encoding.Latin1.GetString(smask)}\nendstream\nendobj\n";
+        var path = WriteRawImagePdf(dir, "smask.pdf", images,
+            "q 144 0 0 144 50 50 cm /Im1 Do Q", "/Im1 5 0 R");
+
+        var target = Path.Combine(dir, "smask-out.pdf");
+        var stats = await _pdfium.RecompressImagesAsync(path, null, target, 100,
+            (bgra, w, h) => EncodeJpeg(bgra, w, h, 75), CancellationToken.None);
+
+        // Прозрачное изображение обязано быть пропущено, а не «сплющено».
+        Assert.Equal(0, stats.Recompressed);
+        await using var reopened = await _pdfium.OpenAsync(target, null, CancellationToken.None);
+        var render = await reopened.RenderPageAsync(0, 300, 300, 0, CancellationToken.None);
+        var center = (150 * render.Stride) + (120 * 4);
+        Assert.True(render.Bgra[center + 1] > 250 && render.Bgra[center + 2] > 250,
+            "Полностью прозрачное изображение не должно проявиться на странице.");
+    }
+
+    [Fact]
+    public async Task Stencil_ImageMask_Is_Skipped()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        // 1-битный трафарет 600x600: все биты 0 = закрашивать текущим цветом.
+        var bits = Compress(new byte[600 / 8 * 600]);
+        var images =
+            "5 0 obj\n<< /Type /XObject /Subtype /Image /Width 600 /Height 600 " +
+            $"/ImageMask true /BitsPerComponent 1 /Filter /FlateDecode /Length {bits.Length} >>\n" +
+            $"stream\n{System.Text.Encoding.Latin1.GetString(bits)}\nendstream\nendobj\n";
+        var path = WriteRawImagePdf(dir, "stencil.pdf", images,
+            "q 1 0 0 rg 144 0 0 144 50 50 cm /Im1 Do Q", "/Im1 5 0 R");
+
+        var target = Path.Combine(dir, "stencil-out.pdf");
+        var stats = await _pdfium.RecompressImagesAsync(path, null, target, 100,
+            (bgra, w, h) => EncodeJpeg(bgra, w, h, 75), CancellationToken.None);
+
+        Assert.Equal(0, stats.Recompressed); // трафарет не трогаем
+        await using var reopened = await _pdfium.OpenAsync(target, null, CancellationToken.None);
+        var render = await reopened.RenderPageAsync(0, 300, 300, 0, CancellationToken.None);
+        var center = (150 * render.Stride) + (120 * 4);
+        Assert.True(render.Bgra[center + 2] > 200 && render.Bgra[center + 1] < 60,
+            "Красный трафарет обязан остаться видимым после пересжатия файла.");
+    }
+
+    [Fact]
+    public async Task Rotated_Placement_Uses_Matrix_Dpi_Not_Metadata()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        // 600x150 px, размещено с поворотом 90°: истинные 300 DPI по обеим осям
+        // (метаданные pdfium для такого размещения врут в разы).
+        var images = FlateImageObject(5, 600, 150, NoisyRgb(600, 150), "");
+        var path = WriteRawImagePdf(dir, "rotated.pdf", images,
+            "q 0 144 -36 0 150 50 cm /Im1 Do Q", "/Im1 5 0 R");
+
+        var target = Path.Combine(dir, "rotated-out.pdf");
+        var stats = await _pdfium.RecompressImagesAsync(path, null, target, 150,
+            (bgra, w, h) => EncodeJpeg(bgra, w, h, 75), CancellationToken.None);
+
+        Assert.Equal(1, stats.Recompressed);
+        // DPI из матрицы: 600px на 144pt = 300 DPI → цель 150 → уменьшение
+        // ровно вдвое (300x75), а не вчетверо+ по врущим метаданным (75x19).
+        // Прокси-проверка масштаба: JPEG шума 300x75 весит на порядок больше
+        // замыленного 75x19.
+        await using var reopened = await _pdfium.OpenAsync(target, null, CancellationToken.None);
+        Assert.Equal(1, reopened.Info.PageCount);
+        Assert.True(new FileInfo(target).Length > 8 * 1024,
+            $"Файл подозрительно мал ({new FileInfo(target).Length} Б) — изображение замылено сильнее цели.");
+    }
+
+    [Fact]
+    public async Task Shared_Image_On_Two_Pages_Is_Recompressed_Once_For_Largest_Placement()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        // Одно изображение на двух страницах: крупное (300 DPI) и мелкое.
+        var spec = NoisyPage(1200, 1200, 300);
+        var source = Path.Combine(dir, "shared.pdf");
+        await _pdfium.CreateImageDocumentAsync(new[] { spec, spec with { WidthPoints = 72, HeightPoints = 72 } },
+            source, CancellationToken.None);
+
+        var target = Path.Combine(dir, "shared-out.pdf");
+        var stats = await _pdfium.RecompressImagesAsync(source, null, target, 150,
+            (bgra, w, h) => EncodeJpeg(bgra, w, h, 75), CancellationToken.None);
+
+        // Группа одна: счётчик — изображения, не размещения.
+        Assert.Equal(1, stats.Recompressed);
+        await using var reopened = await _pdfium.OpenAsync(target, null, CancellationToken.None);
+        Assert.Equal(2, reopened.Info.PageCount);
+    }
+
     [Fact]
     public async Task LowDpi_Image_Is_Left_Untouched()
     {
