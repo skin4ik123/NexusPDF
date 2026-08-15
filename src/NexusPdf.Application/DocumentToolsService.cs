@@ -259,6 +259,60 @@ public sealed class DocumentToolsService
     }
 
     /// <summary>
+    /// Копия документа с выровненными и вычищенными сканами. Как и сжатие,
+    /// работает через копию: исходный файл не трогается, а результат
+    /// проверяется на число страниц перед подменой.
+    /// </summary>
+    public async Task<ScanEnhanceStats> EnhanceScansCopyAsync(
+        OpenedDocument document, string targetPath, ScanEnhanceOptions options,
+        IProgress<int>? progress, CancellationToken ct)
+    {
+        SaveService.ThrowIfTargetIsOpenSource(document, targetPath);
+        var metadata = await document.PrimaryHandle.GetMetadataAsync(ct).ConfigureAwait(false);
+        if (document.Password != null || metadata.IsEncrypted)
+            throw new PdfEngineException(
+                "Улучшение защищённых документов не поддерживается: сохранение сняло бы шифрование молча. Сначала сохраните копию без защиты.");
+        await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
+
+        await using var baked = await document.BuildCompositionBakedAsync(_renderEngine, ct).ConfigureAwait(false);
+        var composition = baked.Composition;
+        var stats = new ScanEnhanceStats();
+
+        await SafeFileReplace.WriteAndReplaceAsync(
+            targetPath,
+            async tempPath =>
+            {
+                var plain = tempPath + ".plain";
+                try
+                {
+                    if (SaveService.CanSaveDirect(document))
+                        await document.PrimaryHandle.SaveCurrentAsync(plain, ct).ConfigureAwait(false);
+                    else
+                        await _renderEngine.ComposeAsync(composition, plain, ct).ConfigureAwait(false);
+                    stats = await _renderEngine.EnhanceScansAsync(
+                        plain, null, tempPath, options, progress, ct).ConfigureAwait(false);
+                }
+                finally
+                {
+                    try { File.Delete(plain); } catch { /* лучшая попытка */ }
+                }
+            },
+            async tempPath =>
+            {
+                var handle = await _renderEngine.OpenAsync(tempPath, null, ct).ConfigureAwait(false);
+                await using (handle.ConfigureAwait(false))
+                {
+                    if (handle.Info.PageCount != composition.Count)
+                        throw new PdfEngineException("Проверка исправленной копии не пройдена: число страниц не совпало.");
+                }
+            },
+            keepBackup: false,
+            ct).ConfigureAwait(false);
+
+        return stats;
+    }
+
+    /// <summary>
     /// Структурная оптимизация уже готового файла на месте. Ошибка здесь не
     /// повод терять пересжатие: без qpdf копия просто останется без этой
     /// последней пары процентов.

@@ -118,6 +118,9 @@ public static class CommandIds
     public const string MergePdfs = "convert.merge";
     public const string CompareDocuments = "convert.compare";
     public const string OptimizeCopy = "convert.optimize";
+
+    /// <summary>Выравнивание наклона и чистка отсканированных страниц.</summary>
+    public const string EnhanceScans = "convert.enhance-scans";
     public const string BatchProcess = "convert.batch";
 
     // Документ целиком

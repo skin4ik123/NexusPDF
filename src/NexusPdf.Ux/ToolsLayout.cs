@@ -45,7 +45,8 @@ public static class ToolsLayout
         {
             CommandIds.ExportImages, CommandIds.ExtractText, CommandIds.CreateFromImages,
             CommandIds.MergePdfs, CommandIds.CompareDocuments,
-            CommandIds.CompressPages, CommandIds.OptimizeCopy, CommandIds.BatchProcess,
+            CommandIds.CompressPages, CommandIds.OptimizeCopy, CommandIds.EnhanceScans,
+            CommandIds.BatchProcess,
         }),
         new ToolsGroupLayout("MenuDocument", new[]
         {
