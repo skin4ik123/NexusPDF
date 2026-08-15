@@ -9,8 +9,14 @@ namespace NexusPdf.Application;
 /// </summary>
 public sealed class OpenedDocument : IAsyncDisposable
 {
-    private OpenedDocument(DocumentSession session, Guid primarySourceId, IPdfDocumentHandle primaryHandle)
+    /// <summary>Движок нужен документу самому: он рисует страницы с несохранёнными правками.</summary>
+    private readonly IPdfRenderEngine _engine;
+
+    private OpenedDocument(
+        IPdfRenderEngine engine, DocumentSession session,
+        Guid primarySourceId, IPdfDocumentHandle primaryHandle)
     {
+        _engine = engine;
         Session = session;
         PrimarySourceId = primarySourceId;
         Handles = new Dictionary<Guid, IPdfDocumentHandle> { [primarySourceId] = primaryHandle };
@@ -38,7 +44,7 @@ public sealed class OpenedDocument : IAsyncDisposable
             var sourceId = Guid.NewGuid();
             var model = DocumentModel.ForNewSource(sourceId, filePath, handle.Info.PageCount);
             var session = new DocumentSession(model, filePath);
-            return new OpenedDocument(session, sourceId, handle) { Password = password };
+            return new OpenedDocument(engine, session, sourceId, handle) { Password = password };
         }
         catch
         {
@@ -60,7 +66,34 @@ public sealed class OpenedDocument : IAsyncDisposable
     public Task<RenderedPageImage> RenderLogicalPageAsync(int logicalIndex, int pixelWidth, int pixelHeight, CancellationToken ct)
     {
         var page = Session.Model.Pages[logicalIndex];
-        return Handles[page.SourceId].RenderPageAsync(page.SourcePageIndex, pixelWidth, pixelHeight, page.RotationOffset, ct);
+        var handle = Handles[page.SourceId];
+
+        // Страница с несохранёнными правками рисуется ВМЕСТЕ с ними — тем же
+        // кодом запекания, что и при сохранении. Иначе экран показывает не то,
+        // что окажется в файле (а часть правок не показывает вообще).
+        if (page.OverlayList.Count > 0)
+        {
+            return _engine.RenderPageWithOverlaysAsync(
+                handle, page.SourcePageIndex, page.RotationOffset,
+                page.OverlayList, pixelWidth, pixelHeight, ct);
+        }
+
+        return handle.RenderPageAsync(page.SourcePageIndex, pixelWidth, pixelHeight, page.RotationOffset, ct);
+    }
+
+    /// <summary>
+    /// Отпечаток правок страницы для ключа кэша растров: без него после
+    /// добавления правки вернулась бы старая картинка из кэша.
+    /// </summary>
+    public int GetOverlaySignature(int logicalIndex)
+    {
+        var overlays = Session.Model.Pages[logicalIndex].OverlayList;
+        if (overlays.Count == 0)
+            return 0;
+        var hash = new HashCode();
+        foreach (var overlay in overlays)
+            hash.Add(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(overlay));
+        return hash.ToHashCode();
     }
 
     /// <summary>Растр только содержимого страницы (без аннотаций/полей форм) — для OCR.</summary>

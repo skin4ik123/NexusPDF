@@ -84,6 +84,95 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
     public Task ComposeAsync(IReadOnlyList<ComposedPage> pages, string targetPath, CancellationToken ct) =>
         _thread.InvokeAsync(() => ComposeCore(pages, targetPath), ct);
 
+    public Task<RenderedPageImage> RenderPageWithOverlaysAsync(
+        IPdfDocumentHandle source, int sourcePageIndex, int extraQuarterTurns,
+        IReadOnlyList<PageOverlay> overlays, int pixelWidth, int pixelHeight, CancellationToken ct) =>
+        _thread.InvokeAsync(() => RenderWithOverlaysCore(
+            (PdfiumDocumentHandle)source, sourcePageIndex, extraQuarterTurns,
+            overlays, pixelWidth, pixelHeight), ct);
+
+    /// <summary>
+    /// Одна страница переносится во ВРЕМЕННЫЙ документ в памяти, туда же
+    /// запекаются правки, и рисуется уже он. На диск ничего не пишется, а
+    /// картинка совпадает с будущим файлом, потому что путь запекания тот же.
+    /// </summary>
+    private static RenderedPageImage RenderWithOverlaysCore(
+        PdfiumDocumentHandle source, int sourcePageIndex, int extraQuarterTurns,
+        IReadOnlyList<PageOverlay> overlays, int pixelWidth, int pixelHeight)
+    {
+        if (pixelWidth < 1 || pixelHeight < 1)
+            throw new ArgumentOutOfRangeException(nameof(pixelWidth));
+
+        var newDoc = fpdf_edit.FPDF_CreateNewDocument();
+        if (newDoc == null || newDoc.__Instance == IntPtr.Zero)
+            throw new PdfEngineException("Не удалось подготовить страницу для показа.");
+        try
+        {
+            if (fpdf_ppo.FPDF_ImportPages(newDoc, source.NativeDoc,
+                    (sourcePageIndex + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), 0) == 0)
+                throw new PdfEngineException("Не удалось перенести страницу для показа.");
+
+            var rotation = ((extraQuarterTurns % 4) + 4) % 4;
+            var page = fpdfview.FPDF_LoadPage(newDoc, 0);
+            if (page == null || page.__Instance == IntPtr.Zero)
+                throw new PdfEngineException("Не удалось открыть страницу для показа.");
+            try
+            {
+                if (overlays.Count > 0)
+                {
+                    var font = PdfiumOverlayWriter.LoadOverlayFont(newDoc);
+                    PdfiumOverlayWriter.ApplyOverlays(newDoc, page, font, overlays, rotation);
+                }
+            }
+            finally
+            {
+                fpdfview.FPDF_ClosePage(page);
+            }
+
+            // Страница перечитывается: после запекания её содержимое изменилось.
+            var baked = fpdfview.FPDF_LoadPage(newDoc, 0);
+            if (baked == null || baked.__Instance == IntPtr.Zero)
+                throw new PdfEngineException("Не удалось открыть подготовленную страницу.");
+            try
+            {
+                var stride = pixelWidth * 4;
+                var pixels = new byte[(long)stride * pixelHeight];
+                var pin = System.Runtime.InteropServices.GCHandle.Alloc(
+                    pixels, System.Runtime.InteropServices.GCHandleType.Pinned);
+                try
+                {
+                    var bitmap = fpdfview.FPDFBitmapCreateEx(
+                        pixelWidth, pixelHeight, 4, pin.AddrOfPinnedObject(), stride);
+                    if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
+                        throw new PdfEngineException("Не удалось создать растровый буфер.");
+                    try
+                    {
+                        fpdfview.FPDFBitmapFillRect(bitmap, 0, 0, pixelWidth, pixelHeight, 0xFFFFFFFFUL);
+                        fpdfview.FPDF_RenderPageBitmap(
+                            bitmap, baked, 0, 0, pixelWidth, pixelHeight, rotation, 0x01 | 0x02);
+                    }
+                    finally
+                    {
+                        fpdfview.FPDFBitmapDestroy(bitmap);
+                    }
+                }
+                finally
+                {
+                    pin.Free();
+                }
+                return new RenderedPageImage(pixelWidth, pixelHeight, stride, pixels);
+            }
+            finally
+            {
+                fpdfview.FPDF_ClosePage(baked);
+            }
+        }
+        finally
+        {
+            fpdfview.FPDF_CloseDocument(newDoc);
+        }
+    }
+
     private static void ComposeCore(IReadOnlyList<ComposedPage> pages, string targetPath)
     {
         if (pages.Count == 0)
