@@ -92,6 +92,83 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
             overlays, pixelWidth, pixelHeight), ct);
 
     /// <summary>
+    /// Дескриптор ОДНОЙ страницы с применёнными правками — обычный документ в
+    /// памяти из одной страницы. Через него работают все существующие операции
+    /// (текст, поиск, выделение, ссылки), поэтому распознанный или добавленный
+    /// текст доступен сразу, без сохранения файла.
+    /// </summary>
+    public Task<IPdfDocumentHandle> CreateBakedPageAsync(
+        IPdfDocumentHandle source, int sourcePageIndex, int extraQuarterTurns,
+        IReadOnlyList<PageOverlay> overlays, CancellationToken ct) =>
+        _thread.InvokeAsync<IPdfDocumentHandle>(() =>
+        {
+            var doc = BuildBakedPage((PdfiumDocumentHandle)source, sourcePageIndex, extraQuarterTurns, overlays);
+            try
+            {
+                var page = fpdfview.FPDF_LoadPage(doc, 0);
+                if (page == null || page.__Instance == IntPtr.Zero)
+                    throw new PdfEngineException("Не удалось открыть подготовленную страницу.");
+                PdfPageDescriptor descriptor;
+                try
+                {
+                    descriptor = new PdfPageDescriptor(
+                        fpdfview.FPDF_GetPageWidthF(page), fpdfview.FPDF_GetPageHeightF(page));
+                }
+                finally
+                {
+                    fpdfview.FPDF_ClosePage(page);
+                }
+                return new PdfiumDocumentHandle(
+                    this, _thread, source.FilePath, doc,
+                    new PdfDocumentInfo(1, new[] { descriptor }), null, null);
+            }
+            catch
+            {
+                fpdfview.FPDF_CloseDocument(doc);
+                throw;
+            }
+        }, ct);
+
+    /// <summary>Переносит одну страницу в новый документ и запекает в неё правки.</summary>
+    private static FpdfDocumentT BuildBakedPage(
+        PdfiumDocumentHandle source, int sourcePageIndex, int extraQuarterTurns,
+        IReadOnlyList<PageOverlay> overlays)
+    {
+        var newDoc = fpdf_edit.FPDF_CreateNewDocument();
+        if (newDoc == null || newDoc.__Instance == IntPtr.Zero)
+            throw new PdfEngineException("Не удалось подготовить страницу.");
+        try
+        {
+            if (fpdf_ppo.FPDF_ImportPages(newDoc, source.NativeDoc,
+                    (sourcePageIndex + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), 0) == 0)
+                throw new PdfEngineException("Не удалось перенести страницу.");
+
+            if (overlays.Count > 0)
+            {
+                var page = fpdfview.FPDF_LoadPage(newDoc, 0);
+                if (page == null || page.__Instance == IntPtr.Zero)
+                    throw new PdfEngineException("Не удалось открыть страницу для запекания.");
+                try
+                {
+                    var font = PdfiumOverlayWriter.LoadOverlayFont(newDoc);
+                    PdfiumOverlayWriter.ApplyOverlays(
+                        newDoc, page, font, overlays, ((extraQuarterTurns % 4) + 4) % 4);
+                }
+                finally
+                {
+                    fpdfview.FPDF_ClosePage(page);
+                }
+            }
+            return newDoc;
+        }
+        catch
+        {
+            fpdfview.FPDF_CloseDocument(newDoc);
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Одна страница переносится во ВРЕМЕННЫЙ документ в памяти, туда же
     /// запекаются правки, и рисуется уже он. На диск ничего не пишется, а
     /// картинка совпадает с будущим файлом, потому что путь запекания тот же.

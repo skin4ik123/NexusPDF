@@ -81,6 +81,49 @@ public sealed class OpenedDocument : IAsyncDisposable
         return handle.RenderPageAsync(page.SourcePageIndex, pixelWidth, pixelHeight, page.RotationOffset, ct);
     }
 
+    // Испечённые страницы: по одной на логическую страницу с правками.
+    // Держим их, чтобы текст, поиск и выделение работали по тому, что видит
+    // пользователь, а не по исходному файлу без его правок.
+    private readonly Dictionary<int, (int Signature, IPdfDocumentHandle Handle)> _baked = new();
+
+    /// <summary>
+    /// Дескриптор и номер страницы, ПО КОТОРЫМ нужно спрашивать текст, ссылки
+    /// и координаты символов. Для страницы с несохранёнными правками это
+    /// испечённая копия: иначе поиск и выделение не видели бы ни распознанный
+    /// текст, ни добавленные надписи до сохранения файла.
+    /// </summary>
+    public async Task<(IPdfDocumentHandle Handle, int PageIndex)> ResolveTextPageAsync(
+        int logicalIndex, CancellationToken ct)
+    {
+        var page = Session.Model.Pages[logicalIndex];
+        var signature = GetOverlaySignature(logicalIndex);
+        if (signature == 0)
+            return (Handles[page.SourceId], page.SourcePageIndex);
+
+        if (_baked.TryGetValue(logicalIndex, out var cached))
+        {
+            if (cached.Signature == signature)
+                return (cached.Handle, 0);
+            _baked.Remove(logicalIndex);
+            await cached.Handle.DisposeAsync().ConfigureAwait(false);
+        }
+
+        var handle = await _engine.CreateBakedPageAsync(
+            Handles[page.SourceId], page.SourcePageIndex, page.RotationOffset,
+            page.OverlayList, ct).ConfigureAwait(false);
+        _baked[logicalIndex] = (signature, handle);
+        return (handle, 0);
+    }
+
+    /// <summary>Освобождает испечённые страницы (после сохранения и при закрытии).</summary>
+    public async Task DropBakedPagesAsync()
+    {
+        var handles = _baked.Values.Select(v => v.Handle).ToList();
+        _baked.Clear();
+        foreach (var handle in handles)
+            await handle.DisposeAsync().ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Отпечаток правок страницы для ключа кэша растров: без него после
     /// добавления правки вернулась бы старая картинка из кэша.

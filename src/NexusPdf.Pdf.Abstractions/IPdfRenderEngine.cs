@@ -25,6 +25,16 @@ public interface IPdfRenderEngine : IAsyncDisposable
     /// файл: рисовать правки приближениями поверх страницы значит показывать
     /// не результат, а его имитацию (а для части правок — вообще ничего).
     /// </summary>
+    /// <summary>
+    /// Дескриптор ОДНОЙ страницы с применёнными правками (документ из одной
+    /// страницы в памяти). Через него работают обычные операции с текстом,
+    /// поэтому распознанный или добавленный текст ищется и выделяется сразу,
+    /// без сохранения файла. Освобождать через DisposeAsync.
+    /// </summary>
+    Task<IPdfDocumentHandle> CreateBakedPageAsync(
+        IPdfDocumentHandle source, int sourcePageIndex, int extraQuarterTurns,
+        IReadOnlyList<PageOverlay> overlays, CancellationToken ct);
+
     /// <remarks>
     /// Удаление существующих аннотаций здесь НЕ применяется: при сохранении оно
     /// разворачивает связанные popup-объекты, и повторять эту логику ради
