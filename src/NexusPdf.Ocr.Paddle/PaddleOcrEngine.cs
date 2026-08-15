@@ -54,18 +54,74 @@ public sealed class PaddleOcrEngine : IDisposable
         return null;
     }
 
-    /// <summary>Файлы распознавателя выбранного пакета: модель и её словарь.</summary>
+    /// <summary>
+    /// Файлы распознавателя выбранного пакета берутся ИЗ КАТАЛОГА, а не
+    /// угадываются по имени: у половины пакетов идентификатор не совпадает с
+    /// именем файла (chinese против ch_, japanese против japan_, kannada
+    /// против ka_), и угадывание молча находило бы не ту модель или ничего.
+    /// </summary>
     private (string Model, string Dict)? FindRecognizer()
     {
         if (_modelsDir == null) return null;
-        // Имена файлов пакета определяются каталогом ocrmodels.lock.json; здесь
-        // достаточно найти пару «модель + словарь» по префиксу пакета.
-        var model = Directory.EnumerateFiles(_modelsDir, "*_rec_*.onnx")
-            .FirstOrDefault(f => Path.GetFileName(f).StartsWith(_packId + "_", StringComparison.OrdinalIgnoreCase));
-        if (model == null) return null;
-        var dict = Directory.EnumerateFiles(_modelsDir, "*.txt")
-            .FirstOrDefault(f => Path.GetFileName(f).Contains(_packId, StringComparison.OrdinalIgnoreCase));
-        return dict == null ? null : (model, dict);
+        var pack = Catalog.FirstOrDefault(p =>
+            string.Equals(p.Id, _packId, StringComparison.OrdinalIgnoreCase));
+        if (pack == null) return null;
+
+        var model = Path.Combine(_modelsDir, pack.ModelFile);
+        var dict = Path.Combine(_modelsDir, pack.DictFile);
+        return File.Exists(model) && File.Exists(dict) ? (model, dict) : null;
+    }
+
+    /// <summary>Языковой пакет распознавания: идентификатор, название и его файлы.</summary>
+    public sealed record LanguagePack(
+        string Id, string Title, string Languages, bool IsDefault, string ModelFile, string DictFile);
+
+    private static IReadOnlyList<LanguagePack>? _catalog;
+
+    /// <summary>Каталог языковых пакетов из tools/ocrmodels.lock.json рядом с моделями.</summary>
+    public static IReadOnlyList<LanguagePack> Catalog => _catalog ??= LoadCatalog();
+
+    private static IReadOnlyList<LanguagePack> LoadCatalog()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (var depth = 0; dir != null && depth < 8; depth++, dir = dir.Parent)
+        {
+            var path = Path.Combine(dir.FullName, "tools", "ocrmodels.lock.json");
+            if (!File.Exists(path)) continue;
+            try
+            {
+                using var json = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+                var packs = new List<LanguagePack>();
+                foreach (var p in json.RootElement.GetProperty("packs").EnumerateArray())
+                {
+                    packs.Add(new LanguagePack(
+                        p.GetProperty("id").GetString() ?? "",
+                        p.GetProperty("title").GetString() ?? "",
+                        p.GetProperty("languages").GetString() ?? "",
+                        p.GetProperty("isDefault").GetBoolean(),
+                        p.GetProperty("model").GetProperty("name").GetString() ?? "",
+                        p.GetProperty("dict").GetProperty("name").GetString() ?? ""));
+                }
+                return packs;
+            }
+            catch (Exception ex)
+            {
+                Serilog.Log.Warning(ex, "Не удалось прочитать каталог языковых пакетов OCR");
+                return Array.Empty<LanguagePack>();
+            }
+        }
+        return Array.Empty<LanguagePack>();
+    }
+
+    /// <summary>Пакеты, файлы которых реально загружены и готовы к работе.</summary>
+    public static IReadOnlyList<LanguagePack> InstalledPacks(string baseDirectory)
+    {
+        var dir = ResolveModelsDir(baseDirectory);
+        if (dir == null) return Array.Empty<LanguagePack>();
+        return Catalog
+            .Where(p => File.Exists(Path.Combine(dir, p.ModelFile))
+                     && File.Exists(Path.Combine(dir, p.DictFile)))
+            .ToList();
     }
 
     /// <summary>
