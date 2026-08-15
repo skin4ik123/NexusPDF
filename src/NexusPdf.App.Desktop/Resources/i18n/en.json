@@ -166,6 +166,8 @@
   "MdTitle": "Manual two-sided printing",
   "MdStep2Intro": "The first side has been sent. Wait for printing to finish and do the following.",
   "MdFaceUpHint": "The output stack is reversed. The program will print the backs in reverse order.",
+  "PrintCommentSummary": "Comment summary…",
+  "PrintCommentSummaryDone": "Summary ready: {0} comments, {1} pages.",
   "Print": "Print",
   "PrintTooltip": "Print (Ctrl+P)",
   "PrintPages": "Pages to print",

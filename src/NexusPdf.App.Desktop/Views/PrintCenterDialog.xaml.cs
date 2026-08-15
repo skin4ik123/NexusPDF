@@ -62,6 +62,43 @@ public partial class PrintCenterDialog : Window
         }
     }
 
+    /// <summary>
+    /// Сводка комментариев отдельным файлом. Исходный документ не меняется —
+    /// поэтому сводка и делается отдельным PDF, а не вставкой страниц.
+    /// </summary>
+    private async void OnCommentSummary(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = Loc.Get("PrintCommentSummary"),
+            Filter = Loc.Get("PdfFilter"),
+            FileName = Path.GetFileNameWithoutExtension(_document.Title) + "-comments.pdf",
+            OverwritePrompt = true,
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        var ct = _model.BeginSubmit(Loc.Get("PrintCommentSummary"));
+        try
+        {
+            var result = await new CommentSummaryService(_services.Engine).BuildAsync(
+                _document.Document, dialog.FileName, new CommentSummarySettings(),
+                _document.Title, ct);
+
+            InfoDialog.Show(this, Loc.Get("PrintCommentSummary"),
+                Loc.F("PrintCommentSummaryDone", result.CommentCount, result.PageCount));
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Не удалось построить сводку комментариев");
+            ErrorDialog.Show(this, Loc.Get("ErrorTitle"), Loc.Get("PrintFailed"), ex.ToString());
+        }
+        finally
+        {
+            _model.EndSubmit();
+        }
+    }
+
     private void OnSaveProfile(object sender, RoutedEventArgs e)
     {
         var name = TextPromptDialog.Ask(this,

@@ -258,6 +258,8 @@
             </ComboBox>
             <CheckBox Content="{l:Loc PrintAsImage}" IsChecked="{Binding PrintAsImage}" Margin="0,8,0,0"
                       Foreground="{DynamicResource TextBrush}"/>
+            <Button Content="{l:Loc PrintCommentSummary}" Style="{StaticResource LinkButton}"
+                    HorizontalAlignment="Left" Margin="0,8,0,0" Click="OnCommentSummary"/>
 
             <TextBlock Text="{l:Loc PrintGroupMarks}" Style="{StaticResource GroupCaption}"/>
             <CheckBox Content="{l:Loc PrintMarkCrop}" Foreground="{DynamicResource TextBrush}"
