@@ -414,10 +414,12 @@ public sealed partial class MainViewModel : ObservableObject
     private void AddRedaction()
     {
         if (ActiveDocument is not { } doc || doc.IsBusy) return;
-        doc.StatusText = Loc.Get("RedactHint");
         doc.BeginRectPlacement((_, rect) =>
             new NexusPdf.Pdf.Abstractions.RedactionDraft(
                 rect.X, rect.Y, rect.Width, rect.Height));
+        // После BeginRectPlacement: он ставит общий PlaceRectHint, а
+        // предупреждение об УНИЧТОЖЕНИИ содержимого должно его перекрыть.
+        doc.StatusText = Loc.Get("RedactHint");
     }
 
     [RelayCommand]
