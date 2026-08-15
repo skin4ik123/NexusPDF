@@ -604,6 +604,217 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
         }
     }
 
+    private const int PageObjectText = 1; // FPDF_PAGEOBJ_TEXT
+
+    public Task<PdfTextObject?> GetTextObjectAtAsync(
+        int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync<PdfTextObject?>(() =>
+            {
+                var page = fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
+                if (page == null || page.__Instance == IntPtr.Zero)
+                    return null;
+                var textPage = fpdf_text.FPDFTextLoadPage(page);
+                try
+                {
+                    var (px, py) = DisplayedToPage(page, pageIndex, extraQuarterTurns, xPt, yPt);
+                    var count = fpdf_edit.FPDFPageCountObjects(page);
+                    for (var i = count - 1; i >= 0; i--)
+                    {
+                        var obj = fpdf_edit.FPDFPageGetObject(page, i);
+                        if (obj == null || obj.__Instance == IntPtr.Zero ||
+                            fpdf_edit.FPDFPageObjGetType(obj) != PageObjectText)
+                            continue;
+
+                        float left = 0, bottom = 0, right = 0, top = 0;
+                        if (fpdf_edit.FPDFPageObjGetBounds(obj, ref left, ref bottom, ref right, ref top) == 0)
+                            continue;
+                        if (px < Math.Min(left, right) || px > Math.Max(left, right) ||
+                            py < Math.Min(bottom, top) || py > Math.Max(bottom, top))
+                            continue;
+
+                        var text = ReadTextObjectText(obj, textPage);
+                        if (text.Length == 0)
+                            continue; // пустой объект править нечего
+
+                        float size = 0;
+                        fpdf_edit.FPDFTextObjGetFontSize(obj, ref size);
+
+                        uint r = 0, g = 0, b = 0, a = 255;
+                        fpdf_edit.FPDFPageObjGetFillColor(obj, ref r, ref g, ref b, ref a);
+
+                        var fontName = "";
+                        var embedded = false;
+                        var font = fpdf_edit.FPDFTextObjGetFont(obj);
+                        if (font != null && font.__Instance != IntPtr.Zero)
+                        {
+                            fontName = ReadFontName(font);
+                            embedded = fpdf_edit.FPDFFontGetIsEmbedded(font) == 1;
+                        }
+
+                        var (x, y, w, h) = ContentRectToDisplayed(
+                            page, pageIndex, extraQuarterTurns, left, bottom, right, top);
+                        return new PdfTextObject(i, text, size,
+                            (a << 24) | (r << 16) | (g << 8) | b,
+                            fontName, embedded, x, y, w, h);
+                    }
+                    return null;
+                }
+                finally
+                {
+                    if (textPage != null && textPage.__Instance != IntPtr.Zero)
+                        fpdf_text.FPDFTextClosePage(textPage);
+                    fpdfview.FPDF_ClosePage(page);
+                }
+            }, ct);
+        }
+    }
+
+    public Task<bool> CanFontRenderTextAsync(
+        int pageIndex, int objectIndex, string text, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() =>
+            {
+                // Пустая и пробельная строка рисуется чем угодно.
+                if (text.All(char.IsWhiteSpace))
+                    return true;
+
+                var page = fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
+                if (page == null || page.__Instance == IntPtr.Zero)
+                    return false;
+                try
+                {
+                    var source = fpdf_edit.FPDFPageGetObject(page, objectIndex);
+                    if (source == null || source.__Instance == IntPtr.Zero ||
+                        fpdf_edit.FPDFPageObjGetType(source) != PageObjectText)
+                        return false;
+                    var font = fpdf_edit.FPDFTextObjGetFont(source);
+                    if (font == null || font.__Instance == IntPtr.Zero)
+                        return false;
+
+                    // Пробный объект тем же шрифтом: сам документ не меняется.
+                    var probe = fpdf_edit.FPDFPageObjCreateTextObj(NativeDoc, font, 24f);
+                    if (probe == null || probe.__Instance == IntPtr.Zero)
+                        return false;
+                    try
+                    {
+                        var visible = new string(text.Where(c => !char.IsWhiteSpace(c)).ToArray());
+                        var buffer = new ushort[visible.Length + 1];
+                        for (var i = 0; i < visible.Length; i++)
+                            buffer[i] = visible[i];
+                        if (fpdf_edit.FPDFTextSetText(probe, ref buffer[0]) == 0)
+                            return false;
+
+                        var bitmap = fpdf_edit.FPDFTextObjGetRenderedBitmap(NativeDoc, page, probe, 1f);
+                        if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
+                            return false;
+                        try
+                        {
+                            // Если шрифт не знает этих букв, картинка выходит пустой.
+                            return HasAnyInk(bitmap);
+                        }
+                        finally
+                        {
+                            fpdfview.FPDFBitmapDestroy(bitmap);
+                        }
+                    }
+                    finally
+                    {
+                        fpdf_edit.FPDFPageObjDestroy(probe);
+                    }
+                }
+                finally
+                {
+                    fpdfview.FPDF_ClosePage(page);
+                }
+            }, ct);
+        }
+    }
+
+    /// <summary>Есть ли в растре хоть один непрозрачный пиксель.</summary>
+    private static unsafe bool HasAnyInk(FpdfBitmapT bitmap)
+    {
+        var width = fpdfview.FPDFBitmapGetWidth(bitmap);
+        var height = fpdfview.FPDFBitmapGetHeight(bitmap);
+        var stride = fpdfview.FPDFBitmapGetStride(bitmap);
+        var buffer = fpdfview.FPDFBitmapGetBuffer(bitmap);
+        if (width < 1 || height < 1 || buffer == IntPtr.Zero)
+            return false;
+        var src = (byte*)buffer;
+        for (var y = 0; y < height; y++)
+        {
+            var row = src + (long)y * stride;
+            for (var x = 0; x < width; x++)
+            {
+                if (row[x * 4 + 3] != 0)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    internal static string ReadTextObjectText(FpdfPageobjectT obj, FpdfTextpageT? textPage)
+    {
+        if (textPage == null || textPage.__Instance == IntPtr.Zero)
+            return "";
+        return ReadUtf16((buffer, size) =>
+            fpdf_edit.FPDFTextObjGetText(obj, textPage, ref buffer[0], size));
+    }
+
+    private static unsafe string ReadFontName(FpdfFontT font)
+    {
+        var name = ReadAnsiName((buffer, size) =>
+            fpdf_edit.FPDFFontGetBaseFontName(font, (sbyte*)buffer, size));
+        if (name.Length == 0)
+            name = ReadAnsiName((buffer, size) =>
+                fpdf_edit.FPDFFontGetFamilyName(font, (sbyte*)buffer, size));
+        return name;
+    }
+
+    /// <summary>Имя шрифта pdfium отдаёт однобайтовой строкой с завершающим нулём.</summary>
+    private static unsafe string ReadAnsiName(Func<IntPtr, ulong, ulong> read)
+    {
+        var length = read(IntPtr.Zero, 0);
+        if (length <= 1)
+            return "";
+        var buffer = System.Runtime.InteropServices.Marshal.AllocHGlobal((int)length);
+        try
+        {
+            read(buffer, length);
+            return System.Runtime.InteropServices.Marshal
+                .PtrToStringAnsi(buffer, (int)length - 1) ?? "";
+        }
+        finally
+        {
+            System.Runtime.InteropServices.Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    /// <summary>Рамка объекта из координат содержимого в отображаемые пункты.</summary>
+    private (double X, double Y, double W, double H) ContentRectToDisplayed(
+        FpdfPageT page, int pageIndex, int extraQuarterTurns,
+        float left, float bottom, float right, float top)
+    {
+        var size = Info.Pages[pageIndex];
+        var rotate = ((extraQuarterTurns % 4) + 4) % 4;
+        var displayedW = rotate % 2 == 0 ? size.WidthPoints : size.HeightPoints;
+        var displayedH = rotate % 2 == 0 ? size.HeightPoints : size.WidthPoints;
+        int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+        fpdfview.FPDF_PageToDevice(page, 0, 0,
+            (int)Math.Round(displayedW), (int)Math.Round(displayedH), rotate,
+            Math.Min(left, right), Math.Max(top, bottom), ref x1, ref y1);
+        fpdfview.FPDF_PageToDevice(page, 0, 0,
+            (int)Math.Round(displayedW), (int)Math.Round(displayedH), rotate,
+            Math.Max(left, right), Math.Min(top, bottom), ref x2, ref y2);
+        return (Math.Min(x1, x2), Math.Min(y1, y2), Math.Abs(x2 - x1), Math.Abs(y2 - y1));
+    }
+
     /// <summary>Растр PDFium → BGRA. null — неизвестный формат.</summary>
     internal static unsafe byte[]? BitmapToBgra(FpdfBitmapT bitmap, out int width, out int height)
     {

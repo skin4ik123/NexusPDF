@@ -79,6 +79,30 @@ public sealed record InkAnnotationDraft(
     string Contents,
     string Author) : PageOverlay;
 
+/// <summary>
+/// Найденный на странице текстовый объект: его содержимое и всё, что нужно
+/// показать пользователю перед правкой. IsEmbeddedFont важен: у встроенного
+/// подмножества шрифта может просто не быть нужных букв.
+/// </summary>
+public sealed record PdfTextObject(
+    int ObjectIndex,
+    string Text,
+    double FontSizePt,
+    uint ColorArgb,
+    string FontName,
+    bool IsEmbeddedFont,
+    double XPt,
+    double YPt,
+    double WidthPt,
+    double HeightPt);
+
+/// <summary>
+/// Замена содержимого СУЩЕСТВУЮЩЕГО текстового объекта. Шрифт, размер, цвет
+/// и матрица объекта остаются его собственными, поэтому правленый текст
+/// выглядит как исходный, а не как наклейка поверх.
+/// </summary>
+public sealed record TextObjectReplacement(int ObjectIndex, string Text) : PageOverlay;
+
 /// <summary>Найденное на странице растровое изображение: индекс объекта, его растр и рамка в отображаемых пунктах.</summary>
 public sealed record PdfImageObject(
     int ObjectIndex,
