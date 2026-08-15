@@ -43,10 +43,82 @@ public sealed class PrintPlanRenderer
             Blit(image, page, buffer, stride, composed.WidthPx, composed.HeightPx);
         }
 
+        // Метки рисуются ПОСЛЕ содержимого: линия реза, попавшая под страницу,
+        // бесполезна — по ней нечего резать.
+        DrawMarks(composed, buffer, stride);
+
         if (drawGuides)
             DrawGuides(composed, buffer, stride);
 
         return new RenderedPageImage(composed.WidthPx, composed.HeightPx, stride, buffer);
+    }
+
+    /// <summary>
+    /// Типографские метки и печатные наложения листа. Текстовые метки
+    /// (подпись листа, наложение) рисуются простым растровым шрифтом: тянуть
+    /// сюда полноценную типографику ради строки в углу листа незачем.
+    /// </summary>
+    private static void DrawMarks(ComposedSheet composed, byte[] buffer, int stride)
+    {
+        if (composed.Sheet.Marks.Count == 0) return;
+
+        var scale = composed.Dpi / 72.0;
+        foreach (var mark in composed.Sheet.Marks)
+        {
+            var x = (int)Math.Round(mark.AreaPt.XPt * scale);
+            var y = (int)Math.Round(mark.AreaPt.YPt * scale);
+            var w = (int)Math.Round(mark.AreaPt.WidthPt * scale);
+            var h = (int)Math.Round(mark.AreaPt.HeightPt * scale);
+
+            switch (mark.Kind)
+            {
+                case "crop":
+                case "trim":
+                case "bleed":
+                case "fold":
+                case "cut":
+                    // Штрих: нулевая ширина или высота означает линию.
+                    DrawLine(buffer, stride, composed.WidthPx, composed.HeightPx,
+                        x, y, x + Math.Max(w, 0), y + Math.Max(h, 0), 0, 0, 0);
+                    break;
+
+                case "registration":
+                    DrawLine(buffer, stride, composed.WidthPx, composed.HeightPx,
+                        x, y + h / 2, x + w, y + h / 2, 0, 0, 0);
+                    DrawLine(buffer, stride, composed.WidthPx, composed.HeightPx,
+                        x + w / 2, y, x + w / 2, y + h, 0, 0, 0);
+                    break;
+
+                case "page-info":
+                case "overlay":
+                case "tile-label":
+                    if (!string.IsNullOrEmpty(mark.Text))
+                        TinyFont.Draw(buffer, stride, composed.WidthPx, composed.HeightPx,
+                            mark.Text!, x, y, Math.Max(1, (int)Math.Round(h / 7.0)));
+                    break;
+            }
+        }
+    }
+
+    private static void DrawLine(
+        byte[] buffer, int stride, int width, int height,
+        int x0, int y0, int x1, int y1, byte b, byte g, byte r)
+    {
+        var dx = Math.Abs(x1 - x0);
+        var dy = Math.Abs(y1 - y0);
+        var steps = Math.Max(dx, dy);
+        if (steps == 0) steps = 1;
+
+        for (var i = 0; i <= steps; i++)
+        {
+            var x = x0 + (x1 - x0) * i / steps;
+            var y = y0 + (y1 - y0) * i / steps;
+            if (x < 0 || y < 0 || x >= width || y >= height) continue;
+            var offset = y * stride + x * 4;
+            buffer[offset] = b;
+            buffer[offset + 1] = g;
+            buffer[offset + 2] = r;
+        }
     }
 
     /// <summary>

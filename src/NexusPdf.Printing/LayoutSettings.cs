@@ -177,6 +177,12 @@ public sealed record LayoutSettings
     /// <summary>Печатать всё растром — режим совместимости с проблемными драйверами.</summary>
     public bool PrintAsImage { get; init; }
 
+    /// <summary>Типографские метки и вылет.</summary>
+    public MarkSettings Marks { get; init; } = new();
+
+    /// <summary>Надписи, добавляемые только в печатное задание.</summary>
+    public IReadOnlyList<PrintOverlay> Overlays { get; init; } = Array.Empty<PrintOverlay>();
+
     /// <summary>Калибровка под конкретный принтер: поправки масштаба и смещения.</summary>
     public double CalibrationScaleX { get; init; } = 1.0;
     public double CalibrationScaleY { get; init; } = 1.0;
