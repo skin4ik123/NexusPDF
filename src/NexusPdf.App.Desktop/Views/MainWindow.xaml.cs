@@ -138,7 +138,11 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnMenuOpened(object sender, EventArgs e)
     {
+        // Из доступной высоты вычитается закреплённый подвал (тема, язык,
+        // «О программе»): иначе прокручиваемый список занимал бы её целиком,
+        // и подвал вылезал бы за нижний край экрана вместе с ним.
         var available = ActualHeight - MenuToggle.TranslatePoint(new Point(0, MenuToggle.ActualHeight), this).Y;
-        MenuScroll.MaxHeight = Math.Max(240, available - 24);
+        MenuFooter.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        MenuScroll.MaxHeight = Math.Max(200, available - MenuFooter.DesiredSize.Height - 28);
     }
 }

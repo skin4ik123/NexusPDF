@@ -304,8 +304,34 @@
                  AllowsTransparency="True" Opened="OnMenuOpened" Closed="OnMenuClosed">
             <Border Background="{DynamicResource PanelBg}" BorderBrush="{DynamicResource PanelBorder}"
                     BorderThickness="1" CornerRadius="6" Padding="6" Margin="0,4,8,8" MinWidth="230">
-              <!-- Высота ограничивается в OnMenuOpened по фактической высоте окна:
-                   без этого список из ~28 пунктов просто уезжал за край экрана. -->
+              <!-- Список прокручивается, а тема/язык/«О программе» закреплены
+                   подвалом: они были последними в прокрутке и на длинном
+                   списке уезжали за нижний край экрана. Высота списка
+                   ограничивается в OnMenuOpened по фактической высоте окна. -->
+              <DockPanel>
+              <StackPanel x:Name="MenuFooter" DockPanel.Dock="Bottom">
+                <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
+                <TextBlock Text="{l:Loc Theme}" Foreground="{DynamicResource TextSecondary}"
+                           FontSize="11" Margin="6,4"/>
+                <StackPanel Orientation="Horizontal" Margin="4,0">
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeLight}" Margin="0,0,10,0"
+                          Command="{Binding SetThemeCommand}" CommandParameter="light" Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeDark}" Margin="0,0,10,0"
+                          Command="{Binding SetThemeCommand}" CommandParameter="dark" Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeSystem}"
+                          Command="{Binding SetThemeCommand}" CommandParameter="system" Click="OnMenuItem"/>
+                </StackPanel>
+                <TextBlock Text="{l:Loc Language}" Foreground="{DynamicResource TextSecondary}"
+                           FontSize="11" Margin="6,4"/>
+                <StackPanel Orientation="Horizontal" Margin="4,0">
+                  <Button Style="{StaticResource LinkButton}" Content="Русский" Margin="0,0,10,0"
+                          Command="{Binding SetLanguageCommand}" CommandParameter="ru" Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="English" Margin="0,0,10,0"
+                          Command="{Binding SetLanguageCommand}" CommandParameter="en" Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc About}"
+                          Command="{Binding AboutCommand}" Click="OnMenuItem"/>
+                </StackPanel>
+              </StackPanel>
               <ScrollViewer x:Name="MenuScroll" VerticalScrollBarVisibility="Auto"
                             HorizontalScrollBarVisibility="Disabled">
               <StackPanel>
@@ -394,33 +420,9 @@
                 <Button Style="{StaticResource LinkButton}" Content="{l:Loc DetachTab}"
                         Command="{Binding DetachTabCommand}" IsEnabled="{Binding HasDocuments}"
                         Click="OnMenuItem"/>
-                <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
-
-                <!-- Настройки внизу: они нужны раз в жизни, а действия с
-                     документом — постоянно, поэтому наверху теперь они. -->
-                <TextBlock Text="{l:Loc Theme}" Foreground="{DynamicResource TextSecondary}"
-                           FontSize="11" Margin="6,4"/>
-                <StackPanel Orientation="Horizontal" Margin="4,0">
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeLight}" Margin="0,0,10,0"
-                          Command="{Binding SetThemeCommand}" CommandParameter="light" Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeDark}" Margin="0,0,10,0"
-                          Command="{Binding SetThemeCommand}" CommandParameter="dark" Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeSystem}"
-                          Command="{Binding SetThemeCommand}" CommandParameter="system" Click="OnMenuItem"/>
-                </StackPanel>
-                <TextBlock Text="{l:Loc Language}" Foreground="{DynamicResource TextSecondary}"
-                           FontSize="11" Margin="6,4"/>
-                <StackPanel Orientation="Horizontal" Margin="4,0">
-                  <Button Style="{StaticResource LinkButton}" Content="Русский" Margin="0,0,10,0"
-                          Command="{Binding SetLanguageCommand}" CommandParameter="ru" Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="English"
-                          Command="{Binding SetLanguageCommand}" CommandParameter="en" Click="OnMenuItem"/>
-                </StackPanel>
-                <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc About}"
-                        Command="{Binding AboutCommand}" Click="OnMenuItem"/>
               </StackPanel>
               </ScrollViewer>
+              </DockPanel>
             </Border>
           </Popup>
       </StackPanel>
@@ -594,8 +596,9 @@
                   ToolTip="{l:Loc ZoomFitPage}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE73F;" FontSize="12"/>
           </Button>
-          <TextBlock Text="{Binding EngineName}" Foreground="{DynamicResource TextSecondary}"
-                     VerticalAlignment="Center" Margin="14,0,0,0" FontSize="11"/>
+          <!-- Название движка отрисовки убрано: пользователю оно ничего не
+               говорит, а место в строке состояния занимало. Оно есть в
+               окне «О программе», где ему и место. -->
         </StackPanel>
       </Grid>
     </Border>

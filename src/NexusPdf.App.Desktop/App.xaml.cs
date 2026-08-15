@@ -39,6 +39,11 @@ public partial class App : System.Windows.Application
             typeof(App).Assembly.GetName().Version?.ToString(3) ?? "?");
 
         Loc.Load(settings.Language);
+        // Каждое окно красит свой системный заголовок под тему сразу, как
+        // только появится: один обработчик на класс дешевле, чем помнить про
+        // это в каждом из полутора десятков диалогов.
+        EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
+            new RoutedEventHandler((sender, _) => ThemeManager.ApplyTitleBar((Window)sender)));
         ThemeManager.Apply(settings.Theme);
 
         var crashed = CrashSentinel.PreviousSessionCrashed();
