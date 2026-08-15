@@ -11,6 +11,40 @@ namespace NexusPdf.App.Desktop.Services;
 /// </summary>
 public static class ImageEncoder
 {
+    /// <summary>BGRA-растр → PNG без потерь с записью DPI (для правки во внешнем редакторе).</summary>
+    public static byte[] EncodePng(byte[] bgra, int width, int height, double dpi)
+    {
+        var source = BitmapSource.Create(
+            width, height, dpi, dpi, PixelFormats.Bgra32, null, bgra, width * 4);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(source));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return stream.ToArray();
+    }
+
+    /// <summary>Замороженный BitmapSource из BGRA-растра (для предпросмотра).</summary>
+    public static BitmapSource ToBitmap(byte[] bgra, int width, int height)
+    {
+        var bitmap = BitmapSource.Create(
+            width, height, 96, 96, PixelFormats.Bgra32, null, bgra, width * 4);
+        bitmap.Freeze();
+        return bitmap;
+    }
+
+    /// <summary>Файл изображения → BGRA-растр (возврат из внешнего редактора).</summary>
+    public static (byte[] Bgra, int PixelWidth, int PixelHeight) DecodeBgra(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var frame = BitmapDecoder.Create(stream,
+            BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad).Frames[0];
+        var converted = new FormatConvertedBitmap(frame, PixelFormats.Bgra32, null, 0);
+        var stride = converted.PixelWidth * 4;
+        var pixels = new byte[stride * (long)converted.PixelHeight];
+        converted.CopyPixels(pixels, stride, 0);
+        return (pixels, converted.PixelWidth, converted.PixelHeight);
+    }
+
     /// <summary>BGRA-растр → JPEG с заданным качеством (для пересжатия изображений документа).</summary>
     public static byte[] EncodeJpeg(byte[] bgra, int width, int height, int quality)
     {

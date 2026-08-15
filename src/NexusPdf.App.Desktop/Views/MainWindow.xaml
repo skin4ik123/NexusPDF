@@ -213,6 +213,12 @@
                           Click="OnMenuItem"/>
                   <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
                 </StackPanel>
+                <StackPanel Visibility="{Binding HasImageEditor, Converter={StaticResource BoolToVis}}">
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc PaintEditMenu}"
+                          Command="{Binding EditPageInPaintCommand}" IsEnabled="{Binding HasDocuments}"
+                          Click="OnMenuItem"/>
+                  <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
+                </StackPanel>
                 <TextBlock Text="{l:Loc ConvertSection}" Foreground="{DynamicResource TextSecondary}"
                            FontSize="11" Margin="6,4"/>
                 <Button Style="{StaticResource LinkButton}" Content="{l:Loc ExportImagesMenu}"

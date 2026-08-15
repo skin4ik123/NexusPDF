@@ -577,6 +577,115 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>Правка внешнего редактора доступна, только если редактор реально найден.</summary>
+    public bool HasImageEditor => ExternalImageEditor.IsEditorAvailable();
+
+    [RelayCommand]
+    private async Task EditPageInPaint()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy || doc.PageCount == 0) return;
+        if (!ExternalImageEditor.IsEditorAvailable())
+        {
+            ErrorDialog.Show(OwnerWindow, Loc.Get("PaintEditTitle"), Loc.Get("PaintNoEditor"), "");
+            return;
+        }
+
+        var request = PaintEditDialog.Show(OwnerWindow, wholePage: true, _services.Ocr.IsAvailable);
+        if (request == null) return;
+
+        var pageIndex = Math.Clamp(doc.CurrentPageNumber - 1, 0, doc.PageCount - 1);
+        var page = doc.Pages[pageIndex];
+        doc.IsBusy = true;
+        doc.StatusText = Loc.Get("PaintExporting");
+        ExternalEditWorkspace? workspace = null;
+        ExternalImageEditor? editor = null;
+        try
+        {
+            // 1. Экспорт ТОЛЬКО содержимого страницы: аннотации и поля форм
+            //    остаются в документе и не должны попасть в картинку дважды.
+            var size = doc.Document.GetLogicalPageSize(pageIndex);
+            var scale = request.Dpi / 72.0;
+            var width = Math.Max(1, (int)Math.Round(size.WidthPoints * scale));
+            var height = Math.Max(1, (int)Math.Round(size.HeightPoints * scale));
+            var image = await doc.Document.RenderLogicalPageContentOnlyAsync(
+                pageIndex, width, height, CancellationToken.None);
+            var bgra = request.Grayscale ? ToGrayscale(image.Bgra) : image.Bgra;
+
+            workspace = ExternalEditWorkspace.Create(
+                Path.GetFileNameWithoutExtension(doc.Title) + $"-p{pageIndex + 1}");
+            await File.WriteAllBytesAsync(workspace.ImagePath,
+                ImageEncoder.EncodePng(bgra, image.PixelWidth, image.PixelHeight, request.Dpi));
+
+            var before = ImageEncoder.ToBitmap(bgra, image.PixelWidth, image.PixelHeight);
+
+            // 2. Запуск редактора: путь не задан жёстко, ожидания закрытия нет.
+            editor = new ExternalImageEditor(workspace.ImagePath);
+            if (!editor.Launch())
+            {
+                ErrorDialog.Show(OwnerWindow, Loc.Get("PaintEditTitle"), Loc.Get("PaintNoEditor"), "");
+                return;
+            }
+
+            doc.StatusText = Loc.Get("PaintWaitWaiting");
+            var edited = PaintWaitDialog.Run(OwnerWindow, editor, workspace.ImagePath, before);
+            if (edited == null)
+            {
+                doc.StatusText = Loc.Get("PaintCancelled");
+                return;
+            }
+
+            // 3. Импорт: заменяется ТОЛЬКО визуальное содержимое страницы.
+            var imported = ImageEncoder.DecodeBgra(edited);
+            doc.Document.Session.Apply(new NexusPdf.Domain.AddOverlayOperation(pageIndex,
+                new NexusPdf.Pdf.Abstractions.PageRasterReplacement(
+                    imported.Bgra, imported.PixelWidth, imported.PixelHeight)));
+            var dpiScale = OwnerWindow != null
+                ? System.Windows.Media.VisualTreeHelper.GetDpi(OwnerWindow).DpiScaleX
+                : 1.0;
+            page.ForceRefresh(dpiScale);
+            doc.StatusText = Loc.Get("PaintImported");
+            Log.Information("Страница {Page} заменена правкой из внешнего редактора", pageIndex + 1);
+
+            // 4. По желанию — распознать текст на новой картинке.
+            if (request.RunOcrAfter && _services.Ocr.IsAvailable)
+            {
+                doc.StatusText = Loc.Get("OcrTitle");
+                var result = await _services.Ocr.RecognizeAsync(
+                    doc.Document, new[] { pageIndex }, null, CancellationToken.None);
+                doc.StatusText = result.PagesRecognized > 0
+                    ? Loc.F("PaintImportedWithOcr", result.WordCount)
+                    : Loc.Get("PaintImported");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка правки страницы во внешнем редакторе");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("PaintEditTitle"), ex.Message, ex.ToString());
+            doc.StatusText = Loc.Get("Ready");
+        }
+        finally
+        {
+            editor?.Dispose();
+            workspace?.Dispose(); // временное изображение удаляется всегда
+            doc.IsBusy = false;
+        }
+    }
+
+    private static byte[] ToGrayscale(byte[] bgra)
+    {
+        var result = new byte[bgra.Length];
+        for (var i = 0; i < bgra.Length; i += 4)
+        {
+            // Коэффициенты яркости BT.601 — привычная «серая» печать.
+            var gray = (byte)((bgra[i + 2] * 299 + bgra[i + 1] * 587 + bgra[i] * 114) / 1000);
+            result[i] = gray;
+            result[i + 1] = gray;
+            result[i + 2] = gray;
+            result[i + 3] = bgra[i + 3];
+        }
+        return result;
+    }
+
     // ----- Конвертация и пакетная обработка -----
 
     private bool _convertBusy; // глобальные операции без открытого документа
