@@ -7,6 +7,13 @@
                        "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv6/det/PP-OCRv6_det_medium.onnx",
                        "sha256":  "92078b7355007ccfffcd4c8cd441a3afd4538904d06881b29a155e1e679907c2",
                        "note":  "Поиск строк, 59 МБ. Общая для всех языков: детекция от письма не зависит, поэтому здесь самая новая версия v6. Хеш подтверждён загрузкой."
+                   },
+                   {
+                       "name":  "ch_PP-LCNet_x1_0_textline_ori_cls_server.onnx",
+                       "role":  "classification",
+                       "url":  "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/cls/ch_PP-LCNet_x1_0_textline_ori_cls_server.onnx",
+                       "sha256":  "7d3c02ef6c7da8ae08b4347cc7695b2081aae68c325d64375724ecf39c99e743",
+                       "note":  "Определение поворота строки на 180 градусов. Берётся server-вариант: он точнее мобильного, который идёт в комплекте пакета. Скачивается в свой каталог намеренно — комплектные файлы чужого пакета не доезжают до потребителей сборки, и движок на этом молча не поднимался."
                    }
                ],
     "packs":  [

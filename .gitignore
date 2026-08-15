@@ -10,3 +10,4 @@ artifacts/
 third_party/downloads/
 tools/qpdf/
 tools/tessdata/
+tools/ocrmodels/
