@@ -671,6 +671,31 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>Список вложенных файлов. Открывать их программа не умеет — только сохранять.</summary>
+    [RelayCommand]
+    private async Task ShowAttachments()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        try
+        {
+            var attachments = await doc.Document.PrimaryHandle
+                .GetAttachmentsAsync(CancellationToken.None);
+            if (attachments.Count == 0)
+            {
+                doc.StatusText = Loc.Get("AttachmentsNone");
+                return;
+            }
+            AttachmentsDialog.Show(OwnerWindow, attachments,
+                index => doc.Document.PrimaryHandle.ReadAttachmentAsync(index, CancellationToken.None));
+            doc.StatusText = Loc.Get("Ready");
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка чтения вложений документа");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("AttachmentsTitle"), ex.Message, ex.ToString());
+        }
+    }
+
     /// <summary>Правка существующей строки: клик по тексту открывает его в диалоге.</summary>
     [RelayCommand]
     private void EditExistingText()

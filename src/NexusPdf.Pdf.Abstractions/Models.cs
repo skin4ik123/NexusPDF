@@ -193,6 +193,21 @@ public sealed record PdfBookmark(
     int TargetPageIndex,
     IReadOnlyList<PdfBookmark> Children);
 
+/// <summary>
+/// Вложенный в документ файл. Программа умеет только показать его и сохранить
+/// на диск по явной команде пользователя — открывать вложения она не будет
+/// никогда: это классический способ доставки вредоносного содержимого.
+/// </summary>
+/// <remarks>
+/// Описания у вложения нет намеренно: FPDFAttachment_GetStringValue в
+/// поставляемой сборке pdfium возвращает пустую строку и для /Desc, и для
+/// ключей /Params (проверено тестом), поэтому поле было бы вечно пустым.
+/// </remarks>
+public sealed record PdfAttachment(
+    int Index,
+    string Name,
+    long SizeBytes);
+
 /// <summary>Ссылка страницы вместе с её рамкой в координатах страницы PDF (для подсветки и наведения).</summary>
 public sealed record PdfPageLink(PdfTextRect RectPt, string? Uri, int TargetPageIndex);
 

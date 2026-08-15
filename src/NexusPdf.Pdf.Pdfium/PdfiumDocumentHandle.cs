@@ -604,6 +604,88 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
         }
     }
 
+    public Task<IReadOnlyList<PdfAttachment>> GetAttachmentsAsync(CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync<IReadOnlyList<PdfAttachment>>(() =>
+            {
+                var result = new List<PdfAttachment>();
+                var count = fpdf_attachment.FPDFDocGetAttachmentCount(NativeDoc);
+                for (var i = 0; i < count; i++)
+                {
+                    var attachment = fpdf_attachment.FPDFDocGetAttachment(NativeDoc, i);
+                    if (attachment == null || attachment.__Instance == IntPtr.Zero)
+                        continue;
+                    var name = ReadUtf16((buffer, size) =>
+                        fpdf_attachment.FPDFAttachmentGetName(attachment, ref buffer[0], size));
+                    result.Add(new PdfAttachment(
+                        i,
+                        name.Length > 0 ? name : $"#{i + 1}",
+                        AttachmentSize(attachment)));
+                }
+                return result;
+            }, ct);
+        }
+    }
+
+    /// <summary>Размер вложения: первый вызов FPDFAttachment_GetFile с нулевым буфером.</summary>
+    private static ulong ReadAttachmentInto(FpdfAttachmentT attachment, byte[]? buffer)
+    {
+        ulong written = 0;
+        if (buffer == null)
+        {
+            fpdf_attachment.FPDFAttachmentGetFile(attachment, IntPtr.Zero, 0, ref written);
+            return written;
+        }
+        var pin = System.Runtime.InteropServices.GCHandle.Alloc(
+            buffer, System.Runtime.InteropServices.GCHandleType.Pinned);
+        try
+        {
+            fpdf_attachment.FPDFAttachmentGetFile(
+                attachment, pin.AddrOfPinnedObject(), (ulong)buffer.Length, ref written);
+        }
+        finally
+        {
+            pin.Free();
+        }
+        return written;
+    }
+
+    private static long AttachmentSize(FpdfAttachmentT attachment) =>
+        (long)ReadAttachmentInto(attachment, null);
+
+    public Task<byte[]> ReadAttachmentAsync(int index, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() =>
+            {
+                var count = fpdf_attachment.FPDFDocGetAttachmentCount(NativeDoc);
+                if (index < 0 || index >= count)
+                    throw new PdfEngineException("Вложение с таким номером в документе отсутствует.");
+                var attachment = fpdf_attachment.FPDFDocGetAttachment(NativeDoc, index);
+                if (attachment == null || attachment.__Instance == IntPtr.Zero)
+                    throw new PdfEngineException("Не удалось прочитать вложение.");
+
+                var size = ReadAttachmentInto(attachment, null);
+                if (size == 0)
+                    return Array.Empty<byte>();
+                // Вложение целиком грузится в память: гигабайтные вложения в
+                // PDF не встречаются, а поточного API pdfium не даёт.
+                if (size > int.MaxValue)
+                    throw new PdfEngineException("Вложение слишком велико для извлечения.");
+                var buffer = new byte[size];
+                var written = ReadAttachmentInto(attachment, buffer);
+                if (written != size)
+                    throw new PdfEngineException("Вложение прочитано не полностью.");
+                return buffer;
+            }, ct);
+        }
+    }
+
     private const int PageObjectText = 1; // FPDF_PAGEOBJ_TEXT
 
     public Task<PdfTextObject?> GetTextObjectAtAsync(
