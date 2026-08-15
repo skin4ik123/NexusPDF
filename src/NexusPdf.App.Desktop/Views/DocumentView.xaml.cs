@@ -786,6 +786,17 @@ public partial class DocumentView : UserControl
             e.Handled = true;
     }
 
+    /// <summary>
+    /// Enter в поле свойств применяет значение. Без этого число применялось бы
+    /// только при уходе фокуса, и было бы непонятно, приняли его или нет.
+    /// </summary>
+    private void OnObjectFieldKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || sender is not TextBox box) return;
+        box.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+        e.Handled = true;
+    }
+
     /// <summary>Элемент списка под курсором по его DataContext.</summary>
     private static T? FindItemAt<T>(object originalSource) where T : class
     {

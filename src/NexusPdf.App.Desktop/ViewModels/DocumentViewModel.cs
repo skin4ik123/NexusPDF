@@ -747,6 +747,25 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         return mapped;
     }
 
+    /// <summary>
+    /// Держит объект на странице. Утащенный за край объект не виден ни на
+    /// экране, ни в сохранённом файле — вернуть его оттуда пользователю нечем,
+    /// поэтому проще не выпускать.
+    /// </summary>
+    private NexusPdf.Ux.HandleBox ClampToPage(NexusPdf.Ux.HandleBox box, PageViewModel page)
+    {
+        var (width, height) = page.PageRef.RotationOffset % 2 == 0
+            ? (page.SizePt.WidthPoints, page.SizePt.HeightPoints)
+            : (page.SizePt.HeightPoints, page.SizePt.WidthPoints);
+
+        var normalized = NexusPdf.Pdf.Abstractions.OverlayGeometry.Normalize(
+            new NexusPdf.Pdf.Abstractions.OverlayBox(box.X, box.Y, box.Width, box.Height));
+
+        var x = Math.Clamp(normalized.XPt, 0, Math.Max(0, width - normalized.WidthPt));
+        var y = Math.Clamp(normalized.YPt, 0, Math.Max(0, height - normalized.HeightPt));
+        return new NexusPdf.Ux.HandleBox(x, y, normalized.WidthPt, normalized.HeightPt);
+    }
+
     private void UpdateObjectFrame(NexusPdf.Pdf.Abstractions.OverlayBox box)
     {
         if (SelectedObject is not { } selection) return;
@@ -815,6 +834,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         var dragged = NexusPdf.Ux.ObjectHandles.Drag(_dragStartBox, _dragHandle, dxPt, dyPt);
         dragged = NexusPdf.Ux.Snapping.Apply(
             dragged, SnapToGrid, GridStepPt, Array.Empty<double>(), Array.Empty<double>());
+        dragged = ClampToPage(dragged, selection.Page);
         selection.Page.DragPreviewRect = new Rect(
             Math.Min(dragged.X, dragged.X + dragged.Width),
             Math.Min(dragged.Y, dragged.Y + dragged.Height),
@@ -840,6 +860,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         var dragged = NexusPdf.Ux.ObjectHandles.Drag(_dragStartBox, handle, dxPt, dyPt);
         dragged = NexusPdf.Ux.Snapping.Apply(
             dragged, SnapToGrid, GridStepPt, Array.Empty<double>(), Array.Empty<double>());
+        dragged = ClampToPage(dragged, selection.Page);
 
         var displayed = ToDisplayFrame(selection.Overlay, selection.Page);
         NexusPdf.Pdf.Abstractions.PageOverlay? updated;
@@ -933,7 +954,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     {
         if (SelectedObject is not { } selection || IsBusy) return false;
         var displayed = ToDisplayFrame(selection.Overlay, selection.Page);
-        var moved = NexusPdf.Pdf.Abstractions.OverlayGeometry.Moved(displayed, dxPt, dyPt);
+        var clamped = ClampToPage(new NexusPdf.Ux.HandleBox(
+            selection.Box.XPt + dxPt, selection.Box.YPt + dyPt,
+            selection.Box.WidthPt, selection.Box.HeightPt), selection.Page);
+        var moved = NexusPdf.Pdf.Abstractions.OverlayGeometry.Moved(
+            displayed, clamped.X - selection.Box.XPt, clamped.Y - selection.Box.YPt);
         if (moved == null) return false;
 
         var stamped = moved with { PlacedRotation = selection.Page.PageRef.RotationOffset };
@@ -971,6 +996,134 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             Math.Round(box.WidthPt * PtToMm, 1), Math.Round(box.HeightPt * PtToMm, 1),
             selection.OverlayIndex + 1, selection.Page.PageRef.OverlayList.Count);
     }
+
+    // ----- Панель свойств выбранного объекта -----
+
+    private const double PointToMm = 25.4 / 72.0;
+    private bool _applyingObjectProperties;
+
+    public string SelectedObjectTitle => SelectedObject?.Overlay switch
+    {
+        NexusPdf.Pdf.Abstractions.TextOverlay => Loc.Get("UxObjectText"),
+        NexusPdf.Pdf.Abstractions.ImageOverlay => Loc.Get("UxObjectImage"),
+        NexusPdf.Pdf.Abstractions.NoteAnnotationDraft => Loc.Get("UxObjectNote"),
+        NexusPdf.Pdf.Abstractions.ShapeAnnotationDraft shape =>
+            Loc.Get(shape.IsEllipse ? "UxObjectEllipse" : "UxObjectRect"),
+        NexusPdf.Pdf.Abstractions.InkAnnotationDraft => Loc.Get("UxObjectInk"),
+        NexusPdf.Pdf.Abstractions.RedactionDraft => Loc.Get("UxObjectRedaction"),
+        NexusPdf.Pdf.Abstractions.TextMarkupDraft => Loc.Get("UxObjectMarkup"),
+        _ => Loc.Get("UxObjectOther"),
+    };
+
+    /// <summary>Растягивается ли выбранный объект — от этого зависят поля размера.</summary>
+    public bool CanResizeSelectedObject => SelectedObject is { } s &&
+        NexusPdf.Pdf.Abstractions.OverlayGeometry.AbilitiesOf(ToDisplayFrame(s.Overlay, s.Page)).CanResize;
+
+    public bool CanMoveSelectedObject => SelectedObject is { } s &&
+        NexusPdf.Pdf.Abstractions.OverlayGeometry.AbilitiesOf(ToDisplayFrame(s.Overlay, s.Page)).CanMove;
+
+    public string SelectedObjectOrderText => SelectedObject is { } s
+        ? Loc.F("UxObjectOrder", s.OverlayIndex + 1, s.Page.PageRef.OverlayList.Count)
+        : "";
+
+    /// <summary>Положение и размер в миллиметрах: пользователь мыслит листом, а не пунктами.</summary>
+    public double SelectedObjectXMm
+    {
+        get => SelectedObject is { } s ? Math.Round(s.Box.XPt * PointToMm, 1) : 0;
+        set => ApplyObjectBox(x: value / PointToMm);
+    }
+
+    public double SelectedObjectYMm
+    {
+        get => SelectedObject is { } s ? Math.Round(s.Box.YPt * PointToMm, 1) : 0;
+        set => ApplyObjectBox(y: value / PointToMm);
+    }
+
+    public double SelectedObjectWidthMm
+    {
+        get => SelectedObject is { } s ? Math.Round(s.Box.WidthPt * PointToMm, 1) : 0;
+        set => ApplyObjectBox(width: value / PointToMm);
+    }
+
+    public double SelectedObjectHeightMm
+    {
+        get => SelectedObject is { } s ? Math.Round(s.Box.HeightPt * PointToMm, 1) : 0;
+        set => ApplyObjectBox(height: value / PointToMm);
+    }
+
+    /// <summary>
+    /// Применяет введённые в панели свойств числа. Каждое поле — отдельная
+    /// операция отмены: пользователь правит их по одному, и откатываться они
+    /// должны так же.
+    /// </summary>
+    private void ApplyObjectBox(
+        double? x = null, double? y = null, double? width = null, double? height = null)
+    {
+        if (_applyingObjectProperties || SelectedObject is not { } selection || IsBusy) return;
+
+        var box = selection.Box;
+        var clamped = ClampToPage(new NexusPdf.Ux.HandleBox(
+            x ?? box.XPt, y ?? box.YPt, width ?? box.WidthPt, height ?? box.HeightPt), selection.Page);
+        var target = new NexusPdf.Pdf.Abstractions.OverlayBox(
+            clamped.X, clamped.Y, clamped.Width, clamped.Height);
+        if (Math.Abs(target.XPt - box.XPt) < 0.05 && Math.Abs(target.YPt - box.YPt) < 0.05 &&
+            Math.Abs(target.WidthPt - box.WidthPt) < 0.05 && Math.Abs(target.HeightPt - box.HeightPt) < 0.05)
+            return;
+
+        var displayed = ToDisplayFrame(selection.Overlay, selection.Page);
+        var sizeChanged = width != null || height != null;
+        var updated = sizeChanged
+            ? NexusPdf.Pdf.Abstractions.OverlayGeometry.Resized(displayed, target)
+            : NexusPdf.Pdf.Abstractions.OverlayGeometry.Moved(
+                displayed, target.XPt - box.XPt, target.YPt - box.YPt);
+        if (updated == null)
+        {
+            // Объект не двигается или не растягивается: поле обязано вернуть
+            // прежнее значение, а не сделать вид, что применилось.
+            RaiseObjectPropertyChanged();
+            return;
+        }
+
+        _applyingObjectProperties = true;
+        try
+        {
+            var stamped = updated with { PlacedRotation = selection.Page.PageRef.RotationOffset };
+            Document.Session.Apply(new ReplaceOverlayOperation(
+                selection.Page.LogicalIndex, selection.Overlay, stamped));
+            ReselectAfterChange(selection.Page, selection.OverlayIndex);
+        }
+        finally
+        {
+            _applyingObjectProperties = false;
+        }
+        RaiseObjectPropertyChanged();
+    }
+
+    private void RaiseObjectPropertyChanged()
+    {
+        OnPropertyChanged(nameof(SelectedObjectTitle));
+        OnPropertyChanged(nameof(SelectedObjectXMm));
+        OnPropertyChanged(nameof(SelectedObjectYMm));
+        OnPropertyChanged(nameof(SelectedObjectWidthMm));
+        OnPropertyChanged(nameof(SelectedObjectHeightMm));
+        OnPropertyChanged(nameof(SelectedObjectOrderText));
+        OnPropertyChanged(nameof(CanResizeSelectedObject));
+        OnPropertyChanged(nameof(CanMoveSelectedObject));
+    }
+
+    partial void OnSelectedObjectChanged(ObjectSelection? value) => RaiseObjectPropertyChanged();
+
+    [RelayCommand]
+    private void DeleteObject() => DeleteSelectedObject();
+
+    [RelayCommand]
+    private void DuplicateObject() => DuplicateSelectedObject();
+
+    [RelayCommand]
+    private void BringObjectForward() => MoveSelectedObjectInOrder(forward: true);
+
+    [RelayCommand]
+    private void SendObjectBackward() => MoveSelectedObjectInOrder(forward: false);
 
     // ----- Сетка и привязка -----
 
