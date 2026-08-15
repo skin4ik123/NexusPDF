@@ -1,26 +1,26 @@
 {
-  "comment": "Модели PaddleOCR в формате ONNX для движка RapidOcrNet. Ссылки и SHA-256 взяты из default_models.yaml проекта RapidOCR (ветка main, набор v3.9.2) и проверяются при загрузке. Лицензия моделей Apache-2.0. ВАЖНО: ModelScope отвечает 403 без заголовка User-Agent — загрузчик обязан его слать.",
+  "comment": "Модели PaddleOCR в формате ONNX для движка RapidOcrNet. Ссылки и SHA-256 сверены с default_models.yaml проекта RapidOCR (ветка main, набор v3.9.2) и ПРОВЕРЕНЫ фактической загрузкой. Лицензия моделей Apache-2.0. ВАЖНО: ModelScope отвечает 403 без заголовка User-Agent — загрузчик обязан его слать.",
   "files": [
     {
       "name": "PP-OCRv6_det_medium.onnx",
       "role": "detection",
       "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv6/det/PP-OCRv6_det_medium.onnx",
       "sha256": "",
-      "note": "Поиск строк на странице. Не зависит от языка, поэтому берём самую новую и точную версию."
+      "note": "Поиск строк на странице. Детекция от языка не зависит, поэтому здесь берётся самая новая версия — v6."
     },
     {
       "name": "cyrillic_PP-OCRv5_rec_mobile.onnx",
-      "role": "recognition-cyrillic",
+      "role": "recognition",
       "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/cyrillic_PP-OCRv5_rec_mobile.onnx",
       "sha256": "90f761b4bfcce0c8c561c0cb5c887b0971d3ec01c32164bdf7374a35b0982711",
-      "note": "Русский и латиница. У v6-распознавателей в списке RapidOCR НЕТ файла словаря, а без него вывод — мусор, поэтому для кириллицы берём v5 с опубликованным словарём."
+      "note": "Самый новый распознаватель, умеющий кириллицу. Распознаватели PP-OCRv6 для русского НЕ годятся: их словарь ppocrv6_dict.txt содержит 18708 символов — 15565 иероглифов, 53 латинских, 10 цифр и НОЛЬ кириллических (проверено загрузкой). Server-варианты есть только для китайского, для кириллицы mobile — единственный."
     },
     {
-      "name": "cyrillic_dict.txt",
-      "role": "recognition-cyrillic-dict",
-      "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv4/rec/cyrillic_PP-OCRv3_rec_mobile/cyrillic_dict.txt",
-      "sha256": "369a82c6c8c479784a5d726448b83b1eafb5fef0a4129a5eaa3929625ddcd132",
-      "note": "Набор символов распознавателя, 163 знака: 66 кириллических, 52 латинских, 10 цифр — русский, английский и числа одной моделью. ОБЯЗАН соответствовать модели, иначе буквы съезжают по таблице."
+      "name": "ppocrv5_cyrillic_dict.txt",
+      "role": "recognition-dict",
+      "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv5/rec/cyrillic_PP-OCRv5_rec_mobile/ppocrv5_cyrillic_dict.txt",
+      "sha256": "db40aa52ceb112055be80c694afdf655d5d2c4f7873704524cc16a447ca913ba",
+      "note": "Словарь ИМЕННО модели v5: 850 символов, из них 66 кириллических, 52 латинских, 10 цифр. Не путать с cyrillic_dict.txt (163 символа) — это словарь модели v3, и с ним v5 выдаёт мусор: набор символов задаётся словарём, а не моделью."
     }
   ]
 }
