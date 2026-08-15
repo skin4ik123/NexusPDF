@@ -7,6 +7,8 @@ namespace NexusPdf.Application;
 
 public sealed record OptimizeResult(long BytesBefore, long BytesAfter);
 
+public sealed record CompressImagesResult(long BytesBefore, long BytesAfter, int Recompressed, int Skipped);
+
 /// <summary>
 /// Операции над документом, требующие структурного движка (qpdf):
 /// защита паролем и оптимизация без потерь. Всегда создают новую копию,
@@ -130,6 +132,61 @@ public sealed class DocumentToolsService
             },
             keepBackup: false,
             ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Копия текущего состояния документа с ПЕРЕСЖАТЫМИ изображениями
+    /// (уменьшение до целевого DPI + JPEG): сжатие с потерями для сканов.
+    /// JPEG-кодек передаёт вызывающий слой (WPF-энкодер).
+    /// </summary>
+    public async Task<CompressImagesResult> CompressImagesCopyAsync(
+        OpenedDocument document, string targetPath, double targetDpi,
+        Func<byte[], int, int, byte[]> encodeJpeg, CancellationToken ct)
+    {
+        SaveService.ThrowIfTargetIsOpenSource(document, targetPath);
+        if (document.Password != null)
+            throw new PdfEngineException(
+                "Пересжатие защищённых паролем документов не поддерживается: сохранение сняло бы шифрование молча. Сначала сохраните копию без пароля.");
+        await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
+
+        var composition = document.BuildComposition();
+        long bytesBefore = 0;
+        ImageRecompressStats stats = new(0, 0);
+
+        await SafeFileReplace.WriteAndReplaceAsync(
+            targetPath,
+            async tempPath =>
+            {
+                var plain = tempPath + ".plain";
+                try
+                {
+                    if (SaveService.CanSaveDirect(document))
+                        await document.PrimaryHandle.SaveCurrentAsync(plain, ct).ConfigureAwait(false);
+                    else
+                        await _renderEngine.ComposeAsync(composition, plain, ct).ConfigureAwait(false);
+                    bytesBefore = new FileInfo(plain).Length;
+                    stats = await _renderEngine.RecompressImagesAsync(
+                        plain, null, tempPath, targetDpi, encodeJpeg, ct).ConfigureAwait(false);
+                }
+                finally
+                {
+                    try { File.Delete(plain); } catch { /* лучшая попытка */ }
+                }
+            },
+            async tempPath =>
+            {
+                var handle = await _renderEngine.OpenAsync(tempPath, null, ct).ConfigureAwait(false);
+                await using (handle.ConfigureAwait(false))
+                {
+                    if (handle.Info.PageCount != composition.Count)
+                        throw new PdfEngineException("Проверка пересжатой копии не пройдена: число страниц не совпало.");
+                }
+            },
+            keepBackup: false,
+            ct).ConfigureAwait(false);
+
+        return new CompressImagesResult(
+            bytesBefore, new FileInfo(targetPath).Length, stats.Recompressed, stats.Skipped);
     }
 
     /// <summary>Структурная оптимизация без потери качества. Возвращает размеры до/после.</summary>

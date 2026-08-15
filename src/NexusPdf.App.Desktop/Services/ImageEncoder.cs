@@ -11,6 +11,18 @@ namespace NexusPdf.App.Desktop.Services;
 /// </summary>
 public static class ImageEncoder
 {
+    /// <summary>BGRA-растр → JPEG с заданным качеством (для пересжатия изображений документа).</summary>
+    public static byte[] EncodeJpeg(byte[] bgra, int width, int height, int quality)
+    {
+        var source = BitmapSource.Create(
+            width, height, 96, 96, PixelFormats.Bgra32, null, bgra, width * 4);
+        var encoder = new JpegBitmapEncoder { QualityLevel = quality };
+        encoder.Frames.Add(BitmapFrame.Create(source));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return stream.ToArray();
+    }
+
     public static byte[] Encode(RenderedPageImage image, bool jpeg, double dpi)
     {
         var source = BitmapSource.Create(

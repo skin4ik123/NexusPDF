@@ -509,6 +509,51 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    [RelayCommand]
+    private async Task CompressImages()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy || !_services.Tools.IsAvailable) return;
+        var request = CompressImagesDialog.Show(OwnerWindow);
+        if (request == null) return;
+        var dialog = new SaveFileDialog
+        {
+            Filter = Loc.Get("PdfFilter"),
+            FileName = Path.GetFileNameWithoutExtension(doc.Title) + "-compressed.pdf",
+            DefaultExt = ".pdf",
+        };
+        if (dialog.ShowDialog(OwnerWindow) != true) return;
+        if (RejectIfTargetOpenElsewhere(doc, dialog.FileName)) return;
+
+        doc.IsBusy = true;
+        doc.StatusText = Loc.Get("CompressingStatus");
+        try
+        {
+            var result = await _services.Tools.CompressImagesCopyAsync(
+                doc.Document, dialog.FileName, request.Dpi,
+                (bgra, w, h) => ImageEncoder.EncodeJpeg(bgra, w, h, request.Quality),
+                CancellationToken.None);
+            doc.StatusText = result.BytesAfter < result.BytesBefore
+                ? Loc.F("CompressDone",
+                    (result.BytesBefore / 1024.0 / 1024.0).ToString("0.#"),
+                    (result.BytesAfter / 1024.0 / 1024.0).ToString("0.#"),
+                    result.Recompressed)
+                : Loc.F("CompressNoGain", result.Recompressed);
+            Log.Information("Пересжатие: {Before} → {After} байт, изображений {N}",
+                result.BytesBefore, result.BytesAfter, result.Recompressed);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка пересжатия изображений");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"),
+                Loc.F("ErrorSaveFile", Path.GetFileName(dialog.FileName)), ex.ToString());
+            doc.StatusText = Loc.Get("Ready");
+        }
+        finally
+        {
+            doc.IsBusy = false;
+        }
+    }
+
     // ----- Конвертация и пакетная обработка -----
 
     private bool _convertBusy; // глобальные операции без открытого документа
