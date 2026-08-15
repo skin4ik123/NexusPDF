@@ -241,6 +241,72 @@ public static class PdfFixture
         return path;
     }
 
+    /// <summary>
+    /// Двухслойный PDF: по строке текста в каждом слое (/OC ... BDC).
+    /// offLayer 0 — оба слоя включены, 1 или 2 — соответствующий выключен в
+    /// конфигурации по умолчанию.
+    /// </summary>
+    public static byte[] BuildWithLayers(int offLayer = 0)
+    {
+        var on = offLayer switch
+        {
+            1 => "7 0 R",
+            2 => "6 0 R",
+            _ => "6 0 R 7 0 R",
+        };
+        var off = offLayer switch
+        {
+            1 => "6 0 R",
+            2 => "7 0 R",
+            _ => "",
+        };
+
+        var stream =
+            "/OC /L1 BDC BT /F1 24 Tf 72 700 Td (LAYERONE) Tj ET EMC\n" +
+            "/OC /L2 BDC BT /F1 24 Tf 72 600 Td (LAYERTWO) Tj ET EMC";
+
+        var objects = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [6 0 R 7 0 R] " +
+            $"/D << /Order [6 0 R 7 0 R] /ON [{on}] /OFF [{off}] >> >> >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R " +
+            "/Resources << /Font << /F1 5 0 R >> /Properties << /L1 6 0 R /L2 7 0 R >> >> >>",
+            $"<< /Length {stream.Length} >>\nstream\n{stream}\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            "<< /Type /OCG /Name (Layer one) >>",
+            "<< /Type /OCG /Name (Layer two) >>",
+        };
+
+        var buffer = new MemoryStream();
+        void WriteRaw(string s) => buffer.Write(Encoding.ASCII.GetBytes(s));
+
+        WriteRaw("%PDF-1.6\n");
+        buffer.Write(new byte[] { (byte)'%', 0xE2, 0xE3, 0xCF, 0xD3, (byte)'\n' });
+        var offsets = new long[objects.Count + 1];
+        for (var i = 0; i < objects.Count; i++)
+        {
+            offsets[i + 1] = buffer.Position;
+            WriteRaw($"{i + 1} 0 obj\n{objects[i]}\nendobj\n");
+        }
+        var xrefPosition = buffer.Position;
+        WriteRaw($"xref\n0 {objects.Count + 1}\n");
+        WriteRaw("0000000000 65535 f \n");
+        for (var i = 1; i <= objects.Count; i++)
+            WriteRaw($"{offsets[i]:0000000000} 00000 n \n");
+        WriteRaw($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xrefPosition}\n%%EOF\n");
+        return buffer.ToArray();
+    }
+
+    public static string WriteLayersToTemp(string fileName, int offLayer = 0)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, fileName);
+        File.WriteAllBytes(path, BuildWithLayers(offLayer));
+        return path;
+    }
+
     public static string WriteOutlineToTemp(string fileName)
     {
         var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));

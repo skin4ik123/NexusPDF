@@ -11,6 +11,21 @@ public interface IEngineFeature
     string? UnavailableReason { get; }
 }
 
+/// <summary>
+/// Доступ к структуре документа на уровне объектов PDF в формате JSON qpdf.
+/// Нужен там, где у pdfium нет публичного API: слои (/OCProperties) читаются
+/// и переключаются только так.
+/// </summary>
+public interface IPdfStructureJsonEngine : IEngineFeature
+{
+    /// <summary>Структура документа в JSON qpdf версии 2.</summary>
+    Task<string> DescribeJsonAsync(string filePath, string? password, CancellationToken ct);
+
+    /// <summary>Копия документа, в которой перечисленные в патче объекты заменены целиком.</summary>
+    Task UpdateFromJsonAsync(
+        string sourcePath, string patchJson, string targetPath, string? password, CancellationToken ct);
+}
+
 /// <summary>Структурные операции над файлами PDF (линеаризация, оптимизация, проверка). Реализация — qpdf.</summary>
 public interface IPdfStructureEngine : IEngineFeature
 {

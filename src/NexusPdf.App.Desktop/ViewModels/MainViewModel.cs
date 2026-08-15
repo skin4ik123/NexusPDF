@@ -671,6 +671,77 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Слои документа. Видимость записывается в копию файла: движок отрисовки
+    /// читает конфигурацию слоёв при открытии, поэтому переключение прямо в
+    /// текущей вкладке потребовало бы переоткрытия документа и потери истории
+    /// правок — вместо этого честно предлагается сохранить копию.
+    /// </summary>
+    [RelayCommand]
+    private async Task ShowLayers()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        if (doc.FilePath is not { } path)
+        {
+            doc.StatusText = Loc.Get("LayersNeedSavedFile");
+            return;
+        }
+        if (!_services.Layers.IsAvailable)
+        {
+            ErrorDialog.Show(OwnerWindow, Loc.Get("LayersTitle"), Loc.Get("QpdfMissing"), "");
+            return;
+        }
+
+        try
+        {
+            doc.IsBusy = true;
+            var layers = await _services.Layers.GetLayersAsync(
+                path, doc.Document.Password, CancellationToken.None);
+            doc.IsBusy = false;
+            if (layers.Count == 0)
+            {
+                doc.StatusText = Loc.Get("LayersNone");
+                return;
+            }
+
+            var choice = LayersDialog.Choose(OwnerWindow, layers);
+            if (choice == null)
+            {
+                doc.StatusText = Loc.Get("Ready");
+                return;
+            }
+
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = Loc.Get("LayersSaveCopy"),
+                Filter = Loc.Get("PdfFilter"),
+                FileName = Path.GetFileNameWithoutExtension(path) + "-layers.pdf",
+            };
+            if (dialog.ShowDialog(OwnerWindow) != true)
+            {
+                doc.StatusText = Loc.Get("Ready");
+                return;
+            }
+
+            doc.IsBusy = true;
+            doc.StatusText = Loc.Get("LayersApplying");
+            await _services.Layers.SetLayerVisibilityAsync(
+                path, doc.Document.Password, choice, dialog.FileName, CancellationToken.None);
+            doc.StatusText = Loc.F("LayersSaved", Path.GetFileName(dialog.FileName));
+            Log.Information("Копия со слоями сохранена: {Path}", dialog.FileName);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка работы со слоями документа");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("LayersTitle"), ex.Message, ex.ToString());
+            doc.StatusText = Loc.Get("Ready");
+        }
+        finally
+        {
+            doc.IsBusy = false;
+        }
+    }
+
     /// <summary>Список вложенных файлов. Открывать их программа не умеет — только сохранять.</summary>
     [RelayCommand]
     private async Task ShowAttachments()

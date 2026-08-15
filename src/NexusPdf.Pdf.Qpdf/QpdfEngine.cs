@@ -12,7 +12,8 @@ namespace NexusPdf.Pdf.Qpdf;
 /// Пока qpdf.exe не найден — движок честно недоступен, зависящие функции
 /// в интерфейсе не показываются.
 /// </summary>
-public sealed class QpdfEngine : IPdfStructureEngine, IPdfSecurityEngine, IPdfValidationEngine
+public sealed class QpdfEngine : IPdfStructureEngine, IPdfSecurityEngine, IPdfValidationEngine,
+    IPdfStructureJsonEngine
 {
     private static readonly TimeSpan OperationTimeout = TimeSpan.FromMinutes(5);
 
@@ -101,6 +102,54 @@ public sealed class QpdfEngine : IPdfStructureEngine, IPdfSecurityEngine, IPdfVa
         RunExpectSuccessAsync(
             new[] { "--password=" + password, "--decrypt", sourcePath, targetPath },
             "Снятие защиты", ct);
+
+    /// <summary>
+    /// Структура документа в JSON qpdf (версия 2). Нужна там, где у pdfium нет
+    /// публичного API — например для слоёв: /OCProperties читается только так.
+    /// </summary>
+    public async Task<string> DescribeJsonAsync(string filePath, string? password, CancellationToken ct)
+    {
+        var args = new List<string> { "--warning-exit-0", "--json=2" };
+        if (!string.IsNullOrEmpty(password))
+            args.Add("--password=" + password);
+        args.Add(filePath);
+
+        var (exitCode, output) = await RunAsync(args, ct).ConfigureAwait(false);
+        if (exitCode != 0)
+            throw new PdfEngineException($"Чтение структуры: qpdf завершился с кодом {exitCode}. {Truncate(output)}");
+        // Ошибки и предупреждения идут в stderr и приклеены к выводу — берём
+        // ровно JSON-объект от первой «{» до последней «}».
+        var start = output.IndexOf('{');
+        var end = output.LastIndexOf('}');
+        if (start < 0 || end <= start)
+            throw new PdfEngineException("qpdf не вернул структуру документа.");
+        return output[start..(end + 1)];
+    }
+
+    /// <summary>
+    /// Применяет к документу патч в формате JSON qpdf: перечисленные объекты
+    /// заменяются целиком, остальное содержимое файла не трогается.
+    /// </summary>
+    public async Task UpdateFromJsonAsync(
+        string sourcePath, string patchJson, string targetPath, string? password, CancellationToken ct)
+    {
+        // qpdf читает JSON строго без BOM — с ним он падает на первом символе.
+        var patchFile = Path.Combine(Path.GetTempPath(), "nexuslayers-" + Guid.NewGuid().ToString("N") + ".json");
+        await File.WriteAllTextAsync(patchFile, patchJson, new UTF8Encoding(false), ct).ConfigureAwait(false);
+        try
+        {
+            var args = new List<string> { sourcePath };
+            if (!string.IsNullOrEmpty(password))
+                args.Add("--password=" + password);
+            args.Add("--update-from-json=" + patchFile);
+            args.Add(targetPath);
+            await RunExpectSuccessAsync(args, "Изменение слоёв", ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            try { File.Delete(patchFile); } catch { /* лучшая попытка */ }
+        }
+    }
 
     private async Task RunExpectSuccessAsync(IReadOnlyList<string> args, string operationName, CancellationToken ct)
     {
