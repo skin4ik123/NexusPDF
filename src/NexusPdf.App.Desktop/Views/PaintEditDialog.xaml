@@ -42,6 +42,19 @@
       <ComboBoxItem Content="{l:Loc PaintEditColorGray}"/>
     </ComboBox>
 
+    <StackPanel x:Name="RegionModePanel" Visibility="Collapsed">
+      <TextBlock Text="{l:Loc PaintEditRegionMode}" Foreground="{DynamicResource TextSecondary}"
+                 FontSize="12" Margin="0,12,0,4"/>
+      <RadioButton x:Name="ModeOverlay" IsChecked="True" Foreground="{DynamicResource TextBrush}"
+                   Content="{l:Loc PaintEditRegionOverlay}"/>
+      <TextBlock Text="{l:Loc PaintEditRegionOverlayHint}" FontSize="11" Margin="24,2,0,0"
+                 Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" MaxWidth="460"/>
+      <RadioButton x:Name="ModeDestroy" Margin="0,8,0,0" Foreground="{DynamicResource TextBrush}"
+                   Content="{l:Loc PaintEditRegionDestroy}"/>
+      <TextBlock Text="{l:Loc PaintEditRegionDestroyHint}" FontSize="11" Margin="24,2,0,0"
+                 Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" MaxWidth="460"/>
+    </StackPanel>
+
     <CheckBox x:Name="OcrCheck" Content="{l:Loc PaintEditOcrAfter}" Margin="0,14,0,0"
               Foreground="{DynamicResource TextBrush}"/>
     <TextBlock x:Name="OcrHint" Text="{l:Loc PaintEditOcrHint}" FontSize="11" Margin="24,2,0,0"
