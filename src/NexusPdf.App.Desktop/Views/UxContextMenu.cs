@@ -61,13 +61,27 @@ public static class UxContextMenu
         return menu;
     }
 
-    /// <summary>Показывает меню у элемента; ничего не делает, если меню пустое.</summary>
-    public static bool Show(UxCommandHub hub, UxTarget target, FrameworkElement placementTarget)
+    /// <summary>
+    /// Показывает меню у элемента; ничего не делает, если меню пустое.
+    /// </summary>
+    /// <param name="at">
+    /// Точка внутри <paramref name="placementTarget"/>. Задаётся для касания и
+    /// пера: у них нет положения мыши, и меню иначе выскакивает там, где в
+    /// последний раз был курсор.
+    /// </param>
+    public static bool Show(
+        UxCommandHub hub, UxTarget target, FrameworkElement placementTarget, Point? at = null)
     {
         var menu = Build(hub, target);
         if (menu == null)
             return false;
         menu.PlacementTarget = placementTarget;
+        if (at is { } point)
+        {
+            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Relative;
+            menu.HorizontalOffset = point.X;
+            menu.VerticalOffset = point.Y;
+        }
         menu.IsOpen = true;
         return true;
     }

@@ -17,6 +17,13 @@ public sealed class AppSettings
 
     /// <summary>Языковой пакет распознавания (идентификатор из ocrmodels.lock.json).</summary>
     public string OcrLanguagePack { get; set; } = "cyrillic";
+    /// <summary>
+    /// Плотность интерфейса: "auto" | "compact" | "comfortable" | "touch".
+    /// «auto» — размеры идут за способом ввода: коснулись пальцем, значит цели
+    /// становятся крупнее сразу.
+    /// </summary>
+    public string UiDensity { get; set; } = "auto";
+
     public bool KeepBackupOnSave { get; set; }
     public double LastZoom { get; set; } = 1.0;
 

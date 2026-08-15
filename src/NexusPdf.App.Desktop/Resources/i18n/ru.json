@@ -649,5 +649,13 @@
   "UxPagePropsLine": "Страница {0}: {1}×{2} мм ({3}×{4} пт), поворот {5}°",
   "UxPagePropsMore": "…и ещё страниц: {0}",
   "PrintSelectedScope": "Выбранные страницы ({0})",
-  "UxEditText": "Править текст"
+  "UxEditText": "Править текст",
+  "UxDensity": "Размер элементов",
+  "UxDensityAuto": "Авто",
+  "UxDensityAutoHint": "Мышью — обычные размеры, после касания пальцем — крупные.",
+  "UxDensityCompact": "Плотно",
+  "UxDensityComfortable": "Обычно",
+  "UxDensityTouch": "Для пальца",
+  "UxDensityTouchHint": "Кнопки и пункты меню не меньше 44 точек — попадать пальцем без промахов.",
+  "UxDensityApplied": "Размер элементов интерфейса изменён."
 }

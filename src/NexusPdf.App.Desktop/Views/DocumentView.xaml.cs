@@ -480,11 +480,23 @@ public partial class DocumentView : UserControl
 
     private void OnPagesRightClick(object sender, MouseButtonEventArgs e)
     {
-        if (_vm == null || Hub is not { } hub) return;
-        var hit = FindPageAt(e.OriginalSource);
-        if (hit == null) return;
+        if (ShowPageContextMenu(e.GetPosition(PagesList)))
+            e.Handled = true;
+    }
+
+    /// <summary>
+    /// Меню страницы в точке. Точка, а не источник события: то же меню
+    /// открывается долгим удержанием пальца и кнопкой пера, где никакого
+    /// «источника клика» нет.
+    /// </summary>
+    private bool ShowPageContextMenu(Point pointInList)
+    {
+        if (_vm == null || Hub is not { } hub) return false;
+        var hit = FindPageAt(PagesList.InputHitTest(pointInList) as DependencyObject
+                             ?? (object)PagesList);
+        if (hit == null) return false;
         var (page, element) = hit.Value;
-        var position = e.GetPosition(element);
+        var position = PagesList.TranslatePoint(pointInList, element);
 
         // Правая кнопка НЕ снимает выделение текста: иначе к моменту показа
         // меню размечать было бы уже нечего.
@@ -512,8 +524,7 @@ public partial class DocumentView : UserControl
             Pages = new[] { page },
             Link = link,
         };
-        if (UxContextMenu.Show(hub, target, PagesList))
-            e.Handled = true;
+        return UxContextMenu.Show(hub, target, PagesList, pointInList);
     }
 
     private void OnThumbRightClick(object sender, MouseButtonEventArgs e) =>
@@ -571,6 +582,106 @@ public partial class DocumentView : UserControl
             Bookmark = bookmark,
         };
         if (sender is FrameworkElement element && UxContextMenu.Show(hub, target, element))
+            e.Handled = true;
+    }
+
+    // ----- Сенсорный ввод и перо -----
+
+    private System.Windows.Threading.DispatcherTimer? _longPressTimer;
+    private Point _touchStart;
+    private bool _touchMoved;
+
+    /// <summary>
+    /// Щипок и протяжка. WPF умеет прокручивать список пальцем сам, но тогда
+    /// он же и съедает манипуляцию, и щипок не доходит: поэтому прокрутка и
+    /// масштаб считаются здесь вместе.
+    /// </summary>
+    private void OnPagesManipulationStarting(object sender, ManipulationStartingEventArgs e)
+    {
+        e.ManipulationContainer = PagesList;
+        e.Mode = ManipulationModes.Scale | ManipulationModes.Translate;
+        e.Handled = true;
+    }
+
+    private void OnPagesManipulationDelta(object sender, ManipulationDeltaEventArgs e)
+    {
+        if (_vm == null) return;
+        HookScroller();
+        if (_scroller == null) return;
+
+        var scale = (e.DeltaManipulation.Scale.X + e.DeltaManipulation.Scale.Y) / 2;
+        if (Math.Abs(scale - 1.0) > NexusPdf.Ux.TouchGestures.ZoomDeadZone)
+        {
+            // Щипок: масштаб идёт через ту же модель, что колесо и кнопки, —
+            // иначе появились бы два разных «масштаба» с разными границами.
+            _vm.SetZoom(NexusPdf.Ux.TouchGestures.ApplyZoom(_vm.Zoom, scale));
+        }
+        else
+        {
+            var translation = e.DeltaManipulation.Translation;
+            _scroller.ScrollToVerticalOffset(_scroller.VerticalOffset - translation.Y);
+            _scroller.ScrollToHorizontalOffset(_scroller.HorizontalOffset - translation.X);
+        }
+        e.Handled = true;
+    }
+
+    /// <summary>Инерция после броска: без неё прокрутка пальцем ощущается «залипшей».</summary>
+    private void OnPagesInertiaStarting(object sender, ManipulationInertiaStartingEventArgs e)
+    {
+        e.TranslationBehavior.DesiredDeceleration = 0.0016; // ≈ 1000 точек за 800 мс
+        e.ExpansionBehavior.DesiredDeceleration = 0.0008;
+        e.Handled = true;
+    }
+
+    private void OnPagesTouchDown(object sender, TouchEventArgs e)
+    {
+        _touchStart = e.GetTouchPoint(PagesList).Position;
+        _touchMoved = false;
+        StopLongPress();
+
+        // Второй палец — это уже щипок, а не удержание.
+        if (PagesList.TouchesOver.Count() > 1) return;
+
+        _longPressTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(NexusPdf.Ux.TouchGestures.LongPressMs),
+        };
+        _longPressTimer.Tick += (_, _) =>
+        {
+            StopLongPress();
+            if (!_touchMoved)
+                ShowPageContextMenu(_touchStart);
+        };
+        _longPressTimer.Start();
+    }
+
+    private void OnPagesTouchMove(object sender, TouchEventArgs e)
+    {
+        var point = e.GetTouchPoint(PagesList).Position;
+        var moved = Math.Abs(point.X - _touchStart.X) + Math.Abs(point.Y - _touchStart.Y);
+        if (moved > NexusPdf.Ux.TouchGestures.MoveToleranceDip)
+        {
+            _touchMoved = true;
+            StopLongPress();
+        }
+    }
+
+    private void OnPagesTouchUp(object sender, TouchEventArgs e) => StopLongPress();
+
+    private void StopLongPress()
+    {
+        _longPressTimer?.Stop();
+        _longPressTimer = null;
+    }
+
+    /// <summary>
+    /// Кнопка на пере — правая кнопка мыши. У пера её ищут именно там, где она
+    /// есть физически, поэтому меню открывается в точке пера, а не у курсора.
+    /// </summary>
+    private void OnPagesStylusButtonDown(object sender, StylusButtonEventArgs e)
+    {
+        if (e.StylusButton.Guid != StylusPointProperties.BarrelButton.Id) return;
+        if (ShowPageContextMenu(e.GetPosition(PagesList)))
             e.Handled = true;
     }
 

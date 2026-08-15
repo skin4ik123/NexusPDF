@@ -46,6 +46,11 @@ public partial class App : System.Windows.Application
             new RoutedEventHandler((sender, _) => ThemeManager.ApplyTitleBar((Window)sender)));
         ThemeManager.Apply(settings.Theme);
 
+        // Плотность интерфейса. В режиме «авто» она следует за тем, чем
+        // работают сейчас: до первого касания — мышиная, после — пальцевая.
+        Services.Ux.DensityManager.Apply(settings.UiDensity);
+        Services.Ux.TouchInputWatcher.Start(settings.UiDensity);
+
         var crashed = CrashSentinel.PreviousSessionCrashed();
         CrashSentinel.MarkSessionStarted();
 
