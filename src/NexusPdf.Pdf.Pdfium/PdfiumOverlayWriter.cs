@@ -77,6 +77,31 @@ internal static class PdfiumOverlayWriter
         var displayHeight = rotation % 2 == 0 ? contentHeight : contentWidth;
 
         var contentAdded = false;
+
+        // Замена содержимого выполняется ПЕРВОЙ: она стирает объекты страницы,
+        // после чего остальные оверлеи ложатся поверх новой картинки.
+        // Аннотации, ссылки и поля форм не трогаются — они не объекты
+        // содержимого, а элементы /Annots.
+        if (overlays.OfType<PageRasterReplacement>().LastOrDefault() is { } replacement)
+        {
+            for (var i = fpdf_edit.FPDFPageCountObjects(page) - 1; i >= 0; i--)
+            {
+                var existing = fpdf_edit.FPDFPageGetObject(page, i);
+                if (existing == null || existing.__Instance == IntPtr.Zero)
+                    continue;
+                if (fpdf_edit.FPDFPageRemoveObject(page, existing) != 0)
+                    fpdf_edit.FPDFPageObjDestroy(existing); // владение вернулось нам
+            }
+
+            // Растр кладётся на всю рамку страницы в ЕЁ ориентации: правка
+            // выполнялась над отображаемым видом.
+            var full = new ImageOverlay(
+                replacement.Bgra, replacement.PixelWidth, replacement.PixelHeight,
+                0, 0, displayWidth, displayHeight);
+            ApplyImage(document, page, full, 0, rotation, left, bottom, contentWidth, contentHeight);
+            contentAdded = true;
+        }
+
         foreach (var raw in overlays)
         {
             var (overlay, extraAngle) = OverlayDisplayMapper.ToFrame(
@@ -101,6 +126,8 @@ internal static class PdfiumOverlayWriter
                     ApplyShape(page, shape,
                         rotation, left, bottom, contentWidth, contentHeight);
                     break;
+                case PageRasterReplacement:
+                    break; // уже применена выше
                 case OcrTextLayerOverlay ocrLayer:
                     ApplyOcrLayer(document, page, font, ocrLayer, extraAngle,
                         rotation, left, bottom, contentWidth, contentHeight);
