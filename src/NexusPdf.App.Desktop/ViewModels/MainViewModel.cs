@@ -154,6 +154,7 @@ public sealed partial class MainViewModel : ObservableObject
                 _ = vm.LoadSignaturesAsync();    // значок статуса подписей в статус-баре
                 _ = vm.CheckActiveContentAsync(); // предупреждение о JS/вложениях/Launch
                 _ = vm.LoadPermissionsAsync();   // запрет печати обязан быть виден до попытки печатать
+                RestoreWorkspace();              // панели те же, что в прошлый раз
 
                 _services.Settings.TouchRecent(path);
                 SyncRecent();
@@ -974,6 +975,65 @@ public sealed partial class MainViewModel : ObservableObject
         doc.IsOrganizeMode = ActiveToolGroup == ToolGroup.Pages;
         if (ActiveToolGroup != ToolGroup.Comment)
             doc.SelectDrawTool(DocumentViewModel.DrawTool.None);
+    }
+
+    // ----- Профили рабочих пространств -----
+
+    /// <summary>
+    /// Профиль — набор состояний интерфейса под задачу: читать, править и
+    /// рецензировать удобно с разными открытыми панелями, и переключать их по
+    /// одной каждый раз не должно быть работой.
+    /// </summary>
+    [RelayCommand]
+    private void ApplyWorkspace(string? id) => ApplyWorkspace(id, remember: true, changeZoom: true);
+
+    /// <summary>
+    /// Восстановление рабочего пространства на открытом документе. Масштаб при
+    /// этом НЕ трогается: его выбирает начальная подгонка страницы, и
+    /// перебивать её на каждом открытии — значит спорить с пользователем.
+    /// </summary>
+    private void RestoreWorkspace() =>
+        ApplyWorkspace(_services.Settings.Workspace, remember: false, changeZoom: false);
+
+    private void ApplyWorkspace(string? id, bool remember, bool changeZoom)
+    {
+        var profile = NexusPdf.Ux.WorkspaceProfile.ById(id);
+        if (remember)
+        {
+            _services.Settings.Workspace = profile.Id;
+            _services.SaveSettings();
+        }
+
+        ActiveToolGroup = profile.Rail switch
+        {
+            NexusPdf.Ux.ToolRail.Pages => ToolGroup.Pages,
+            NexusPdf.Ux.ToolRail.Comment => ToolGroup.Comment,
+            NexusPdf.Ux.ToolRail.Edit => ToolGroup.Edit,
+            NexusPdf.Ux.ToolRail.Forms => ToolGroup.Forms,
+            NexusPdf.Ux.ToolRail.Protect => ToolGroup.Protect,
+            _ => ToolGroup.None,
+        };
+
+        if (ActiveDocument is not { } doc) return;
+
+        doc.IsOrganizeMode = profile.Organize;
+        doc.IsCommentsVisible = profile.CommentsPanel;
+        // Оглавление показывается только если оно у документа есть: пустая
+        // вкладка вместо миниатюр была бы хуже, чем миниатюры.
+        doc.IsOutlineVisible = profile.Outline && doc.HasBookmarks;
+        if (profile.Rail != NexusPdf.Ux.ToolRail.Comment)
+            doc.SelectDrawTool(DocumentViewModel.DrawTool.None);
+
+        if (!changeZoom)
+            return;
+        if (!profile.Organize)
+        {
+            if (profile.FitWholePage)
+                doc.FitPageCommand.Execute(null);
+            else
+                doc.FitWidthCommand.Execute(null);
+        }
+        doc.StatusText = Loc.F("UxWorkspaceApplied", Loc.Get(profile.TitleKey));
     }
 
     // ----- Рисование от руки -----
