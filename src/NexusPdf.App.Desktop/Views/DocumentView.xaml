@@ -49,6 +49,7 @@
         <ColumnDefinition Width="176"/>
         <ColumnDefinition Width="*"/>
         <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="Auto"/>
       </Grid.ColumnDefinitions>
 
       <Border Grid.Column="0" Background="{DynamicResource PanelBg}"
@@ -404,6 +405,88 @@
             </ListBox.ItemTemplate>
           </ListBox>
         </Grid>
+      </Border>
+
+      <!-- Свойства выбранного объекта: появляются вместе с выделением и
+           исчезают вместе с ним — постоянная пустая панель занимала бы место
+           и ничего не сообщала -->
+      <Border Grid.Column="3" Width="250" Background="{DynamicResource PanelBg}"
+              BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1,0,0,0"
+              Visibility="{Binding HasObjectSelection, Converter={StaticResource BoolToVis}}">
+        <StackPanel Margin="12,10">
+          <TextBlock Text="{Binding SelectedObjectTitle}" FontWeight="SemiBold" FontSize="13"
+                     Foreground="{DynamicResource TextBrush}" TextWrapping="Wrap"/>
+          <TextBlock Text="{Binding SelectedObjectOrderText}" FontSize="11" Margin="0,2,0,10"
+                     Foreground="{DynamicResource TextSecondary}"/>
+
+          <TextBlock Text="{l:Loc UxObjectPosition}" FontSize="11" Margin="0,0,0,4"
+                     Foreground="{DynamicResource TextSecondary}"/>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Margin="0,0,6,0">
+              <TextBlock Text="X, мм" FontSize="10" Foreground="{DynamicResource TextSecondary}"/>
+              <TextBox Style="{StaticResource ThemedTextBox}"
+                       IsEnabled="{Binding CanMoveSelectedObject}"
+                       KeyDown="OnObjectFieldKeyDown"
+                       Text="{Binding SelectedObjectXMm, StringFormat={}{0:F1}}"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1">
+              <TextBlock Text="Y, мм" FontSize="10" Foreground="{DynamicResource TextSecondary}"/>
+              <TextBox Style="{StaticResource ThemedTextBox}"
+                       IsEnabled="{Binding CanMoveSelectedObject}"
+                       KeyDown="OnObjectFieldKeyDown"
+                       Text="{Binding SelectedObjectYMm, StringFormat={}{0:F1}}"/>
+            </StackPanel>
+          </Grid>
+
+          <TextBlock Text="{l:Loc UxObjectSize}" FontSize="11" Margin="0,10,0,4"
+                     Foreground="{DynamicResource TextSecondary}"/>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Margin="0,0,6,0">
+              <TextBlock Text="{l:Loc UxObjectWidth}" FontSize="10"
+                         Foreground="{DynamicResource TextSecondary}"/>
+              <TextBox Style="{StaticResource ThemedTextBox}"
+                       IsEnabled="{Binding CanResizeSelectedObject}"
+                       KeyDown="OnObjectFieldKeyDown"
+                       Text="{Binding SelectedObjectWidthMm, StringFormat={}{0:F1}}"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1">
+              <TextBlock Text="{l:Loc UxObjectHeight}" FontSize="10"
+                         Foreground="{DynamicResource TextSecondary}"/>
+              <TextBox Style="{StaticResource ThemedTextBox}"
+                       IsEnabled="{Binding CanResizeSelectedObject}"
+                       KeyDown="OnObjectFieldKeyDown"
+                       Text="{Binding SelectedObjectHeightMm, StringFormat={}{0:F1}}"/>
+            </StackPanel>
+          </Grid>
+
+          <TextBlock Text="{l:Loc UxObjectFixedSize}" FontSize="10" TextWrapping="Wrap"
+                     Margin="0,4,0,0" Foreground="{DynamicResource TextSecondary}"
+                     Visibility="{Binding CanResizeSelectedObject,
+                                  Converter={StaticResource InvBoolToVisLocal}}"/>
+
+          <Separator Margin="0,12" Background="{DynamicResource PanelBorder}"/>
+
+          <Button Style="{StaticResource ToolButton}" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Left" Command="{Binding BringObjectForwardCommand}"
+                  Content="{l:Loc UxBringForward}"/>
+          <Button Style="{StaticResource ToolButton}" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Left" Command="{Binding SendObjectBackwardCommand}"
+                  Content="{l:Loc UxSendBackward}"/>
+          <Button Style="{StaticResource ToolButton}" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Left" Command="{Binding DuplicateObjectCommand}"
+                  Content="{l:Loc UxDuplicateObject}"/>
+          <Button Style="{StaticResource ToolButton}" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Left" Command="{Binding DeleteObjectCommand}"
+                  Content="{l:Loc UxDeleteObject}" Foreground="#DC2626"/>
+        </StackPanel>
       </Border>
     </Grid>
 

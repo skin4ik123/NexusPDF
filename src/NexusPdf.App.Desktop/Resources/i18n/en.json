@@ -694,5 +694,11 @@
   "UxObjectInk": "Freehand drawing",
   "UxObjectRedaction": "Redaction",
   "UxObjectMarkup": "Text markup",
-  "UxObjectOther": "Object"
+  "UxObjectOther": "Object",
+  "UxObjectPosition": "Position from the top-left corner",
+  "UxObjectSize": "Size",
+  "UxObjectWidth": "Width, mm",
+  "UxObjectHeight": "Height, mm",
+  "UxObjectOrder": "Drawing order: {0} of {1}",
+  "UxObjectFixedSize": "This object has a fixed size: it can be moved but not resized."
 }

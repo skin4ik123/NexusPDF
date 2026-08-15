@@ -694,5 +694,11 @@
   "UxObjectInk": "Рисунок от руки",
   "UxObjectRedaction": "Вымарка",
   "UxObjectMarkup": "Разметка текста",
-  "UxObjectOther": "Объект"
+  "UxObjectOther": "Объект",
+  "UxObjectPosition": "Положение от левого верхнего угла",
+  "UxObjectSize": "Размер",
+  "UxObjectWidth": "Ширина, мм",
+  "UxObjectHeight": "Высота, мм",
+  "UxObjectOrder": "Порядок отрисовки: {0} из {1}",
+  "UxObjectFixedSize": "У этого объекта фиксированный размер: его можно двигать, но не растягивать."
 }
