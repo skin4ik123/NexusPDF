@@ -70,6 +70,7 @@
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto"/>
           <RowDefinition Height="*"/>
+          <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <TextBlock Grid.Row="0" Grid.Column="0" x:Name="FirstLabel" FontSize="11"
                    Foreground="{DynamicResource TextSecondary}" Margin="8,4" TextTrimming="CharacterEllipsis"/>
@@ -83,6 +84,16 @@
           <Image x:Name="SecondImage" Stretch="Uniform"/>
           <Image x:Name="SecondDiff" Stretch="Uniform"/>
         </Grid>
+        <!-- Пословные текстовые отличия выбранной страницы -->
+        <Border Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" x:Name="TextDiffPanel"
+                Visibility="Collapsed" MaxHeight="150"
+                Background="{DynamicResource PanelBg}"
+                BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,1,0,0">
+          <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="8,6">
+            <TextBlock x:Name="TextDiffBlock" FontSize="12" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextSecondary}"/>
+          </ScrollViewer>
+        </Border>
       </Grid>
     </Grid>
   </Grid>

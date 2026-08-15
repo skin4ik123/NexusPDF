@@ -271,6 +271,7 @@
   "CompareOnlyFirst": "only in first",
   "CompareOnlySecond": "only in second",
   "CompareError": "Comparison failed:",
+  "CompareTextTooLong": "The page is too long for word-level text comparison.",
   "PropsMenu": "Document properties…",
   "PropsTitle": "Document properties",
   "PropsPath": "Location",

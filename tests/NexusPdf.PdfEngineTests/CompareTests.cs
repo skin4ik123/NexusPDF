@@ -74,6 +74,30 @@ public sealed class CompareTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Text_Diff_Reports_Changed_Words()
+    {
+        var dir = TempDir();
+        var a = Path.Combine(dir, "a.pdf");
+        var b = Path.Combine(dir, "b.pdf");
+        File.WriteAllBytes(a, PdfFixture.Build(
+            new PdfFixture.PageSpec(612, 792, Text: "Total amount is 1000 dollars")));
+        File.WriteAllBytes(b, PdfFixture.Build(
+            new PdfFixture.PageSpec(612, 792, Text: "Total amount is 9999 dollars")));
+
+        await using var session = await CompareSession.OpenAsync(_pdfium, a, null, b, null, CancellationToken.None);
+        var fragments = await session.GetPageTextDiffAsync(0, CancellationToken.None);
+
+        Assert.Contains(fragments, f => f.Kind == TextDiffKind.Removed && f.Text == "1000");
+        Assert.Contains(fragments, f => f.Kind == TextDiffKind.Added && f.Text == "9999");
+        // Неизменившиеся слова не попадают в изменённые фразы.
+        Assert.DoesNotContain(fragments, f => f.Kind != TextDiffKind.Same && f.Text.Contains("dollars"));
+
+        // Идентичные тексты — пустой diff.
+        await using var same = await CompareSession.OpenAsync(_pdfium, a, null, a, null, CancellationToken.None);
+        Assert.Empty(await same.GetPageTextDiffAsync(0, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Metadata_Is_Read_From_Document()
     {
         var path = PdfFixture.WriteToTemp("meta.pdf", new PdfFixture.PageSpec(612, 792));

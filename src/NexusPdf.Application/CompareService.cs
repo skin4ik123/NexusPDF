@@ -34,6 +34,18 @@ public sealed record CompareSummary(
     string FirstPath,
     string SecondPath);
 
+public enum TextDiffKind
+{
+    Same = 0,
+    Added = 1,
+    Removed = 2,
+    /// <summary>Страницы слишком длинные для пословного сравнения.</summary>
+    TooLong = 3,
+}
+
+/// <summary>Фраза пословного diff: общая (сокращённая), добавленная или удалённая.</summary>
+public sealed record TextDiffFragment(string Text, TextDiffKind Kind);
+
 /// <summary>
 /// Визуальное сравнение двух PDF: страницы попарно рендерятся при одном DPI
 /// на общий белый канвас и сравниваются попиксельно с допуском на сглаживание.
@@ -106,6 +118,105 @@ public sealed class CompareSession : IAsyncDisposable
     {
         var (_, images) = await ComparePageAsync(pageIndex, keepImages: true, ct).ConfigureAwait(false);
         return images!;
+    }
+
+    // Пословный diff перестаёт быть полезным на слишком длинных страницах —
+    // и защищает O(n·m)-LCS от квадратичного взрыва.
+    private const int MaxDiffWords = 4000;
+
+    /// <summary>
+    /// Пословные отличия текстовых слоёв пары страниц (LCS): фразы
+    /// «удалено из первого» / «добавлено во втором» и сокращённые общие.
+    /// Пустой список — текстовых отличий нет (или текста нет вовсе).
+    /// </summary>
+    public async Task<IReadOnlyList<TextDiffFragment>> GetPageTextDiffAsync(int pageIndex, CancellationToken ct)
+    {
+        var textA = pageIndex < _first.Info.PageCount
+            ? await _first.GetPageTextAsync(pageIndex, ct).ConfigureAwait(false) : "";
+        var textB = pageIndex < _second.Info.PageCount
+            ? await _second.GetPageTextAsync(pageIndex, ct).ConfigureAwait(false) : "";
+
+        var wordsA = Tokenize(textA);
+        var wordsB = Tokenize(textB);
+        if (wordsA.Length == 0 && wordsB.Length == 0)
+            return Array.Empty<TextDiffFragment>();
+        if (wordsA.Length > MaxDiffWords || wordsB.Length > MaxDiffWords)
+            return new[] { new TextDiffFragment("", TextDiffKind.TooLong) };
+        if (wordsA.SequenceEqual(wordsB, StringComparer.Ordinal))
+            return Array.Empty<TextDiffFragment>();
+
+        return await Task.Run(() => Diff(wordsA, wordsB), ct).ConfigureAwait(false);
+    }
+
+    private static string[] Tokenize(string text) =>
+        text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>Классический LCS-diff по словам со слиянием последовательных фрагментов.</summary>
+    private static IReadOnlyList<TextDiffFragment> Diff(string[] a, string[] b)
+    {
+        // Таблица длин LCS (n+1 x m+1).
+        var n = a.Length;
+        var m = b.Length;
+        var lcs = new int[n + 1, m + 1];
+        for (var i = n - 1; i >= 0; i--)
+        {
+            for (var j = m - 1; j >= 0; j--)
+            {
+                lcs[i, j] = a[i] == b[j]
+                    ? lcs[i + 1, j + 1] + 1
+                    : Math.Max(lcs[i + 1, j], lcs[i, j + 1]);
+            }
+        }
+
+        var fragments = new List<TextDiffFragment>();
+        var kind = TextDiffKind.Same;
+        var words = new List<string>();
+
+        void Flush()
+        {
+            if (words.Count == 0) return;
+            var text = kind == TextDiffKind.Same && words.Count > 8
+                ? string.Join(' ', words.Take(3)) + " … " + string.Join(' ', words.TakeLast(3))
+                : string.Join(' ', words);
+            fragments.Add(new TextDiffFragment(text, kind));
+            words.Clear();
+        }
+
+        void Append(TextDiffKind next, string word)
+        {
+            if (next != kind)
+            {
+                Flush();
+                kind = next;
+            }
+            words.Add(word);
+        }
+
+        var x = 0;
+        var y = 0;
+        while (x < n && y < m)
+        {
+            if (a[x] == b[y])
+            {
+                Append(TextDiffKind.Same, a[x]);
+                x++;
+                y++;
+            }
+            else if (lcs[x + 1, y] >= lcs[x, y + 1])
+            {
+                Append(TextDiffKind.Removed, a[x]);
+                x++;
+            }
+            else
+            {
+                Append(TextDiffKind.Added, b[y]);
+                y++;
+            }
+        }
+        while (x < n) Append(TextDiffKind.Removed, a[x++]);
+        while (y < m) Append(TextDiffKind.Added, b[y++]);
+        Flush();
+        return fragments;
     }
 
     private async Task<(PageCompareInfo Info, PageCompareImages? Images)> ComparePageAsync(
