@@ -17,7 +17,6 @@ public sealed class AppServices : IAsyncDisposable
         SaveService = new SaveService(engine);
         Qpdf = new QpdfEngine();
         Tools = new DocumentToolsService(engine, Qpdf, Qpdf);
-        Print = new PrintService();
         PrintJobs = new NexusPdf.App.Desktop.Services.Printing.PrintJobService();
         Signatures = new SignatureStore();
         OcrEngine = CreateRecognizer(settings);
@@ -54,8 +53,6 @@ public sealed class AppServices : IAsyncDisposable
     public SaveService SaveService { get; }
     public QpdfEngine Qpdf { get; }
     public DocumentToolsService Tools { get; }
-    public PrintService Print { get; }
-
     /// <summary>Отправка заданий центра печати в очередь Windows.</summary>
     public NexusPdf.App.Desktop.Services.Printing.PrintJobService PrintJobs { get; }
     public SignatureStore Signatures { get; }

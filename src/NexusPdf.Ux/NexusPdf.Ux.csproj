@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>NexusPdf.Ux</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Намеренно без WPF: реестр команд, модель выделения, поиск и сборка
+       контекстных меню — это правила, а не отрисовка. Они должны
+       проверяться тестами без окна и без запуска программы. -->
+
+</Project>
