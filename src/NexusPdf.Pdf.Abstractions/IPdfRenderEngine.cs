@@ -49,6 +49,12 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     /// <summary>Метаданные документа: версия PDF и словарь /Info.</summary>
     Task<PdfDocumentMetadata> GetMetadataAsync(CancellationToken ct);
 
+    /// <summary>
+    /// Активное содержимое (JavaScript, вложения, Launch-действия). Программа
+    /// его не выполняет; сведения нужны, чтобы честно предупредить пользователя.
+    /// </summary>
+    Task<PdfActiveContent> GetActiveContentAsync(CancellationToken ct);
+
     /// <summary>Прямоугольники, покрывающие диапазон символов страницы (для подсветки найденного).</summary>
     Task<IReadOnlyList<PdfTextRect>> GetTextRectsAsync(int pageIndex, int startCharIndex, int charCount, CancellationToken ct);
 

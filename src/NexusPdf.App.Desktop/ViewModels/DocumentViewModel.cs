@@ -534,6 +534,35 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         await RefreshSelectionAsync();
     }
 
+    /// <summary>
+    /// Предупреждение об активном содержимом при открытии. Программа его не
+    /// выполняет, но пользователь обязан узнать о нём сразу, а не из свойств.
+    /// </summary>
+    public async Task CheckActiveContentAsync()
+    {
+        try
+        {
+            var active = await Document.PrimaryHandle.GetActiveContentAsync(CancellationToken.None);
+            if (!active.HasAny)
+                return;
+            var parts = new List<string>();
+            if (active.JavaScriptCount > 0)
+                parts.Add(Loc.F("ActiveContentJs", active.JavaScriptCount));
+            if (active.AttachmentCount > 0)
+                parts.Add(Loc.F("ActiveContentAttachments", active.AttachmentCount));
+            if (active.LaunchActionCount > 0)
+                parts.Add(Loc.Get("ActiveContentLaunch"));
+            StatusText = Loc.F("ActiveContentBanner", string.Join(", ", parts));
+            Serilog.Log.Information(
+                "Активное содержимое: скриптов {Js}, вложений {Att}, launch {Launch}",
+                active.JavaScriptCount, active.AttachmentCount, active.LaunchActionCount);
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Не удалось проверить активное содержимое");
+        }
+    }
+
     /// <summary>Ссылки страницы (лениво, один раз на страницу).</summary>
     public async Task EnsureLinksAsync(PageViewModel page)
     {

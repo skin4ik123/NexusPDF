@@ -147,6 +147,114 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
         }
     }
 
+    public Task<PdfActiveContent> GetActiveContentAsync(CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() =>
+            {
+                var scriptNames = new List<string>();
+                var scriptCount = fpdf_javascript.FPDFDocGetJavaScriptActionCount(NativeDoc);
+                for (var i = 0; i < scriptCount && i < 50; i++)
+                {
+                    var action = fpdf_javascript.FPDFDocGetJavaScriptAction(NativeDoc, i);
+                    if (action == null || action.__Instance == IntPtr.Zero)
+                        continue;
+                    try
+                    {
+                        // В журнал и интерфейс попадает только ИМЯ скрипта:
+                        // тело скрипта — содержимое документа, его не показываем.
+                        var name = ReadUtf16((buffer, size) =>
+                            fpdf_javascript.FPDFJavaScriptActionGetName(action, ref buffer[0], size));
+                        scriptNames.Add(name.Length > 0 ? name : $"#{i + 1}");
+                    }
+                    finally
+                    {
+                        fpdf_javascript.FPDFDocCloseJavaScriptAction(action);
+                    }
+                }
+
+                var attachmentNames = new List<string>();
+                var attachmentCount = fpdf_attachment.FPDFDocGetAttachmentCount(NativeDoc);
+                for (var i = 0; i < attachmentCount && i < 50; i++)
+                {
+                    var attachment = fpdf_attachment.FPDFDocGetAttachment(NativeDoc, i);
+                    if (attachment == null || attachment.__Instance == IntPtr.Zero)
+                        continue;
+                    var name = ReadUtf16((buffer, size) =>
+                        fpdf_attachment.FPDFAttachmentGetName(attachment, ref buffer[0], size));
+                    attachmentNames.Add(name.Length > 0 ? name : $"#{i + 1}");
+                }
+
+                return new PdfActiveContent(
+                    scriptCount, scriptNames,
+                    attachmentCount, attachmentNames,
+                    CountLaunchActions());
+            }, ct);
+        }
+    }
+
+    // Файлы больше этого размера на Launch-действия не сканируются: это
+    // предупреждение, а не проверка целостности, и оно не стоит чтения
+    // сотен мегабайт.
+    private const long MaxLaunchScanBytes = 64L * 1024 * 1024;
+
+    /// <summary>
+    /// Launch-действия (запуск внешней программы по клику). Публичный API
+    /// PDFium их не отдаёт: FPDFLink_GetLinkAtPoint для такой ссылки не
+    /// возвращает ничего (проверено тестом). Поэтому используется явно
+    /// обозначенная эвристика — поиск маркера «/Launch» в байтах файла.
+    /// Ложное срабатывание возможно (строка внутри потока), пропуск — при
+    /// сжатых потоках объектов; и то и другое безопасно, потому что
+    /// программа Launch-действия НИКОГДА не выполняет.
+    /// </summary>
+    private int CountLaunchActions()
+    {
+        try
+        {
+            var info = new FileInfo(FilePath);
+            if (!info.Exists || info.Length > MaxLaunchScanBytes)
+                return 0;
+            var bytes = File.ReadAllBytes(FilePath);
+            var needle = "/Launch"u8;
+            var found = 0;
+            var span = bytes.AsSpan();
+            var offset = 0;
+            while (offset < span.Length)
+            {
+                var index = span[offset..].IndexOf(needle);
+                if (index < 0)
+                    break;
+                found++;
+                offset += index + needle.Length;
+            }
+            return found;
+        }
+        catch (IOException)
+        {
+            return 0; // файл занят — предупреждение просто не показываем
+        }
+    }
+
+    /// <summary>Двухпроходное чтение строки UTF-16 из pdfium (сначала длина, потом данные).</summary>
+    private static string ReadUtf16(Func<ushort[], ulong, ulong> read)
+    {
+        var probe = new ushort[1];
+        var bytesNeeded = read(probe, 0);
+        if (bytesNeeded <= 2)
+            return "";
+        var buffer = new ushort[bytesNeeded / 2];
+        read(buffer, bytesNeeded);
+        var length = Array.IndexOf(buffer, (ushort)0);
+        if (length < 0)
+            length = buffer.Length;
+        var chars = new char[length];
+        for (var i = 0; i < length; i++)
+            chars[i] = (char)buffer[i];
+        return new string(chars);
+    }
+
     private string GetMetaText(string tag)
     {
         // Два вызова: длина в байтах UTF-16LE (включая NUL), затем данные.

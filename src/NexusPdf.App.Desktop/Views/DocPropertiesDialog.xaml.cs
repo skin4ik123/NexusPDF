@@ -59,6 +59,22 @@ public partial class DocPropertiesDialog : Window
                     ? document.Signatures.Count.ToString(CultureInfo.InvariantCulture)
                     : Loc.Get("PropsNo")));
 
+            // Активное содержимое: программа его не выполняет, но пользователь
+            // должен знать, что оно есть.
+            var active = await document.Document.PrimaryHandle.GetActiveContentAsync(CancellationToken.None);
+            rows.Add(new Row(Loc.Get("PropsJavaScript"),
+                active.JavaScriptCount == 0
+                    ? Loc.Get("PropsNo")
+                    : Loc.F("PropsJavaScriptFound", active.JavaScriptCount,
+                        string.Join(", ", active.JavaScriptNames.Take(5)))));
+            rows.Add(new Row(Loc.Get("PropsAttachments"),
+                active.AttachmentCount == 0
+                    ? Loc.Get("PropsNo")
+                    : Loc.F("PropsAttachmentsFound", active.AttachmentCount,
+                        string.Join(", ", active.AttachmentNames.Take(5)))));
+            if (active.LaunchActionCount > 0)
+                rows.Add(new Row(Loc.Get("PropsLaunch"), Loc.Get("PropsLaunchFound")));
+
             AddIfNotEmpty(rows, "PropsDocTitle", meta.Title);
             AddIfNotEmpty(rows, "PropsAuthor", meta.Author);
             AddIfNotEmpty(rows, "PropsSubject", meta.Subject);
