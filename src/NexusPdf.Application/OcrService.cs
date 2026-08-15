@@ -48,11 +48,18 @@ public sealed class OcrService
     /// применяются в контексте вызывающего. Исключения середины прогона не
     /// теряют частичный результат — он возвращается вместе с текстом ошибки.
     /// </summary>
+    /// <param name="editableText">
+    /// false — невидимый слой поверх скана: вид страницы не меняется, текст
+    /// доступен для поиска и копирования. true — распознанное заменяет текст
+    /// скана НАСТОЯЩИМ видимым текстом, который можно править; начертание
+    /// оригинала при этом теряется.
+    /// </param>
     public async Task<OcrRunResult> RecognizeAsync(
         OpenedDocument document,
         IReadOnlyList<int>? logicalIndices,
         IProgress<OcrProgress>? progress,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool editableText = false)
     {
         var targets = logicalIndices ?? Enumerable.Range(0, document.Session.Model.Pages.Count).ToList();
         var recognized = 0;
@@ -107,8 +114,32 @@ public sealed class OcrService
                     // Отмена, запрошенная во время распознавания страницы,
                     // не должна добавить её слой уже после нажатия «Отмена».
                     ct.ThrowIfCancellationRequested();
-                    document.Session.Apply(new AddOverlayOperation(
-                        logicalIndex, new OcrTextLayerOverlay(words)));
+
+                    PageOverlay layer;
+                    if (editableText)
+                    {
+                        // Слова собираются в строки, а цвета берутся с самого
+                        // скана: заплатка должна совпасть с бумагой, а буквы —
+                        // с чернилами оригинала.
+                        var lines = OcrLineBuilder.BuildLines(words)
+                            .Select(line =>
+                            {
+                                var background = OcrLineBuilder.SampleBackground(
+                                    image, pixelWidth / size.WidthPoints, pixelHeight / size.HeightPoints, line);
+                                var ink = OcrLineBuilder.SampleInk(
+                                    image, pixelWidth / size.WidthPoints, pixelHeight / size.HeightPoints,
+                                    line, background);
+                                return line with { BackgroundArgb = background, InkArgb = ink };
+                            })
+                            .ToList();
+                        layer = new OcrEditableTextOverlay(lines);
+                    }
+                    else
+                    {
+                        layer = new OcrTextLayerOverlay(words);
+                    }
+
+                    document.Session.Apply(new AddOverlayOperation(logicalIndex, layer));
                     recognized++;
                     totalWords += words.Count;
                     confidenceSum += kept.Sum(w => (double)w.Confidence);

@@ -157,6 +157,24 @@ public sealed record OcrWordBox(
     double WidthPt,
     double HeightPt);
 
+/// <summary>Строка распознанного текста: рамка в отображаемых пунктах и цвета для замены.</summary>
+public sealed record OcrTextLine(
+    string Text,
+    double XPt,
+    double YPt,
+    double WidthPt,
+    double HeightPt,
+    uint BackgroundArgb = 0xFFFFFFFF,
+    uint InkArgb = 0xFF000000);
+
+/// <summary>
+/// РЕДАКТИРУЕМЫЙ текст вместо скана: под каждой строкой закрашивается
+/// прямоугольник цветом бумаги, а поверх ставится НАСТОЯЩИЙ видимый текст.
+/// В отличие от невидимого слоя такой текст можно править как обычный —
+/// ценой того, что начертание оригинала заменяется системным шрифтом.
+/// </summary>
+public sealed record OcrEditableTextOverlay(IReadOnlyList<OcrTextLine> Lines) : PageOverlay;
+
 /// <summary>
 /// Невидимый текстовый слой поверх скана (результат OCR): каждое слово
 /// запекается невидимым текстовым объектом, растянутым по своей рамке —
