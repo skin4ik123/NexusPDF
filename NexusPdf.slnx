@@ -11,10 +11,12 @@
     <Project Path="src/NexusPdf.Pdf.Pdfium/NexusPdf.Pdf.Pdfium.csproj" />
     <Project Path="src/NexusPdf.Pdf.Qpdf/NexusPdf.Pdf.Qpdf.csproj" />
     <Project Path="src/NexusPdf.Printing/NexusPdf.Printing.csproj" />
+    <Project Path="src/NexusPdf.Printing.Windows/NexusPdf.Printing.Windows.csproj" />
     <Project Path="src/NexusPdf.Signing/NexusPdf.Signing.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/NexusPdf.PdfEngineTests/NexusPdf.PdfEngineTests.csproj" />
+    <Project Path="tests/NexusPdf.PrintingTests/NexusPdf.PrintingTests.csproj" />
     <Project Path="tests/NexusPdf.UnitTests/NexusPdf.UnitTests.csproj" />
   </Folder>
 </Solution>

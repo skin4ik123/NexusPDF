@@ -27,6 +27,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\NexusPdf.Application\NexusPdf.Application.csproj" />
+    <ProjectReference Include="..\NexusPdf.Printing\NexusPdf.Printing.csproj" />
+    <ProjectReference Include="..\NexusPdf.Printing.Windows\NexusPdf.Printing.Windows.csproj" />
     <ProjectReference Include="..\NexusPdf.Domain\NexusPdf.Domain.csproj" />
     <ProjectReference Include="..\NexusPdf.Infrastructure\NexusPdf.Infrastructure.csproj" />
     <ProjectReference Include="..\NexusPdf.Pdf.Abstractions\NexusPdf.Pdf.Abstractions.csproj" />

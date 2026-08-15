@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Windows-специфичный TFM намеренно: тут проверяется настоящий
+         System.Printing, а не его имитация. Кроссплатформенные тесты
+         раскладки живут в NexusPdf.UnitTests и остаются net10.0. -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>NexusPdf.PrintingTests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\NexusPdf.Printing\NexusPdf.Printing.csproj" />
+    <ProjectReference Include="..\..\src\NexusPdf.Printing.Windows\NexusPdf.Printing.Windows.csproj" />
+  </ItemGroup>
+
+</Project>
