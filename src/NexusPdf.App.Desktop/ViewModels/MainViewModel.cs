@@ -100,8 +100,9 @@ public sealed partial class MainViewModel : ObservableObject
                 Documents.Add(vm);
                 ActiveDocument = vm;
                 OnPropertyChanged(nameof(HasDocuments));
-                _ = vm.DetectFormsAsync();     // кнопка «Формы» появится, если есть AcroForm
-                _ = vm.LoadSignaturesAsync();  // значок статуса подписей в статус-баре
+                _ = vm.DetectFormsAsync();       // кнопка «Формы» появится, если есть AcroForm
+                _ = vm.LoadSignaturesAsync();    // значок статуса подписей в статус-баре
+                _ = vm.CheckActiveContentAsync(); // предупреждение о JS/вложениях/Launch
 
                 _services.Settings.TouchRecent(path);
                 SyncRecent();

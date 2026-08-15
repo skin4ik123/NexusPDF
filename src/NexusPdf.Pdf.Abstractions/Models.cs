@@ -96,6 +96,20 @@ public sealed record OcrTextLayerOverlay(IReadOnlyList<OcrWordBox> Words) : Page
 /// </summary>
 public sealed record PdfLinkInfo(string? Uri, int TargetPageIndex);
 
+/// <summary>
+/// Активное и потенциально небезопасное содержимое документа. Программа его
+/// НЕ выполняет и не открывает, но обязана честно показать пользователю.
+/// </summary>
+public sealed record PdfActiveContent(
+    int JavaScriptCount,
+    IReadOnlyList<string> JavaScriptNames,
+    int AttachmentCount,
+    IReadOnlyList<string> AttachmentNames,
+    int LaunchActionCount)
+{
+    public bool HasAny => JavaScriptCount > 0 || AttachmentCount > 0 || LaunchActionCount > 0;
+}
+
 /// <summary>Ссылка страницы вместе с её рамкой в координатах страницы PDF (для подсветки и наведения).</summary>
 public sealed record PdfPageLink(PdfTextRect RectPt, string? Uri, int TargetPageIndex);
 
