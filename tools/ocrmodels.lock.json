@@ -5,8 +5,8 @@
       "name": "PP-OCRv6_det_medium.onnx",
       "role": "detection",
       "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv6/det/PP-OCRv6_det_medium.onnx",
-      "sha256": "",
-      "note": "Поиск строк на странице. Детекция от языка не зависит, поэтому здесь берётся самая новая версия — v6."
+      "sha256": "92078b7355007ccfffcd4c8cd441a3afd4538904d06881b29a155e1e679907c2",
+      "note": "Поиск строк на странице, 59 МБ. Детекция от языка не зависит, поэтому здесь берётся самая новая версия — v6. Хеш сверен с default_models.yaml и подтверждён загрузкой."
     },
     {
       "name": "cyrillic_PP-OCRv5_rec_mobile.onnx",
