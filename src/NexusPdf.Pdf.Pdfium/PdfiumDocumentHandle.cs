@@ -744,6 +744,87 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
         }
     }
 
+    public Task<IReadOnlyList<PdfBookmark>> GetBookmarksAsync(CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync<IReadOnlyList<PdfBookmark>>(
+                () => ReadBookmarkLevel(null, 0), ct);
+        }
+    }
+
+    private const int BookmarkMaxDepth = 32;      // защита от циклов в /Outlines
+    private const int BookmarkMaxPerLevel = 5000; // и от бесконечных цепочек Next
+
+    /// <summary>
+    /// Один уровень оглавления. PDF допускает битые деревья с циклами, поэтому
+    /// глубина и длина цепочки ограничены, а посещённые узлы запоминаются.
+    /// </summary>
+    private List<PdfBookmark> ReadBookmarkLevel(FpdfBookmarkT? parent, int depth)
+    {
+        var result = new List<PdfBookmark>();
+        if (depth >= BookmarkMaxDepth)
+            return result;
+
+        var seen = new HashSet<IntPtr>();
+        var node = fpdf_doc.FPDFBookmarkGetFirstChild(NativeDoc, parent);
+        while (node != null && node.__Instance != IntPtr.Zero &&
+               result.Count < BookmarkMaxPerLevel && seen.Add(node.__Instance))
+        {
+            var title = ReadBookmarkTitle(node);
+            result.Add(new PdfBookmark(
+                title.Length > 0 ? title : "(без названия)",
+                ResolveBookmarkPage(node),
+                ReadBookmarkLevel(node, depth + 1)));
+            node = fpdf_doc.FPDFBookmarkGetNextSibling(NativeDoc, node);
+        }
+        return result;
+    }
+
+    /// <summary>Заголовок закладки: UTF-16 с завершающим нулём, длина запрашивается первым проходом.</summary>
+    private static string ReadBookmarkTitle(FpdfBookmarkT bookmark)
+    {
+        var bytes = fpdf_doc.FPDFBookmarkGetTitle(bookmark, IntPtr.Zero, 0);
+        if (bytes <= 2)
+            return "";
+        var buffer = System.Runtime.InteropServices.Marshal.AllocHGlobal((int)bytes);
+        try
+        {
+            fpdf_doc.FPDFBookmarkGetTitle(bookmark, buffer, bytes);
+            return System.Runtime.InteropServices.Marshal
+                .PtrToStringUni(buffer, (int)(bytes / 2) - 1) ?? "";
+        }
+        finally
+        {
+            System.Runtime.InteropServices.Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    /// <summary>Целевая страница закладки: прямой /Dest, иначе действие GoTo. -1 — не определена.</summary>
+    private int ResolveBookmarkPage(FpdfBookmarkT bookmark)
+    {
+        var dest = fpdf_doc.FPDFBookmarkGetDest(NativeDoc, bookmark);
+        if (dest != null && dest.__Instance != IntPtr.Zero)
+        {
+            var page = fpdf_doc.FPDFDestGetDestPageIndex(NativeDoc, dest);
+            if (page >= 0)
+                return page;
+        }
+
+        var action = fpdf_doc.FPDFBookmarkGetAction(bookmark);
+        if (action == null || action.__Instance == IntPtr.Zero)
+            return -1;
+        // Только переход внутри документа: Launch/URI из оглавления не выполняем.
+        if (fpdf_doc.FPDFActionGetType(action) != ActionTypeGoto)
+            return -1;
+        var actionDest = fpdf_doc.FPDFActionGetDest(NativeDoc, action);
+        if (actionDest == null || actionDest.__Instance == IntPtr.Zero)
+            return -1;
+        var target = fpdf_doc.FPDFDestGetDestPageIndex(NativeDoc, actionDest);
+        return target >= 0 ? target : -1;
+    }
+
     private const int ActionTypeGoto = 1;   // PDFACTION_GOTO
     private const int ActionTypeUri = 3;    // PDFACTION_URI
     private const int AnnotSubtypeLink = 2; // FPDF_ANNOT_LINK

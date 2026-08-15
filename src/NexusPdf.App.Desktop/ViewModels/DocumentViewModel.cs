@@ -1051,8 +1051,79 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         OnPropertyChanged(nameof(CanUndo));
         OnPropertyChanged(nameof(CanRedo));
         ClearSearch();
+        RemapBookmarks(); // страницы могли переставить или удалить
         if (IsCommentsVisible)
             _ = RefreshCommentsAsync();
+    }
+
+    // ----- Оглавление документа -----
+
+    public ObservableCollection<BookmarkViewModel> Bookmarks { get; } = new();
+
+    [ObservableProperty]
+    private bool _hasBookmarks;
+
+    /// <summary>Боковая панель показывает оглавление вместо миниатюр.</summary>
+    [ObservableProperty]
+    private bool _isOutlineVisible;
+
+    private bool _bookmarksLoaded;
+
+    /// <summary>Читает оглавление один раз за документ; отсутствие оглавления — не ошибка.</summary>
+    public async Task EnsureBookmarksAsync()
+    {
+        if (_bookmarksLoaded) return;
+        _bookmarksLoaded = true;
+        try
+        {
+            var tree = await Document.PrimaryHandle.GetBookmarksAsync(CancellationToken.None);
+            Bookmarks.Clear();
+            foreach (var node in tree)
+            {
+                var vm = new BookmarkViewModel(node, MapSourcePageToLogical) { IsExpanded = true };
+                Bookmarks.Add(vm);
+            }
+            HasBookmarks = Bookmarks.Count > 0;
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Не удалось прочитать оглавление документа");
+            HasBookmarks = false;
+        }
+    }
+
+    /// <summary>Страница исходного документа → её место в текущем порядке; -1 — страница удалена.</summary>
+    private int MapSourcePageToLogical(int sourcePageIndex)
+    {
+        var pages = Document.Session.Model.Pages;
+        for (var i = 0; i < pages.Count; i++)
+        {
+            if (pages[i].SourceId == Document.PrimarySourceId &&
+                pages[i].SourcePageIndex == sourcePageIndex)
+                return i;
+        }
+        return -1;
+    }
+
+    private void RemapBookmarks()
+    {
+        foreach (var bookmark in Bookmarks)
+            bookmark.Remap(MapSourcePageToLogical);
+    }
+
+    [RelayCommand]
+    private async Task ToggleOutline()
+    {
+        await EnsureBookmarksAsync();
+        IsOutlineVisible = !IsOutlineVisible;
+    }
+
+    /// <summary>Переход по закладке. Узел без страницы — просто заголовок раздела.</summary>
+    public void GoToBookmark(BookmarkViewModel bookmark)
+    {
+        if (!bookmark.CanNavigate) return;
+        CurrentPageNumber = bookmark.LogicalPageIndex + 1;
+        ScrollToPageRequested?.Invoke(this, bookmark.LogicalPageIndex);
     }
 
     private void RebuildPages()
