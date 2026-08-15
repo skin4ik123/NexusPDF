@@ -17,9 +17,13 @@ public sealed class OverlayPreview
     public bool IsRectShape { get; private init; }
     public bool IsEllipseShape { get; private init; }
     public bool IsInk { get; private init; }
+    public bool IsMarkup { get; private init; }
 
     /// <summary>Готовая геометрия штрихов рисунка в пунктах страницы.</summary>
     public Geometry? InkGeometry { get; private init; }
+
+    /// <summary>Заливаемая геометрия разметки текста в пунктах страницы.</summary>
+    public Geometry? MarkupGeometry { get; private init; }
     public Brush Stroke { get; private init; } = Brushes.Transparent;
     public double StrokeThickness { get; private init; }
     public string Text { get; private init; } = "";
@@ -124,6 +128,38 @@ public sealed class OverlayPreview
                     WidthPt = redaction.WidthPt,
                     HeightPt = redaction.HeightPt,
                 };
+            case TextMarkupDraft markup:
+            {
+                // Разметка обязана быть видна СРАЗУ, а не после сохранения:
+                // иначе «выделить маркером» выглядит как неработающая команда.
+                var geometry = new GeometryGroup { FillRule = FillRule.Nonzero };
+                foreach (var rect in markup.Rects)
+                {
+                    var (y, height) = markup.Kind switch
+                    {
+                        // Подчёркивание — тонкая полоса у нижнего края строки,
+                        // зачёркивание — по её середине, ровно как их рисует
+                        // pdfium при запекании.
+                        TextMarkupKind.Underline =>
+                            (rect.YPt + rect.HeightPt - MarkupLineThickness(rect), MarkupLineThickness(rect)),
+                        TextMarkupKind.StrikeOut =>
+                            (rect.YPt + rect.HeightPt / 2 - MarkupLineThickness(rect) / 2, MarkupLineThickness(rect)),
+                        _ => (rect.YPt, rect.HeightPt),
+                    };
+                    if (rect.WidthPt <= 0 || height <= 0) continue;
+                    geometry.Children.Add(new RectangleGeometry(
+                        new System.Windows.Rect(rect.XPt, y, rect.WidthPt, height)));
+                }
+                if (geometry.Children.Count == 0)
+                    return null;
+                geometry.Freeze();
+                return new OverlayPreview
+                {
+                    IsMarkup = true,
+                    MarkupGeometry = geometry,
+                    Fill = MakeBrush(markup.ColorArgb),
+                };
+            }
             case InkAnnotationDraft ink:
             {
                 // Без этой ветки нарисованное было видно только ПОСЛЕ сохранения:
@@ -162,6 +198,10 @@ public sealed class OverlayPreview
                 return null;
         }
     }
+
+    /// <summary>Толщина линии подчёркивания/зачёркивания: доля высоты строки, но не тоньше волоска.</summary>
+    private static double MarkupLineThickness(NexusPdf.Pdf.Abstractions.TextMarkupRect rect) =>
+        Math.Max(0.6, rect.HeightPt * 0.07);
 
     private static Brush MakeBrush(uint argb)
     {

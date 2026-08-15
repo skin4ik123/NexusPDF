@@ -27,6 +27,14 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Окно, обслуживающее эту модель (для владения диалогами).</summary>
     public Window? OwnerWindow { get; set; }
 
+    private Services.Ux.UxCommandHub? _ux;
+
+    /// <summary>
+    /// Единая точка исполнения команд: контекстные меню, палитра и горячие
+    /// клавиши ходят сюда, а не дублируют вызовы у себя.
+    /// </summary>
+    public Services.Ux.UxCommandHub Ux => _ux ??= new Services.Ux.UxCommandHub(this, _services);
+
     public ObservableCollection<DocumentViewModel> Documents { get; } = new();
     public ObservableCollection<string> RecentFiles { get; }
 
@@ -103,6 +111,7 @@ public sealed partial class MainViewModel : ObservableObject
                 _ = vm.DetectFormsAsync();       // кнопка «Формы» появится, если есть AcroForm
                 _ = vm.LoadSignaturesAsync();    // значок статуса подписей в статус-баре
                 _ = vm.CheckActiveContentAsync(); // предупреждение о JS/вложениях/Launch
+                _ = vm.LoadPermissionsAsync();   // запрет печати обязан быть виден до попытки печатать
 
                 _services.Settings.TouchRecent(path);
                 SyncRecent();
@@ -382,6 +391,10 @@ public sealed partial class MainViewModel : ObservableObject
     private void AddHighlight()
     {
         if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        // Текст выделен — размечается именно он, по строкам и настоящей
+        // аннотацией Highlight. Растягивать рамку поверх собственного
+        // выделения пользователю незачем.
+        if (doc.MarkupSelection(NexusPdf.Pdf.Abstractions.TextMarkupKind.Highlight)) return;
         doc.BeginRectPlacement((_, rect) =>
             new NexusPdf.Pdf.Abstractions.ShapeAnnotationDraft(
                 rect.X, rect.Y, rect.Width, rect.Height,
@@ -415,6 +428,9 @@ public sealed partial class MainViewModel : ObservableObject
     private void AddRedaction()
     {
         if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        // Выделенный текст вымарывается сразу по своим строкам: попадать
+        // рамкой в строку мышью — лишний шанс промахнуться мимо секретного.
+        if (doc.RedactSelection()) return;
         doc.BeginRectPlacement((_, rect) =>
             new NexusPdf.Pdf.Abstractions.RedactionDraft(
                 rect.X, rect.Y, rect.Width, rect.Height));

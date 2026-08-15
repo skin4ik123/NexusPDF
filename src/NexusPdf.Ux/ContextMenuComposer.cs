@@ -20,86 +20,59 @@ public sealed class ContextMenuComposer
 
     public ContextMenuComposer(CommandRegistry registry) => _registry = registry;
 
-    /// <summary>Какие команды показывать для каждого вида выделения.</summary>
+    /// <summary>
+    /// Какие команды показывать для каждого вида выделения.
+    ///
+    /// В списках только команды, за которыми есть реализация: пункт меню,
+    /// который ничего не делает, хуже отсутствующего пункта. Виды выделения,
+    /// которых интерфейс пока не различает, дают пустое меню — и правая
+    /// кнопка там просто ничего не открывает, а не показывает обманку.
+    /// </summary>
     private static readonly Dictionary<SelectionKind, string[]> Menus = new()
     {
         [SelectionKind.Nothing] = new[]
         {
-            CommandIds.Paste, CommandIds.SelectAllOnPage,
-            CommandIds.AddText, CommandIds.InsertImage, CommandIds.AddNote,
+            CommandIds.SelectAllOnPage,
             CommandIds.FitPage, CommandIds.FitWidth, CommandIds.ZoomActual,
-            CommandIds.EditPageInPaint, CommandIds.PrintCurrentPage,
+            CommandIds.AddText, CommandIds.InsertImage, CommandIds.AddNote,
+            CommandIds.EditText, CommandIds.EditRegionInPaint, CommandIds.EditPageInPaint,
+            CommandIds.PrintCurrentPage,
             CommandIds.DocumentProperties,
         },
         [SelectionKind.Text] = new[]
         {
-            CommandIds.Copy, CommandIds.Highlight, CommandIds.Underline, CommandIds.Strikeout,
-            CommandIds.AddNote, CommandIds.FindSelection, CommandIds.Redact,
-        },
-        [SelectionKind.TextObject] = new[]
-        {
-            CommandIds.EditText, CommandIds.Cut, CommandIds.Copy, CommandIds.Duplicate,
-            CommandIds.BringForward, CommandIds.SendBackward,
-            CommandIds.Delete, CommandIds.ObjectProperties,
-        },
-        [SelectionKind.Image] = new[]
-        {
-            CommandIds.EditImageInPaint, CommandIds.ReplaceImage, CommandIds.ExportImage,
-            CommandIds.Cut, CommandIds.Copy, CommandIds.Duplicate,
-            CommandIds.RotateRight, CommandIds.RotateLeft,
-            CommandIds.BringForward, CommandIds.SendBackward,
-            CommandIds.Delete, CommandIds.ObjectProperties,
-        },
-        [SelectionKind.Shape] = new[]
-        {
-            CommandIds.StraightenStroke, CommandIds.RestoreStroke,
-            CommandIds.Copy, CommandIds.Duplicate,
-            CommandIds.BringForward, CommandIds.SendBackward,
-            CommandIds.Delete, CommandIds.ObjectProperties,
-        },
-        [SelectionKind.Annotation] = new[]
-        {
-            CommandIds.OpenComment, CommandIds.Copy, CommandIds.Duplicate,
-            CommandIds.Delete, CommandIds.ObjectProperties,
+            CommandIds.Copy,
+            CommandIds.Highlight, CommandIds.Underline, CommandIds.Strikeout,
+            CommandIds.FindSelection,
+            CommandIds.AddNote,
+            CommandIds.Redact,
         },
         [SelectionKind.Link] = new[]
         {
-            CommandIds.OpenLink, CommandIds.CopyLinkAddress, CommandIds.Delete,
-        },
-        [SelectionKind.Signature] = new[]
-        {
-            CommandIds.VerifySignature, CommandIds.ShowCertificate, CommandIds.ObjectProperties,
+            CommandIds.OpenLink, CommandIds.CopyLinkAddress,
         },
         [SelectionKind.Page] = new[]
         {
             CommandIds.RotateRight, CommandIds.RotateLeft, CommandIds.Rotate180,
-            CommandIds.Duplicate, CommandIds.Copy,
-            CommandIds.ExtractPages, CommandIds.EditPageInPaint,
-            CommandIds.OcrPages, CommandIds.CompressPages, CommandIds.PrintSelectedPages,
-            CommandIds.DeletePages, CommandIds.PageProperties,
+            CommandIds.Duplicate,
+            CommandIds.ExtractPages, CommandIds.EditPageInPaint, CommandIds.PrintSelectedPages,
+            CommandIds.PageProperties,
+            CommandIds.DeletePages,
         },
         [SelectionKind.Bookmark] = new[]
         {
-            CommandIds.GoToBookmark, CommandIds.RenameBookmark, CommandIds.DeleteBookmark,
+            CommandIds.GoToBookmark,
         },
-        [SelectionKind.Layer] = new[]
+        [SelectionKind.Signature] = new[]
         {
-            CommandIds.ShowLayer, CommandIds.HideLayer, CommandIds.ShowOnlyThisLayer,
-            CommandIds.ShowAllLayers,
+            CommandIds.VerifySignature,
         },
-        [SelectionKind.Attachment] = new[]
+        [SelectionKind.Tab] = new[]
         {
-            CommandIds.SaveAttachmentAs, CommandIds.CopyAttachmentName,
-            CommandIds.CheckAttachmentSafety,
-        },
-        [SelectionKind.SearchResult] = new[]
-        {
-            CommandIds.GoToSearchResult, CommandIds.Copy, CommandIds.Highlight, CommandIds.AddNote,
-        },
-        [SelectionKind.FormField] = new[]
-        {
-            CommandIds.PreviewField, CommandIds.Duplicate, CommandIds.Delete,
-            CommandIds.ObjectProperties,
+            CommandIds.Save, CommandIds.SaveAs,
+            CommandIds.Print, CommandIds.DetachTab,
+            CommandIds.DocumentProperties,
+            CommandIds.CloseTab,
         },
     };
 

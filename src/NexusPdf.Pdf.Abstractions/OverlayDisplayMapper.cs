@@ -103,6 +103,23 @@ public static class OverlayDisplayMapper
                     HeightPt = Math.Abs(p2.Y - p1.Y),
                 }, 0);
             }
+            case TextMarkupDraft markup:
+            {
+                // Каждая строка выделения переносится своей рамкой: разметка
+                // из нескольких строк не должна схлопываться в один блок.
+                var rects = new List<TextMarkupRect>(markup.Rects.Count);
+                foreach (var rect in markup.Rects)
+                {
+                    var p1 = RemapPoint(rect.XPt, rect.YPt, delta, finalWidth, finalHeight);
+                    var p2 = RemapPoint(
+                        rect.XPt + rect.WidthPt, rect.YPt + rect.HeightPt,
+                        delta, finalWidth, finalHeight);
+                    rects.Add(new TextMarkupRect(
+                        Math.Min(p1.X, p2.X), Math.Min(p1.Y, p2.Y),
+                        Math.Abs(p2.X - p1.X), Math.Abs(p2.Y - p1.Y)));
+                }
+                return (markup with { Rects = rects }, 0);
+            }
             case InkAnnotationDraft ink:
             {
                 // У рисунка нет рамки — переносится каждая точка штриха.

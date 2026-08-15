@@ -39,7 +39,9 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
     private bool _suspendRecalc;
     private bool _disposed;
 
-    public PrintCenterViewModel(DocumentViewModel document, AppServices services)
+    public PrintCenterViewModel(
+        DocumentViewModel document, AppServices services,
+        IReadOnlyList<int>? preselectedPageIndices = null)
     {
         _document = document;
         _services = services;
@@ -48,11 +50,29 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
         LoadPrinters();
         LoadProfiles();
         CurrentPageNumber = document.CurrentPageNumber;
+        // Печать пришла из выбора страниц — объём сразу тот, который выбрал
+        // пользователь. Заставлять его повторять выбор в диалоге незачем.
+        if (preselectedPageIndices is { Count: > 0 })
+        {
+            ExplicitIndices = preselectedPageIndices.Distinct().OrderBy(i => i).ToList();
+            Scope = PageScope.Selected;
+        }
         _suspendRecalc = false;
 
         Recalculate();
         _ = LoadPermissionsAsync();
     }
+
+    /// <summary>
+    /// Страницы, выбранные до открытия центра печати. Пустой список — обычная
+    /// печать; тогда объём «Выбранные» не показывается вовсе, чтобы не
+    /// предлагать заведомо пустой вариант.
+    /// </summary>
+    public IReadOnlyList<int> ExplicitIndices { get; } = Array.Empty<int>();
+
+    public bool HasExplicitSelection => ExplicitIndices.Count > 0;
+
+    public string ExplicitSelectionCaption => Loc.F("PrintSelectedScope", ExplicitIndices.Count);
 
     /// <summary>
     /// Разрешения документа. Читаются асинхронно и пересчитывают план: запрет
@@ -463,6 +483,7 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
         {
             Scope = Scope,
             RangeText = RangeText,
+            ExplicitIndices = ExplicitIndices,
             CurrentPageIndex = Math.Clamp(CurrentPageNumber - 1, 0, Math.Max(0, pageCount - 1)),
             Parity = Parity,
             ReverseOrder = ReversePages,
