@@ -1,4 +1,4 @@
-﻿using NexusPdf.Application;
+using NexusPdf.Application;
 using NexusPdf.Infrastructure;
 using NexusPdf.Pdf.Abstractions;
 using NexusPdf.Pdf.Qpdf;
@@ -18,6 +18,7 @@ public sealed class AppServices : IAsyncDisposable
         Qpdf = new QpdfEngine();
         Tools = new DocumentToolsService(engine, Qpdf, Qpdf);
         Print = new PrintService();
+        PrintJobs = new NexusPdf.App.Desktop.Services.Printing.PrintJobService();
         Signatures = new SignatureStore();
         OcrEngine = CreateRecognizer(settings);
         Ocr = new OcrService(OcrEngine);
@@ -54,6 +55,9 @@ public sealed class AppServices : IAsyncDisposable
     public QpdfEngine Qpdf { get; }
     public DocumentToolsService Tools { get; }
     public PrintService Print { get; }
+
+    /// <summary>Отправка заданий центра печати в очередь Windows.</summary>
+    public NexusPdf.App.Desktop.Services.Printing.PrintJobService PrintJobs { get; }
     public SignatureStore Signatures { get; }
     public NexusPdf.Ocr.ITextRecognizer OcrEngine { get; private set; }
     public OcrService Ocr { get; private set; }
