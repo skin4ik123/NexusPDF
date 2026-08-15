@@ -195,6 +195,9 @@
                   <Button Style="{StaticResource LinkButton}" Content="{l:Loc OptimizeCopy}"
                           Command="{Binding OptimizeCopyCommand}" IsEnabled="{Binding HasDocuments}"
                           Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc CompressMenu}"
+                          Command="{Binding CompressImagesCommand}" IsEnabled="{Binding HasDocuments}"
+                          Click="OnMenuItem"/>
                   <Button Style="{StaticResource LinkButton}" Content="{l:Loc SignMenu}"
                           Command="{Binding SignWithCertificateCommand}" IsEnabled="{Binding HasDocuments}"
                           Click="OnMenuItem"/>

@@ -221,6 +221,50 @@ public static class Program
                 return 0;
             }
 
+            case "compress":
+            {
+                if (positional.Count != 2)
+                    throw new UsageException("compress: нужны <вход.pdf> и <выход.pdf>.");
+                var dpi = ParseDouble(options, "dpi", 150);
+                if (dpi is < 24 or > 600)
+                    throw new UsageException("--dpi: допустимы значения 24–600.");
+                var quality = (int)ParseDouble(options, "quality", 75);
+                if (quality is < 10 or > 100)
+                    throw new UsageException("--quality: допустимы значения 10–100.");
+                RequireNotExists(positional[1], options);
+                try
+                {
+                    await using var probe = await engine.OpenAsync(positional[0], null, ct);
+                }
+                catch (PdfPasswordRequiredException)
+                {
+                    // SaveAsCopy молча снял бы шифрование — честный отказ.
+                    throw new InvalidOperationException(
+                        "Файл защищён паролем: пересжатие сняло бы защиту. Сначала снимите пароль (qpdf --decrypt).");
+                }
+
+                var before = new FileInfo(positional[0]).Length;
+                var tmp = positional[1] + ".nexustmp";
+                NexusPdf.Pdf.Abstractions.ImageRecompressStats stats;
+                try
+                {
+                    stats = await engine.RecompressImagesAsync(positional[0], null, tmp, dpi,
+                        (bgra, w, h) => EncodeJpegRaw(bgra, w, h, quality), ct);
+                    File.Move(tmp, positional[1], overwrite: true);
+                }
+                finally
+                {
+                    try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* лучшая попытка */ }
+                }
+                var after = new FileInfo(positional[1]).Length;
+                Console.WriteLine(
+                    $"Готово: {before / 1024} КиБ → {after / 1024} КиБ; " +
+                    $"изображений пересжато {stats.Recompressed}, пропущено {stats.Skipped}");
+                if (after >= before)
+                    Console.Error.WriteLine("Предупреждение: файл не стал меньше — исходные изображения уже компактны.");
+                return 0;
+            }
+
             case "compare":
             {
                 if (positional.Count != 2)
@@ -354,6 +398,18 @@ public static class Program
         return value;
     }
 
+    /// <summary>BGRA-растр → JPEG с заданным качеством (для пересжатия изображений).</summary>
+    private static byte[] EncodeJpegRaw(byte[] bgra, int width, int height, int quality)
+    {
+        var source = BitmapSource.Create(
+            width, height, 96, 96, PixelFormats.Bgra32, null, bgra, width * 4);
+        var encoder = new JpegBitmapEncoder { QualityLevel = quality };
+        encoder.Frames.Add(BitmapFrame.Create(source));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return stream.ToArray();
+    }
+
     /// <summary>BGRA-растр страницы → PNG/JPEG через WPF-кодеки.</summary>
     private static byte[] Encode(RenderedPageImage image, string format, double dpi)
     {
@@ -418,6 +474,10 @@ NexusPdfCli — консольные операции NexusPDF (локально
       Сборка PDF из изображений (PNG/JPEG/BMP/TIFF; каждая — страница).
   optimize      <вход.pdf> <выход.pdf>
       Структурная оптимизация без потерь (qpdf) + линеаризация.
+  compress      <вход.pdf> <выход.pdf> [--dpi 150] [--quality 75]
+      Сжатие С ПОТЕРЯМИ: изображения выше целевого DPI уменьшаются и
+      пересжимаются в JPEG. Прозрачные и факсовые (CCITT/JBIG2/JPX)
+      пропускаются; защищённые паролем файлы — честный отказ.
   protect       <вход.pdf> <выход.pdf> --password X [--owner-password Y]
       Защищённая копия (AES-256). Пароль в командной строке виден другим
       процессам и попадает в историю — надёжнее задать его переменной

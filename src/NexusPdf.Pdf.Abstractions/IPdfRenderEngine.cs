@@ -21,6 +21,15 @@ public interface IPdfRenderEngine : IAsyncDisposable
 
     /// <summary>Создаёт новый PDF, где каждая страница — одно изображение, растянутое на всю страницу.</summary>
     Task CreateImageDocumentAsync(IReadOnlyList<ImagePageSpec> pages, string targetPath, CancellationToken ct);
+
+    /// <summary>
+    /// Копия файла с пересжатыми изображениями: картинки с эффективным DPI выше
+    /// целевого уменьшаются и кодируются в JPEG (кодек даёт вызывающий).
+    /// Прозрачные и факсовые (CCITT/JBIG2/JPX) изображения пропускаются.
+    /// </summary>
+    Task<ImageRecompressStats> RecompressImagesAsync(
+        string sourcePath, string? password, string targetPath, double targetDpi,
+        Func<byte[], int, int, byte[]> encodeJpeg, CancellationToken ct);
 }
 
 public interface IPdfDocumentHandle : IAsyncDisposable

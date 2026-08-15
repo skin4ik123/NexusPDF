@@ -98,6 +98,9 @@ public sealed record PdfDocumentMetadata(
     string CreationDate,
     string ModDate);
 
+/// <summary>Итог пересжатия изображений: сколько картинок пересжато и сколько пропущено (прозрачность, факсовые кодеки, низкий DPI).</summary>
+public sealed record ImageRecompressStats(int Recompressed, int Skipped);
+
 /// <summary>Страница будущего PDF из изображения: растр BGRA32 и итоговый размер страницы в пунктах.</summary>
 public sealed record ImagePageSpec(
     byte[] Bgra,
