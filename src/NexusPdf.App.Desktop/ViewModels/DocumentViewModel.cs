@@ -1054,8 +1054,23 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         OnPropertyChanged(nameof(CanRedo));
         ClearSearch();
         RemapBookmarks(); // страницы могли переставить или удалить
+        DropRestoreOffer();
         if (IsCommentsVisible)
             _ = RefreshCommentsAsync();
+    }
+
+    /// <summary>
+    /// Предложение вернуть свободный штрих живёт ровно до следующего изменения
+    /// документа. Оно опирается на то, что выпрямленный штрих — вершина стека
+    /// отмены; любая другая правка (в том числе Ctrl+Z вручную) это ломает.
+    /// Сессия шлёт Changed синхронно, а EndStroke выставляет предложение УЖЕ
+    /// ПОСЛЕ своего Apply — поэтому собственный штрих здесь не гасится.
+    /// </summary>
+    private void DropRestoreOffer()
+    {
+        if (_lastStraightened == null) return;
+        _lastStraightened = null;
+        CanRestoreFreeStroke = false;
     }
 
     // ----- Рисование от руки -----
@@ -1213,6 +1228,18 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         if (_lastStraightened is not { } last) return;
         CanRestoreFreeStroke = false;
         _lastStraightened = null;
+
+        // Отменять вслепую нельзя: если сверху оказалась чужая правка, Undo
+        // снял бы именно её и пользователь молча потерял бы свою работу.
+        var pages = Document.Session.Model.Pages;
+        if (last.PageIndex >= pages.Count ||
+            pages[last.PageIndex].OverlayList.Count == 0 ||
+            !ReferenceEquals(pages[last.PageIndex].OverlayList[^1], last.Straightened))
+        {
+            StatusText = Loc.Get("Ready");
+            return;
+        }
+
         Document.Session.Undo();
         Document.Session.Apply(new AddOverlayOperation(last.PageIndex, last.Free));
         StatusText = Loc.Get("DrawFreeRestored");
