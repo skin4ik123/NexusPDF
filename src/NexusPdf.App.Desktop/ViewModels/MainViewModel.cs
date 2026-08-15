@@ -1651,6 +1651,20 @@ public sealed partial class MainViewModel : ObservableObject
             MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
+    /// <summary>
+    /// Плотность интерфейса. Применяется немедленно: смотреть на новые размеры
+    /// после перезапуска — не способ выбрать, что удобнее.
+    /// </summary>
+    [RelayCommand]
+    private void SetDensity(string density)
+    {
+        _services.Settings.UiDensity = density;
+        _services.SaveSettings();
+        Services.Ux.TouchInputWatcher.SetSetting(density);
+        if (ActiveDocument is { } doc)
+            doc.StatusText = Loc.Get("UxDensityApplied");
+    }
+
     [RelayCommand]
     private void About()
     {

@@ -1,11 +1,24 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+
+  <!-- Размеры по умолчанию: их подменяет DensityManager, когда пользователь
+       (или касание пальцем) переключает плотность интерфейса. -->
+  <sys:Double x:Key="UxTouchTarget">32</sys:Double>
+  <sys:Double x:Key="UxRowHeight">30</sys:Double>
+  <sys:Double x:Key="UxGlyphSize">15</sys:Double>
+  <sys:Double x:Key="UxFontSize">13</sys:Double>
+  <Thickness x:Key="UxToolPadding">8,5,8,5</Thickness>
+  <Thickness x:Key="UxToolMargin">2,0,2,0</Thickness>
+  <Thickness x:Key="UxMenuItemPadding">8,5,8,5</Thickness>
 
   <Style x:Key="ToolButton" TargetType="ButtonBase">
     <Setter Property="Background" Value="Transparent"/>
     <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-    <Setter Property="Padding" Value="8,5"/>
-    <Setter Property="Margin" Value="1,0"/>
+    <Setter Property="Padding" Value="{DynamicResource UxToolPadding}"/>
+    <Setter Property="Margin" Value="{DynamicResource UxToolMargin}"/>
+    <Setter Property="MinHeight" Value="{DynamicResource UxTouchTarget}"/>
+    <Setter Property="MinWidth" Value="{DynamicResource UxTouchTarget}"/>
     <Setter Property="BorderThickness" Value="0"/>
     <Setter Property="VerticalAlignment" Value="Center"/>
     <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
@@ -49,8 +62,16 @@
 
   <Style x:Key="ToolGlyph" TargetType="TextBlock">
     <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
-    <Setter Property="FontSize" Value="15"/>
+    <Setter Property="FontSize" Value="{DynamicResource UxGlyphSize}"/>
     <Setter Property="VerticalAlignment" Value="Center"/>
+  </Style>
+
+  <!-- Пункты контекстных меню: пальцем нужно попадать по строке, а не по
+       её тексту, поэтому высота идёт от плотности интерфейса. -->
+  <Style TargetType="MenuItem">
+    <Setter Property="MinHeight" Value="{DynamicResource UxRowHeight}"/>
+    <Setter Property="Padding" Value="{DynamicResource UxMenuItemPadding}"/>
+    <Setter Property="FontSize" Value="{DynamicResource UxFontSize}"/>
   </Style>
 
   <Style x:Key="PrimaryButton" TargetType="Button">

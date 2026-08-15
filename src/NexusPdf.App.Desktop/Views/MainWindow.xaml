@@ -321,6 +321,20 @@
                   <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeSystem}"
                           Command="{Binding SetThemeCommand}" CommandParameter="system" Click="OnMenuItem"/>
                 </StackPanel>
+                <TextBlock Text="{l:Loc UxDensity}" Foreground="{DynamicResource TextSecondary}"
+                           FontSize="11" Margin="6,4"/>
+                <StackPanel Orientation="Horizontal" Margin="4,0">
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxDensityAuto}" Margin="0,0,10,0"
+                          ToolTip="{l:Loc UxDensityAutoHint}"
+                          Command="{Binding SetDensityCommand}" CommandParameter="auto" Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxDensityCompact}" Margin="0,0,10,0"
+                          Command="{Binding SetDensityCommand}" CommandParameter="compact" Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxDensityComfortable}" Margin="0,0,10,0"
+                          Command="{Binding SetDensityCommand}" CommandParameter="comfortable" Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxDensityTouch}"
+                          ToolTip="{l:Loc UxDensityTouchHint}"
+                          Command="{Binding SetDensityCommand}" CommandParameter="touch" Click="OnMenuItem"/>
+                </StackPanel>
                 <TextBlock Text="{l:Loc Language}" Foreground="{DynamicResource TextSecondary}"
                            FontSize="11" Margin="6,4"/>
                 <StackPanel Orientation="Horizontal" Margin="4,0">
@@ -536,8 +550,16 @@
     <!-- Строка состояния -->
     <Border Grid.Row="3" Grid.ColumnSpan="2" Background="{DynamicResource ToolbarBg}"
             BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,1,0,0">
+      <!-- Три колонки, а не наложение двух панелей: при крупных размерах
+           элементов длинный текст состояния наезжал на управление масштабом
+           и прятал его. Теперь текст обрезается, а кнопки остаются на месте. -->
       <Grid Margin="10,3">
-        <StackPanel Orientation="Horizontal">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <StackPanel Grid.Column="0" Orientation="Horizontal">
           <TextBlock Text="{l:Loc PageShort}" Foreground="{DynamicResource TextSecondary}"
                      VerticalAlignment="Center" Margin="0,0,5,0"
                      Visibility="{Binding HasDocuments, Converter={StaticResource BoolToVis}}"/>
@@ -549,8 +571,6 @@
           <TextBlock Text="{Binding ActiveDocument.PageOfText, FallbackValue=''}"
                      Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center" Margin="6,0,0,0"/>
           <TextBlock Text="{Binding ActiveDocument.CurrentPageSizeText, FallbackValue=''}"
-                     Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" Margin="16,0,0,0"/>
-          <TextBlock Text="{Binding ActiveDocument.StatusText, FallbackValue=''}"
                      Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" Margin="16,0,0,0"/>
           <Button Style="{StaticResource ToolButton}" Margin="12,0,0,0"
                   Command="{Binding ShowSignaturesCommand}" ToolTip="{l:Loc SignaturesTitle}"
@@ -580,7 +600,14 @@
             </StackPanel>
           </Button>
         </StackPanel>
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+        <!-- Сообщение о последнем действии: занимает остаток строки и
+             обрезается многоточием, вместо того чтобы вытеснять кнопки. -->
+        <TextBlock Grid.Column="1" Text="{Binding ActiveDocument.StatusText, FallbackValue=''}"
+                   Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"
+                   Margin="16,0,8,0" TextTrimming="CharacterEllipsis"
+                   ToolTip="{Binding ActiveDocument.StatusText, FallbackValue=''}"/>
+
+        <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
           <Button Style="{StaticResource ToolButton}" Command="{Binding ZoomOutActiveCommand}"
                   ToolTip="{l:Loc ZoomOut}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE71F;" FontSize="12"/>

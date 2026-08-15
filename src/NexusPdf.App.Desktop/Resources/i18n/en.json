@@ -649,5 +649,13 @@
   "UxPagePropsLine": "Page {0}: {1}×{2} mm ({3}×{4} pt), rotation {5}°",
   "UxPagePropsMore": "…and {0} more pages",
   "PrintSelectedScope": "Selected pages ({0})",
-  "UxEditText": "Edit text"
+  "UxEditText": "Edit text",
+  "UxDensity": "Element size",
+  "UxDensityAuto": "Auto",
+  "UxDensityAutoHint": "Mouse — normal size; after a touch — large.",
+  "UxDensityCompact": "Compact",
+  "UxDensityComfortable": "Comfortable",
+  "UxDensityTouch": "Touch",
+  "UxDensityTouchHint": "Buttons and menu rows at least 44 points — no missed taps.",
+  "UxDensityApplied": "Interface element size changed."
 }
