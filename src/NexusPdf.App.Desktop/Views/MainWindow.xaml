@@ -220,6 +220,9 @@
                   <Button Style="{StaticResource LinkButton}" Content="{l:Loc PaintEditRegionMenu}"
                           Command="{Binding EditRegionInPaintCommand}" IsEnabled="{Binding HasDocuments}"
                           Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc PaintEditImageMenu}"
+                          Command="{Binding EditImageInPaintCommand}" IsEnabled="{Binding HasDocuments}"
+                          Click="OnMenuItem"/>
                   <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
                 </StackPanel>
                 <TextBlock Text="{l:Loc ConvertSection}" Foreground="{DynamicResource TextSecondary}"

@@ -672,6 +672,99 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void EditImageInPaint()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy || doc.PageCount == 0) return;
+        if (!ExternalImageEditor.IsEditorAvailable())
+        {
+            ErrorDialog.Show(OwnerWindow, Loc.Get("PaintEditTitle"), Loc.Get("PaintNoEditor"), "");
+            return;
+        }
+
+        // Диалога нет намеренно: картинка берётся в своём разрешении, поэтому
+        // выбирать DPI нечего, а страница не растрируется — выбирать способ
+        // возврата тоже не нужно.
+        doc.BeginPlacement((page, x, y) =>
+        {
+            _ = EditImageCoreAsync(doc, page, x, y);
+            return null;
+        });
+        doc.StatusText = Loc.Get("PaintImageHint");
+    }
+
+    private async Task EditImageCoreAsync(DocumentViewModel doc, PageViewModel page, double xPt, double yPt)
+    {
+        ExternalEditWorkspace? workspace = null;
+        ExternalImageEditor? editor = null;
+        try
+        {
+            var handle = doc.Document.Handles[page.PageRef.SourceId];
+            var target = await handle.GetImageObjectAtAsync(
+                page.PageRef.SourcePageIndex, page.PageRef.RotationOffset, xPt, yPt,
+                CancellationToken.None);
+            if (target == null)
+            {
+                doc.StatusText = Loc.Get("PaintImageNotFound");
+                return;
+            }
+
+            doc.IsBusy = true;
+            doc.StatusText = Loc.Get("PaintExporting");
+
+            // Экспорт в натуральном разрешении картинки: ни увеличения, ни
+            // потери деталей при выходе в редактор не происходит.
+            workspace = ExternalEditWorkspace.Create(
+                Path.GetFileNameWithoutExtension(doc.Title) + $"-p{page.LogicalIndex + 1}-image");
+            await File.WriteAllBytesAsync(workspace.ImagePath,
+                ImageEncoder.EncodePng(target.Bgra, target.PixelWidth, target.PixelHeight, 96));
+
+            editor = new ExternalImageEditor(workspace.ImagePath);
+            if (!editor.Launch())
+            {
+                ErrorDialog.Show(OwnerWindow, Loc.Get("PaintEditTitle"), Loc.Get("PaintNoEditor"), "");
+                return;
+            }
+
+            doc.StatusText = Loc.Get("PaintWaitWaiting");
+            var edited = PaintWaitDialog.Run(OwnerWindow, editor, workspace.ImagePath,
+                ImageEncoder.ToBitmap(target.Bgra, target.PixelWidth, target.PixelHeight));
+            if (edited == null)
+            {
+                doc.StatusText = Loc.Get("PaintCancelled");
+                return;
+            }
+
+            // Возврат: подменяется растр САМОГО объекта, поэтому его место,
+            // масштаб, поворот и обрезка сохраняются, а страница остаётся
+            // текстовой. Размер картинки в пикселях может отличаться от
+            // исходного — PDF растянет её по прежней рамке.
+            var imported = ImageEncoder.DecodeBgra(edited);
+            doc.Document.Session.Apply(new NexusPdf.Domain.AddOverlayOperation(page.LogicalIndex,
+                new NexusPdf.Pdf.Abstractions.ImageObjectReplacement(
+                    target.ObjectIndex, imported.Bgra, imported.PixelWidth, imported.PixelHeight)));
+            var dpiScale = OwnerWindow != null
+                ? System.Windows.Media.VisualTreeHelper.GetDpi(OwnerWindow).DpiScaleX
+                : 1.0;
+            page.ForceRefresh(dpiScale);
+            doc.StatusText = Loc.Get("PaintImageDone");
+            Log.Information("Изображение {Index} страницы {Page} заменено правкой из редактора",
+                target.ObjectIndex, page.LogicalIndex + 1);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка правки изображения во внешнем редакторе");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("PaintEditTitle"), ex.Message, ex.ToString());
+            doc.StatusText = Loc.Get("Ready");
+        }
+        finally
+        {
+            editor?.Dispose();
+            workspace?.Dispose();
+            doc.IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
     private void EditRegionInPaint()
     {
         if (ActiveDocument is not { } doc || doc.IsBusy || doc.PageCount == 0) return;
