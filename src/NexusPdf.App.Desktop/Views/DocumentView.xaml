@@ -25,6 +25,7 @@
             Visibility="{Binding IsFindVisible, Converter={StaticResource BoolToVis}}">
       <StackPanel Orientation="Horizontal" Margin="10,6">
         <TextBox x:Name="FindBox" Width="280" Style="{StaticResource ThemedTextBox}"
+               AutomationProperties.Name="{l:Loc A11yFindBox}"
                  Text="{Binding FindQuery, UpdateSourceTrigger=PropertyChanged}"
                  KeyDown="OnFindBoxKeyDown" ToolTip="{l:Loc FindPlaceholder}"/>
         <Button Style="{StaticResource ToolButton}" Command="{Binding FindPreviousCommand}" ToolTip="↑">
@@ -52,6 +53,7 @@
       <Border Grid.Column="0" Background="{DynamicResource PanelBg}"
               BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,1,0">
         <ListBox x:Name="ThumbList" ItemsSource="{Binding Pages}"
+               AutomationProperties.Name="{l:Loc A11yThumbList}"
                  Background="Transparent" BorderThickness="0"
                  SelectedIndex="{Binding CurrentPageNumber, Converter={StaticResource MinusOne}, Mode=OneWay}"
                  SelectionChanged="OnThumbSelectionChanged"
@@ -75,6 +77,7 @@
       </Border>
 
       <ListBox x:Name="PagesList" Grid.Column="1" ItemsSource="{Binding Pages}"
+               AutomationProperties.Name="{l:Loc A11yPagesList}"
                Background="{DynamicResource ViewerBg}" BorderThickness="0"
                SelectionMode="Single" Focusable="True"
                ItemContainerStyle="{StaticResource ReadingPageItem}"

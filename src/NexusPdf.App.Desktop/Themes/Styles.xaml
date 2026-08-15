@@ -9,10 +9,19 @@
     <Setter Property="BorderThickness" Value="0"/>
     <Setter Property="VerticalAlignment" Value="Center"/>
     <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+    <!-- Кнопки панели показывают только значок: без этого экранный диктор
+         не может их назвать. Имя берётся из той же подсказки, что видит
+         зрячий пользователь. -->
+    <Setter Property="AutomationProperties.Name"
+            Value="{Binding RelativeSource={RelativeSource Self}, Path=ToolTip}"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="ButtonBase">
+          <!-- Рамка держится всегда прозрачной толщиной 2: иначе подсветка
+               фокуса с клавиатуры не видна (нулевая толщина) и сдвигает
+               содержимое в момент появления. -->
           <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="5"
+                  BorderThickness="2" BorderBrush="Transparent"
                   Padding="{TemplateBinding Padding}">
             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
@@ -54,9 +63,13 @@
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="Button">
-          <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6"
-                  Padding="{TemplateBinding Padding}">
-            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          <!-- Внешняя рамка — кольцо фокуса: диалоги проходятся клавиатурой,
+               и пользователь должен видеть, где он находится. -->
+          <Border x:Name="Focus" BorderThickness="2" BorderBrush="Transparent" CornerRadius="8" Padding="1">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6"
+                    Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
           </Border>
           <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
@@ -64,6 +77,12 @@
             </Trigger>
             <Trigger Property="IsPressed" Value="True">
               <Setter TargetName="Bd" Property="Opacity" Value="0.8"/>
+            </Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+              <Setter TargetName="Focus" Property="BorderBrush" Value="{DynamicResource TextBrush}"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Bd" Property="Opacity" Value="0.45"/>
             </Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
@@ -81,12 +100,19 @@
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="Button">
-          <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" CornerRadius="4">
+          <Border x:Name="Bd" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"
+                  CornerRadius="4" BorderThickness="2" BorderBrush="Transparent">
             <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
           </Border>
           <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
               <Setter Property="Background" Value="{DynamicResource HoverBg}"/>
+            </Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Bd" Property="Opacity" Value="0.45"/>
             </Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
