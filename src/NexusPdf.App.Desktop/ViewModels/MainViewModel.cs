@@ -1633,7 +1633,6 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void About()
     {
-        MessageBox.Show(Loc.Get("AboutText"), Loc.Get("About"),
-            MessageBoxButton.OK, MessageBoxImage.Information);
+        AboutDialog.Show(OwnerWindow, _services.Ocr.EngineName);
     }
 }
