@@ -63,6 +63,18 @@ public sealed record ShapeAnnotationDraft(
     string Contents,
     string Author) : PageOverlay;
 
+/// <summary>
+/// Черновик ВЫМАРЫВАНИЯ: прямоугольник (в отображаемых пунктах), содержимое
+/// под которым при сохранении УНИЧТОЖАЕТСЯ. Страница с вымарками
+/// растеризуется целиком с закрашенными областями — скрытые данные физически
+/// отсутствуют в результате (это не «чёрный прямоугольник поверх текста»).
+/// </summary>
+public sealed record RedactionDraft(
+    double XPt,
+    double YPt,
+    double WidthPt,
+    double HeightPt) : PageOverlay;
+
 /// <summary>Распознанное OCR слово: рамка в отображаемых пунктах (от левого верхнего угла на момент распознавания).</summary>
 public sealed record OcrWordBox(
     string Text,

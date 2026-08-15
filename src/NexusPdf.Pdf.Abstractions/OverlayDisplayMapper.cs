@@ -75,6 +75,20 @@ public static class OverlayDisplayMapper
                     YPt = center.Y - NoteIconSizePt / 2,
                 }, 0);
             }
+            case RedactionDraft redaction:
+            {
+                var p1 = RemapPoint(redaction.XPt, redaction.YPt, delta, finalWidth, finalHeight);
+                var p2 = RemapPoint(
+                    redaction.XPt + redaction.WidthPt, redaction.YPt + redaction.HeightPt,
+                    delta, finalWidth, finalHeight);
+                return (redaction with
+                {
+                    XPt = Math.Min(p1.X, p2.X),
+                    YPt = Math.Min(p1.Y, p2.Y),
+                    WidthPt = Math.Abs(p2.X - p1.X),
+                    HeightPt = Math.Abs(p2.Y - p1.Y),
+                }, 0);
+            }
             case ShapeAnnotationDraft shape:
             {
                 var p1 = RemapPoint(shape.XPt, shape.YPt, delta, finalWidth, finalHeight);

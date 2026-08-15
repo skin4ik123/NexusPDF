@@ -46,7 +46,8 @@ public sealed class SaveService
 
     public async Task SaveAsAsync(OpenedDocument document, string targetPath, bool keepBackup, CancellationToken ct)
     {
-        var composition = document.BuildComposition();
+        await using var baked = await document.BuildCompositionBakedAsync(_engine, ct).ConfigureAwait(false);
+        var composition = baked.Composition;
         var expectedCount = composition.Count;
         if (expectedCount == 0)
             throw new InvalidOperationException("Документ не содержит страниц.");
@@ -108,7 +109,8 @@ public sealed class SaveService
     {
         ThrowIfTargetIsOpenSource(document, targetPath);
         await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
-        var composition = document.BuildComposition();
+        await using var baked = await document.BuildCompositionBakedAsync(_engine, ct).ConfigureAwait(false);
+        var composition = baked.Composition;
         if (composition.Count == 0)
             throw new InvalidOperationException("Документ не содержит страниц.");
 
@@ -125,7 +127,8 @@ public sealed class SaveService
     {
         ThrowIfTargetIsOpenSource(document, targetPath);
         await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
-        var all = document.BuildComposition();
+        await using var baked = await document.BuildCompositionBakedAsync(_engine, ct).ConfigureAwait(false);
+        var all = baked.Composition;
         var subset = logicalIndices.Select(i => all[i]).ToList();
         if (subset.Count == 0)
             throw new InvalidOperationException("Не выбрано ни одной страницы.");

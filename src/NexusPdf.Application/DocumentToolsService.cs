@@ -35,7 +35,8 @@ public sealed class DocumentToolsService
     {
         SaveService.ThrowIfTargetIsOpenSource(document, targetPath);
         await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
-        var composition = document.BuildComposition();
+        await using var baked = await document.BuildCompositionBakedAsync(_renderEngine, ct).ConfigureAwait(false);
+        var composition = baked.Composition;
         await SafeFileReplace.WriteAndReplaceAsync(
             targetPath,
             async tempPath =>
@@ -97,7 +98,8 @@ public sealed class DocumentToolsService
 
         await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
 
-        var composition = document.BuildComposition();
+        await using var baked = await document.BuildCompositionBakedAsync(_renderEngine, ct).ConfigureAwait(false);
+        var composition = baked.Composition;
         if (visibleStamp && composition.Count > 0)
         {
             // Видимая отметка запекается В СТРАНИЦУ до подписания (кириллица
@@ -180,7 +182,8 @@ public sealed class DocumentToolsService
                 "Пересжатие защищённых документов не поддерживается: сохранение сняло бы шифрование молча. Сначала сохраните копию без защиты.");
         await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
 
-        var composition = document.BuildComposition();
+        await using var baked = await document.BuildCompositionBakedAsync(_renderEngine, ct).ConfigureAwait(false);
+        var composition = baked.Composition;
         long bytesBefore = 0;
         ImageRecompressStats stats = new(0, 0);
 
@@ -225,7 +228,8 @@ public sealed class DocumentToolsService
     {
         SaveService.ThrowIfTargetIsOpenSource(document, targetPath);
         await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
-        var composition = document.BuildComposition();
+        await using var baked = await document.BuildCompositionBakedAsync(_renderEngine, ct).ConfigureAwait(false);
+        var composition = baked.Composition;
         long bytesBefore = 0;
 
         await SafeFileReplace.WriteAndReplaceAsync(
