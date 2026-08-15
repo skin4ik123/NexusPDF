@@ -209,6 +209,106 @@
     <Setter Property="CaretBrush" Value="{DynamicResource TextBrush}"/>
   </Style>
 
+  <!-- Выпадающие списки: без своего шаблона WPF рисует их системными
+       (белая плашка с чёрным текстом), и в тёмной теме каждый список
+       светился ярким прямоугольником посреди тёмного окна. Стиль без
+       ключа — применяется ко ВСЕМ спискам приложения. -->
+  <Style TargetType="ComboBoxItem">
+    <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+    <Setter Property="Padding" Value="8,5"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ComboBoxItem">
+          <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}">
+            <ContentPresenter/>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsHighlighted" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBg}"/>
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SelectedBg}"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style TargetType="ComboBox">
+    <Setter Property="Background" Value="{DynamicResource InputBg}"/>
+    <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource PanelBorder}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="Padding" Value="8,4"/>
+    <Setter Property="MinHeight" Value="28"/>
+    <Setter Property="HorizontalContentAlignment" Value="Left"/>
+    <Setter Property="VerticalContentAlignment" Value="Center"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ComboBox">
+          <Grid>
+            <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4"/>
+            <!-- Кнопка раскрытия занимает всю плашку: щелчок по любому месту
+                 списка должен его открывать, как в системном стиле. -->
+            <ToggleButton Background="Transparent" BorderThickness="0" Focusable="False"
+                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                          ClickMode="Press">
+              <ToggleButton.Template>
+                <ControlTemplate TargetType="ToggleButton">
+                  <Border Background="Transparent"/>
+                </ControlTemplate>
+              </ToggleButton.Template>
+            </ToggleButton>
+            <!-- Правый отступ 26 оставляет место под стрелку: длинный текст
+                 иначе наезжал на неё и она пропадала. ContentTemplateSelector
+                 обязателен — через него работает DisplayMemberPath, иначе в
+                 закрытом списке показывалось имя типа элемента. -->
+            <ContentPresenter x:Name="Content" IsHitTestVisible="False"
+                              Margin="8,4,26,4" ClipToBounds="True"
+                              Content="{TemplateBinding SelectionBoxItem}"
+                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                              ContentTemplateSelector="{Binding ItemTemplateSelector, RelativeSource={RelativeSource TemplatedParent}}"
+                              ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                              VerticalAlignment="Center" HorizontalAlignment="Left"/>
+            <TextBlock Text="&#xE70D;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                       IsHitTestVisible="False" Margin="0,0,10,0"
+                       Foreground="{DynamicResource TextSecondary}"
+                       VerticalAlignment="Center" HorizontalAlignment="Right"/>
+            <Popup IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom"
+                   AllowsTransparency="True" Focusable="False" PopupAnimation="Fade"
+                   MinWidth="{TemplateBinding ActualWidth}">
+              <Border Background="{DynamicResource PanelBg}" BorderBrush="{DynamicResource PanelBorder}"
+                      BorderThickness="1" CornerRadius="4" Margin="0,2,6,6"
+                      MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                <Border.Effect>
+                  <DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.35"
+                                    Color="{DynamicResource ShadowColor}"/>
+                </Border.Effect>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <ItemsPresenter/>
+                </ScrollViewer>
+              </Border>
+            </Popup>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Content" Property="Opacity" Value="0.5"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
   <Style x:Key="DocTabItem" TargetType="TabItem">
     <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
     <Setter Property="Template">
