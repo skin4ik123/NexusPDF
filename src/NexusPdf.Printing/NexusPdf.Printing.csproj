@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>NexusPdf.Printing</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Намеренно без WPF и без System.Printing: ядро печати должно считаться
+       и проверяться тестами без принтера, окна и Windows-специфики.
+       Всё платформенное живёт в backend'ах поверх этих интерфейсов. -->
+  <ItemGroup>
+    <ProjectReference Include="..\NexusPdf.Pdf.Abstractions\NexusPdf.Pdf.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>
