@@ -1412,10 +1412,12 @@ public sealed partial class MainViewModel : ObservableObject
     // ----- Печать и инструменты qpdf -----
 
     [RelayCommand]
-    private async Task PrintActive()
+    private void PrintActive()
     {
-        if (ActiveDocument is not { } doc || doc.IsBusy || OwnerWindow is null) return;
-        await _services.Print.PrintInteractiveAsync(doc, OwnerWindow);
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        // Собственный центр печати вместо системного диалога: предпросмотр,
+        // раскладка и возможности принтера живут там.
+        PrintCenterDialog.Run(OwnerWindow, doc, _services);
     }
 
     [RelayCommand]

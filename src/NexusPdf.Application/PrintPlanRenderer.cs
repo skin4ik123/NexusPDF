@@ -19,8 +19,12 @@ public sealed class PrintPlanRenderer
     public PrintPlanRenderer(OpenedDocument document) => _document = document;
 
     /// <summary>Отрисованный лист: BGRA-буфер размером с физический лист.</summary>
+    /// <param name="drawGuides">
+    /// Нарисовать границу печатаемой области и отметить обрезанное содержимое.
+    /// Только для предпросмотра: на бумагу и в файл направляющие не идут.
+    /// </param>
     public async Task<RenderedPageImage> RenderSheetAsync(
-        ComposedSheet composed, CancellationToken ct)
+        ComposedSheet composed, CancellationToken ct, bool drawGuides = false)
     {
         var stride = composed.WidthPx * 4;
         var buffer = new byte[stride * composed.HeightPx];
@@ -39,7 +43,58 @@ public sealed class PrintPlanRenderer
             Blit(image, page, buffer, stride, composed.WidthPx, composed.HeightPx);
         }
 
+        if (drawGuides)
+            DrawGuides(composed, buffer, stride);
+
         return new RenderedPageImage(composed.WidthPx, composed.HeightPx, stride, buffer);
+    }
+
+    /// <summary>
+    /// Направляющие предпросмотра: серая рамка печатаемой области и красная —
+    /// вокруг обрезанного содержимого. Без них пользователь узнаёт про поля
+    /// принтера уже по испорченному листу.
+    /// </summary>
+    private static void DrawGuides(ComposedSheet composed, byte[] buffer, int stride)
+    {
+        DrawDashedRect(buffer, stride, composed.WidthPx, composed.HeightPx,
+            composed.PrintableAreaPx, b: 190, g: 190, r: 190, dash: 6);
+
+        foreach (var page in composed.Pages)
+        {
+            if (!page.Source.IsClipped) continue;
+            DrawDashedRect(buffer, stride, composed.WidthPx, composed.HeightPx,
+                page.ClipPx, b: 38, g: 38, r: 220, dash: 4);
+        }
+    }
+
+    private static void DrawDashedRect(
+        byte[] buffer, int stride, int width, int height,
+        RectPx rect, byte b, byte g, byte r, int dash)
+    {
+        if (rect.IsEmpty) return;
+
+        void Dot(int x, int y, int step)
+        {
+            if (x < 0 || y < 0 || x >= width || y >= height) return;
+            if (step % (dash * 2) >= dash) return; // пропуск — из этого и получается пунктир
+            var offset = y * stride + x * 4;
+            buffer[offset] = b;
+            buffer[offset + 1] = g;
+            buffer[offset + 2] = r;
+        }
+
+        var right = Math.Min(rect.Right, width) - 1;
+        var bottom = Math.Min(rect.Bottom, height) - 1;
+        for (var x = Math.Max(0, rect.X); x <= right; x++)
+        {
+            Dot(x, rect.Y, x);
+            Dot(x, bottom, x);
+        }
+        for (var y = Math.Max(0, rect.Y); y <= bottom; y++)
+        {
+            Dot(rect.X, y, y);
+            Dot(right, y, y);
+        }
     }
 
     /// <summary>
