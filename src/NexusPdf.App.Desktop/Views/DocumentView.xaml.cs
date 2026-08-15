@@ -148,6 +148,12 @@ public partial class DocumentView : UserControl
             if (_vm?.PendingOverlay == null)
                 ResetDrag(); // Esc/отмена посреди растягивания — рамка не должна залипнуть
         }
+        else if (e.PropertyName == nameof(DocumentViewModel.IsDrawing))
+        {
+            UpdatePlacementCursor();
+            if (_vm?.IsDrawing != true)
+                ResetDrag(); // инструмент выключили посреди штриха
+        }
     }
 
     private void ResetDrag()
@@ -156,14 +162,27 @@ public partial class DocumentView : UserControl
             _dragPage.DragPreviewRect = null;
         _dragPage = null;
         _dragElement = null;
+        // Незаконченный штрих не должен остаться висеть поверх страницы.
+        if (_drawPage != null)
+        {
+            _drawPage.DrawPreview = null;
+            _vm?.CancelStroke(_drawPage);
+            _drawPage = null;
+            _drawElement = null;
+        }
         if (PagesList.IsMouseCaptured)
             PagesList.ReleaseMouseCapture();
     }
 
+    private PageViewModel? _drawPage;
+    private FrameworkElement? _drawElement;
+
     private void OnPagesLostCapture(object sender, MouseEventArgs e) => ResetDrag();
 
     private void UpdatePlacementCursor() =>
-        PagesList.Cursor = _vm?.PendingOverlay != null ? Cursors.Cross : null;
+        PagesList.Cursor = _vm?.PendingOverlay != null || _vm?.IsDrawing == true
+            ? Cursors.Cross
+            : null;
 
     private PageViewModel? _dragPage;
     private FrameworkElement? _dragElement;
@@ -203,6 +222,24 @@ public partial class DocumentView : UserControl
                     e.Handled = true;
                 }
             }
+            return;
+        }
+
+        // Режим рисования: мышь ведёт штрих и не выделяет текст.
+        if (_vm.IsDrawing && _vm.PendingOverlay == null)
+        {
+            var drawHit = FindPageAt(e.OriginalSource);
+            if (drawHit == null) return;
+            var (drawPage, drawElement) = drawHit.Value;
+            var drawScale = drawPage.DisplayScale;
+            if (drawScale <= 0) return;
+            var drawPos = e.GetPosition(drawElement);
+            _drawPage = drawPage;
+            _drawElement = drawElement;
+            _vm.BeginStroke(drawPage, drawPos.X / drawScale, drawPos.Y / drawScale);
+            PagesList.CaptureMouse();
+            PagesList.Focus();
+            e.Handled = true;
             return;
         }
 
@@ -290,6 +327,25 @@ public partial class DocumentView : UserControl
             }
         }
 
+        // Ведение штриха.
+        if (_drawPage != null && _drawElement != null && _vm != null)
+        {
+            if (e.LeftButton != MouseButtonState.Pressed || !PagesList.IsMouseCaptured)
+            {
+                ResetDrag();
+                return;
+            }
+            var drawScale = _drawPage.DisplayScale;
+            if (drawScale > 0)
+            {
+                var pos = e.GetPosition(_drawElement);
+                _vm.ContinueStroke(_drawPage, pos.X / drawScale, pos.Y / drawScale,
+                    (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift);
+            }
+            e.Handled = true;
+            return;
+        }
+
         // Курсор-рука над ссылкой (попадание проверяется по кэшу, без вызовов движка).
         if (_vm != null && _dragPage == null && FindPageAt(e.OriginalSource) is { } hoverHit)
         {
@@ -317,6 +373,18 @@ public partial class DocumentView : UserControl
 
     private void OnPagesPreviewMouseUp(object sender, MouseButtonEventArgs e)
     {
+        if (_drawPage != null && _vm != null)
+        {
+            var strokePage = _drawPage;
+            _drawPage = null;
+            _drawElement = null;
+            if (PagesList.IsMouseCaptured)
+                PagesList.ReleaseMouseCapture();
+            _vm.EndStroke(strokePage);
+            e.Handled = true;
+            return;
+        }
+
         if (_selectionPage != null)
         {
             _selectionPage = null;

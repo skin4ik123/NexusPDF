@@ -124,6 +124,73 @@
                   IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc RedactTool}">
             <TextBlock Text="▮" FontSize="14" Foreground="#DC2626"/>
           </Button>
+
+          <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
+
+          <!-- Рисование: карандаш, линия, стрелка -->
+          <ToggleButton Style="{StaticResource ToolButton}" Command="{Binding DrawPencilCommand}"
+                        IsChecked="{Binding ActiveDocument.IsPencilActive, Mode=OneWay, FallbackValue=False}"
+                        IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc DrawPencilTool}">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE70F;"/>
+          </ToggleButton>
+          <ToggleButton Style="{StaticResource ToolButton}" Command="{Binding DrawLineCommand}"
+                        IsChecked="{Binding ActiveDocument.IsLineActive, Mode=OneWay, FallbackValue=False}"
+                        IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc DrawLineTool}">
+            <TextBlock Text="╱" FontSize="15"/>
+          </ToggleButton>
+          <ToggleButton Style="{StaticResource ToolButton}" Command="{Binding DrawArrowCommand}"
+                        IsChecked="{Binding ActiveDocument.IsArrowActive, Mode=OneWay, FallbackValue=False}"
+                        IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc DrawArrowTool}">
+            <TextBlock Text="↗" FontSize="15"/>
+          </ToggleButton>
+
+          <!-- Цвет, толщина и стабилизация видны, только когда рисуют -->
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                      Visibility="{Binding ActiveDocument.IsDrawing, FallbackValue=Collapsed, Converter={StaticResource BoolToVis}}">
+            <ItemsControl ItemsSource="{Binding DrawPalette}" VerticalAlignment="Center" Margin="6,0,0,0">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Button Width="18" Height="18" Margin="2,0" Cursor="Hand"
+                          Command="{Binding DataContext.SetDrawColorCommand,
+                                    RelativeSource={RelativeSource AncestorType=Window}}"
+                          CommandParameter="{Binding Argb}"
+                          AutomationProperties.Name="{Binding Name}" ToolTip="{Binding Name}">
+                    <Button.Template>
+                      <ControlTemplate TargetType="Button">
+                        <Border Background="{Binding Brush}" CornerRadius="9"
+                                BorderThickness="2" BorderBrush="{DynamicResource PanelBorder}"/>
+                      </ControlTemplate>
+                    </Button.Template>
+                  </Button>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Text="{l:Loc DrawWidth}" Margin="10,0,4,0" VerticalAlignment="Center"
+                       Foreground="{DynamicResource TextSecondary}" FontSize="12"/>
+            <Button Style="{StaticResource ToolButton}" Content="1"
+                    Command="{Binding SetDrawWidthCommand}" CommandParameter="1"/>
+            <Button Style="{StaticResource ToolButton}" Content="2"
+                    Command="{Binding SetDrawWidthCommand}" CommandParameter="2"/>
+            <Button Style="{StaticResource ToolButton}" Content="4"
+                    Command="{Binding SetDrawWidthCommand}" CommandParameter="4"/>
+            <Button Style="{StaticResource ToolButton}" Content="8"
+                    Command="{Binding SetDrawWidthCommand}" CommandParameter="8"/>
+
+            <CheckBox VerticalAlignment="Center" Margin="10,0,0,0"
+                      Foreground="{DynamicResource TextBrush}" FontSize="12"
+                      IsChecked="{Binding ActiveDocument.DrawAutoStraighten}"
+                      Content="{l:Loc DrawAutoStraighten}" ToolTip="{l:Loc DrawAutoStraightenHint}"/>
+
+            <Button Style="{StaticResource LinkButton}" Margin="10,0,0,0"
+                    Content="{l:Loc DrawRestoreFree}" ToolTip="{l:Loc DrawRestoreFreeHint}"
+                    Command="{Binding ActiveDocument.RestoreFreeStrokeCommand}"
+                    Visibility="{Binding ActiveDocument.CanRestoreFreeStroke,
+                                 FallbackValue=Collapsed, Converter={StaticResource BoolToVis}}"/>
+          </StackPanel>
           <ToggleButton Style="{StaticResource ToolButton}"
                         IsChecked="{Binding ActiveDocument.IsCommentsVisible, Mode=OneWay}"
                         Command="{Binding ToggleCommentsActiveCommand}"

@@ -126,6 +126,10 @@ internal static class PdfiumOverlayWriter
                     ApplyShape(page, shape,
                         rotation, left, bottom, contentWidth, contentHeight);
                     break;
+                case InkAnnotationDraft ink:
+                    ApplyInk(page, ink,
+                        rotation, left, bottom, contentWidth, contentHeight);
+                    break;
                 case PageRasterReplacement:
                     break; // уже применена выше
                 case ImageObjectReplacement imageReplacement:
@@ -226,6 +230,98 @@ internal static class PdfiumOverlayWriter
                 SetAnnotString(annot, "Contents", shape.Contents);
             if (shape.Author.Length > 0)
                 SetAnnotString(annot, "T", shape.Author);
+        }
+        finally
+        {
+            fpdf_annot.FPDFPageCloseAnnot(annot);
+        }
+    }
+
+    private const int AnnotInk = 15; // FPDF_ANNOT_INK
+
+    /// <summary>
+    /// Прямой вызов pdfium в обход обёртки PDFiumCore. Сгенерированная
+    /// сигнатура принимает ОДНУ точку по значению, а функция ждёт массив из
+    /// point_count пар float; из-за этого через обёртку в PDF попадал мусор
+    /// вместо штриха (проверено дампом /InkList). Здесь массив передаётся так,
+    /// как его ждёт C-функция.
+    /// </summary>
+    [DllImport("pdfium", EntryPoint = "FPDFAnnot_AddInkStroke",
+        CallingConvention = CallingConvention.Cdecl)]
+    private static extern int AddInkStroke(IntPtr annot, float[] points, ulong pointCount);
+
+    /// <summary>
+    /// Рисунок от руки. Ink-аннотация хранит сами штрихи, а не картинку,
+    /// поэтому линия остаётся чёткой при любом масштабе, её видно в других
+    /// программах и её можно удалить, не трогая содержимое страницы.
+    /// </summary>
+    private static void ApplyInk(
+        FpdfPageT page, InkAnnotationDraft ink,
+        int rotation, double offsetX, double offsetY, double contentWidth, double contentHeight)
+    {
+        var strokes = ink.Strokes.Where(s => s.Count >= 2).ToList();
+        if (strokes.Count == 0)
+            return;
+        if (!(ink.WidthPt > 0) || !double.IsFinite(ink.WidthPt))
+            throw new PdfEngineException("Некорректная толщина линии рисунка.");
+
+        var annot = fpdf_annot.FPDFPageCreateAnnot(page, AnnotInk);
+        if (annot == null || annot.__Instance == IntPtr.Zero)
+            throw new PdfEngineException("Не удалось создать рисунок.");
+        try
+        {
+            // Цвет и толщина задаются ДО добавления штрихов: pdfium строит
+            // внешний вид Ink-аннотации в момент добавления штриха, и всё,
+            // выставленное после, в картинку уже не попадёт.
+            var alpha = (byte)(ink.StrokeArgb >> 24);
+            fpdf_annot.FPDFAnnotSetColor(annot, (FPDFANNOT_COLORTYPE)ColorTypeStroke,
+                (byte)(ink.StrokeArgb >> 16), (byte)(ink.StrokeArgb >> 8), (byte)ink.StrokeArgb,
+                alpha == 0 ? (byte)0xFF : alpha);
+            fpdf_annot.FPDFAnnotSetBorder(annot, 0, 0, (float)ink.WidthPt);
+
+            double minX = double.MaxValue, minY = double.MaxValue;
+            double maxX = double.MinValue, maxY = double.MinValue;
+
+            foreach (var stroke in strokes)
+            {
+                // pdfium ждёт НЕПРЕРЫВНЫЙ массив пар float. Массив FS_POINTF_ им
+                // не является: каждый элемент — отдельная обёртка над своим
+                // куском native-памяти, и по указателю первого элемента pdfium
+                // читал бы чужие байты. Поэтому буфер собирается вручную.
+                var buffer = new float[stroke.Count * 2];
+                for (var i = 0; i < stroke.Count; i++)
+                {
+                    if (!double.IsFinite(stroke[i].XPt) || !double.IsFinite(stroke[i].YPt))
+                        throw new PdfEngineException("Некорректная точка рисунка.");
+                    var (cx, cy) = DisplayedToContent(
+                        stroke[i].XPt, stroke[i].YPt, rotation, contentWidth, contentHeight);
+                    var x = offsetX + cx;
+                    var y = offsetY + cy;
+                    buffer[i * 2] = (float)x;
+                    buffer[i * 2 + 1] = (float)y;
+                    minX = Math.Min(minX, x); maxX = Math.Max(maxX, x);
+                    minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
+                }
+
+                if (AddInkStroke(annot.__Instance, buffer, (ulong)stroke.Count) < 0)
+                    throw new PdfEngineException("Не удалось добавить штрих рисунка.");
+            }
+
+            // Рамка расширяется на пол-толщины: иначе просмотрщик обрежет
+            // край линии, нарисованной ровно по границе.
+            var pad = ink.WidthPt / 2 + 1;
+            fpdf_annot.FPDFAnnotSetRect(annot, new FS_RECTF_
+            {
+                Left = (float)(minX - pad),
+                Bottom = (float)(minY - pad),
+                Right = (float)(maxX + pad),
+                Top = (float)(maxY + pad),
+            });
+
+            if (ink.Contents.Length > 0)
+                SetAnnotString(annot, "Contents", ink.Contents);
+            if (ink.Author.Length > 0)
+                SetAnnotString(annot, "T", ink.Author);
         }
         finally
         {

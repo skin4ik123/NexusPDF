@@ -1,6 +1,8 @@
 using System.Collections;
 using System.Collections.ObjectModel;
 using System.Windows;
+using System.Windows.Media;
+using NexusPdf.Pdf.Abstractions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using GongSolutions.Wpf.DragDrop;
@@ -1054,6 +1056,183 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         RemapBookmarks(); // страницы могли переставить или удалить
         if (IsCommentsVisible)
             _ = RefreshCommentsAsync();
+    }
+
+    // ----- Рисование от руки -----
+
+    public enum DrawTool { None, Pencil, Line, Arrow }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsDrawing))]
+    [NotifyPropertyChangedFor(nameof(IsPencilActive))]
+    [NotifyPropertyChangedFor(nameof(IsLineActive))]
+    [NotifyPropertyChangedFor(nameof(IsArrowActive))]
+    private DrawTool _activeDrawTool = DrawTool.None;
+
+    public bool IsDrawing => ActiveDrawTool != DrawTool.None;
+    public bool IsPencilActive => ActiveDrawTool == DrawTool.Pencil;
+    public bool IsLineActive => ActiveDrawTool == DrawTool.Line;
+    public bool IsArrowActive => ActiveDrawTool == DrawTool.Arrow;
+
+    /// <summary>Цвет линии. По умолчанию красный — рисунок должен быть виден поверх чёрного текста.</summary>
+    [ObservableProperty]
+    private uint _drawColorArgb = 0xFFE02424;
+
+    [ObservableProperty]
+    private double _drawWidthPt = 2.0;
+
+    /// <summary>Сила стабилизации, 0 — выключена. Меняется пользователем.</summary>
+    [ObservableProperty]
+    private double _drawStabilization = StrokeProcessor.DefaultStabilization;
+
+    /// <summary>Автовыпрямление почти прямых штрихов карандаша.</summary>
+    [ObservableProperty]
+    private bool _drawAutoStraighten = true;
+
+    private PageViewModel? _drawPage;
+    private readonly List<StrokePoint> _drawRaw = new();
+
+    /// <summary>
+    /// Последний штрих, который автовыпрямление превратило в отрезок. Пока он
+    /// здесь, пользователь может вернуть свой исходный «живой» штрих.
+    /// </summary>
+    private (int PageIndex, InkAnnotationDraft Straightened, InkAnnotationDraft Free)? _lastStraightened;
+
+    [ObservableProperty]
+    private bool _canRestoreFreeStroke;
+
+    public void SelectDrawTool(DrawTool tool)
+    {
+        CancelPlacement();
+        ClearTextSelection();
+        ActiveDrawTool = ActiveDrawTool == tool ? DrawTool.None : tool;
+        StatusText = ActiveDrawTool switch
+        {
+            DrawTool.Pencil => Loc.Get("DrawHintPencil"),
+            DrawTool.Line => Loc.Get("DrawHintLine"),
+            DrawTool.Arrow => Loc.Get("DrawHintArrow"),
+            _ => Loc.Get("Ready"),
+        };
+    }
+
+    public void BeginStroke(PageViewModel page, double xPt, double yPt)
+    {
+        if (!IsDrawing || IsBusy) return;
+        _drawPage = page;
+        // Рамка, в которой рисуют: если страницу потом повернут, штрих
+        // поедет вместе с ней.
+        _drawPageRotation = page.PageRef.RotationOffset;
+        _drawRaw.Clear();
+        _drawRaw.Add(new StrokePoint(xPt, yPt));
+        page.DrawPreviewWidth = DrawWidthPt;
+        page.DrawPreviewBrush = new SolidColorBrush(Color.FromArgb(
+            (byte)(DrawColorArgb >> 24), (byte)(DrawColorArgb >> 16),
+            (byte)(DrawColorArgb >> 8), (byte)DrawColorArgb));
+        UpdatePreview(page, new[] { new StrokePoint(xPt, yPt) });
+    }
+
+    /// <summary>Продолжение штриха. shift — привязка направления к 45°.</summary>
+    public void ContinueStroke(PageViewModel page, double xPt, double yPt, bool shift)
+    {
+        if (_drawPage == null || !ReferenceEquals(page, _drawPage) || _drawRaw.Count == 0) return;
+        var point = new StrokePoint(xPt, yPt);
+
+        if (ActiveDrawTool is DrawTool.Line or DrawTool.Arrow)
+        {
+            // Линия и стрелка — всегда два конца: тянется только конец.
+            if (shift)
+                point = StrokeProcessor.SnapTo45(_drawRaw[0], point);
+            if (_drawRaw.Count == 1) _drawRaw.Add(point); else _drawRaw[^1] = point;
+            UpdatePreview(page, _drawRaw);
+            return;
+        }
+
+        // Карандаш: точки, которые не сдвинулись, не накапливаем.
+        if (StrokeProcessor.Distance(_drawRaw[^1], point) < 0.4)
+            return;
+        _drawRaw.Add(point);
+        UpdatePreview(page, StrokeProcessor.Stabilize(_drawRaw, DrawStabilization));
+    }
+
+    /// <summary>Штрих прерван (окно потеряло мышь, Esc): ничего не записываем.</summary>
+    public void CancelStroke(PageViewModel page)
+    {
+        if (_drawPage == null || !ReferenceEquals(page, _drawPage)) return;
+        _drawPage = null;
+        _drawRaw.Clear();
+        page.DrawPreview = null;
+    }
+
+    /// <summary>Завершение штриха: обработка геометрии и запись в документ.</summary>
+    public void EndStroke(PageViewModel page)
+    {
+        if (_drawPage == null || !ReferenceEquals(page, _drawPage)) return;
+        _drawPage = null;
+        page.DrawPreview = null;
+
+        var raw = _drawRaw.ToList();
+        _drawRaw.Clear();
+
+        var commit = StrokeProcessor.Commit(raw, CurrentKind,
+            DrawStabilization, DrawAutoStraighten, DrawWidthPt);
+        if (commit == null)
+            return; // случайный клик, а не штрих
+
+        var overlay = BuildInk(commit.Strokes);
+        Document.Session.Apply(new AddOverlayOperation(page.LogicalIndex, overlay));
+
+        // Автовыпрямление сработало — предложим вернуть свободный штрих.
+        _lastStraightened = commit.WasStraightened
+            ? (page.LogicalIndex, overlay, BuildInk(commit.FreeStrokes))
+            : null;
+        CanRestoreFreeStroke = commit.WasStraightened;
+        StatusText = commit.WasStraightened
+            ? Loc.Get("DrawStraightened")
+            : Loc.Get("DrawDone");
+    }
+
+    private StrokeProcessor.StrokeKind CurrentKind => ActiveDrawTool switch
+    {
+        DrawTool.Line => StrokeProcessor.StrokeKind.Line,
+        DrawTool.Arrow => StrokeProcessor.StrokeKind.Arrow,
+        _ => StrokeProcessor.StrokeKind.Pencil,
+    };
+
+    private InkAnnotationDraft BuildInk(IReadOnlyList<IReadOnlyList<StrokePoint>> strokes) =>
+        new(strokes.Select(s => (IReadOnlyList<InkPoint>)
+                s.Select(p => new InkPoint(p.X, p.Y)).ToList()).ToList(),
+            DrawColorArgb, DrawWidthPt, "", Environment.UserName)
+        { PlacedRotation = _drawPageRotation };
+
+    private int _drawPageRotation;
+
+    /// <summary>Возврат свободного штриха вместо автоматически выпрямленного.</summary>
+    [RelayCommand]
+    private void RestoreFreeStroke()
+    {
+        if (_lastStraightened is not { } last) return;
+        CanRestoreFreeStroke = false;
+        _lastStraightened = null;
+        Document.Session.Undo();
+        Document.Session.Apply(new AddOverlayOperation(last.PageIndex, last.Free));
+        StatusText = Loc.Get("DrawFreeRestored");
+    }
+
+    private void UpdatePreview(PageViewModel page, IReadOnlyList<StrokePoint> points)
+    {
+        var collection = new PointCollection(points.Count);
+        foreach (var point in points)
+            collection.Add(new Point(point.X, point.Y));
+        // Стрелка в предпросмотре тоже с наконечником — что видно, то и ляжет.
+        if (ActiveDrawTool == DrawTool.Arrow && points.Count >= 2)
+        {
+            foreach (var barb in StrokeProcessor.ArrowHead(points[^2], points[^1], DrawWidthPt))
+            {
+                collection.Add(new Point(barb[0].X, barb[0].Y));
+                collection.Add(new Point(barb[^1].X, barb[^1].Y));
+            }
+        }
+        page.DrawPreview = collection;
     }
 
     // ----- Оглавление документа -----

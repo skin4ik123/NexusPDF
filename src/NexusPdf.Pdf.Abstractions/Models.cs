@@ -63,6 +63,22 @@ public sealed record ShapeAnnotationDraft(
     string Contents,
     string Author) : PageOverlay;
 
+/// <summary>Точка рукописного штриха в отображаемых пунктах (от левого верхнего угла на момент рисования).</summary>
+public readonly record struct InkPoint(double XPt, double YPt);
+
+/// <summary>
+/// Черновик рисунка от руки: карандаш, линия или стрелка. Хранится
+/// Ink-аннотацией PDF, поэтому нарисованное можно удалить и оно не портит
+/// содержимое страницы. Наконечник стрелки — отдельные штрихи в том же
+/// объекте: так стрелка выглядит одинаково в любом просмотрщике.
+/// </summary>
+public sealed record InkAnnotationDraft(
+    IReadOnlyList<IReadOnlyList<InkPoint>> Strokes,
+    uint StrokeArgb,
+    double WidthPt,
+    string Contents,
+    string Author) : PageOverlay;
+
 /// <summary>Найденное на странице растровое изображение: индекс объекта, его растр и рамка в отображаемых пунктах.</summary>
 public sealed record PdfImageObject(
     int ObjectIndex,

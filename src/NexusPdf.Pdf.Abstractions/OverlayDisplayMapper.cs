@@ -103,6 +103,22 @@ public static class OverlayDisplayMapper
                     HeightPt = Math.Abs(p2.Y - p1.Y),
                 }, 0);
             }
+            case InkAnnotationDraft ink:
+            {
+                // У рисунка нет рамки — переносится каждая точка штриха.
+                var strokes = new List<IReadOnlyList<InkPoint>>(ink.Strokes.Count);
+                foreach (var stroke in ink.Strokes)
+                {
+                    var moved = new List<InkPoint>(stroke.Count);
+                    foreach (var point in stroke)
+                    {
+                        var (x, y) = RemapPoint(point.XPt, point.YPt, delta, finalWidth, finalHeight);
+                        moved.Add(new InkPoint(x, y));
+                    }
+                    strokes.Add(moved);
+                }
+                return (ink with { Strokes = strokes }, 0);
+            }
             case OcrTextLayerOverlay ocr:
             {
                 // Переносится якорь запекания — левый нижний угол рамки слова
