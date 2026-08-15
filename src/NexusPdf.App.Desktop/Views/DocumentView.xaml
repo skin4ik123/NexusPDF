@@ -283,6 +283,35 @@
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
+                <!-- Рамка выбранного объекта и её ручки -->
+                <Canvas IsHitTestVisible="False"
+                        Visibility="{Binding HasObjectFrame, Converter={StaticResource BoolToVis}}">
+                  <Canvas.LayoutTransform>
+                    <ScaleTransform ScaleX="{Binding DisplayScale}" ScaleY="{Binding DisplayScale}"/>
+                  </Canvas.LayoutTransform>
+                  <Rectangle Canvas.Left="{Binding ObjectFrameXPt}" Canvas.Top="{Binding ObjectFrameYPt}"
+                             Width="{Binding ObjectFrameWPt}" Height="{Binding ObjectFrameHPt}"
+                             Stroke="{DynamicResource Accent}" StrokeThickness="1.5"
+                             StrokeDashArray="3 2" Fill="#0F2563EB"/>
+                  <ItemsControl ItemsSource="{Binding ObjectHandles}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemContainerStyle>
+                      <Style TargetType="ContentPresenter">
+                        <Setter Property="Canvas.Left" Value="{Binding X}"/>
+                        <Setter Property="Canvas.Top" Value="{Binding Y}"/>
+                      </Style>
+                    </ItemsControl.ItemContainerStyle>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Rectangle Width="{Binding Width}" Height="{Binding Height}"
+                                   Fill="{DynamicResource Accent}" Stroke="White" StrokeThickness="1"/>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </Canvas>
+
                 <!-- Живая рамка при растягивании аннотации -->
                 <Canvas IsHitTestVisible="False"
                         Visibility="{Binding HasDragRect, Converter={StaticResource BoolToVis}}">

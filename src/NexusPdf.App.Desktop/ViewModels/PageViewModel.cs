@@ -100,6 +100,31 @@ public sealed partial class PageViewModel : ObservableObject
     public double DragRectWPt => DragPreviewRect?.Width ?? 0;
     public double DragRectHPt => DragPreviewRect?.Height ?? 0;
 
+    // ----- Рамка выделенного объекта (в пунктах страницы) -----
+
+    /// <summary>
+    /// Рамка выбранного наложенного объекта. Рисуется поверх страницы вместе с
+    /// ручками: без видимой рамки «выделение» существует только в голове
+    /// программы.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasObjectFrame))]
+    [NotifyPropertyChangedFor(nameof(ObjectFrameXPt))]
+    [NotifyPropertyChangedFor(nameof(ObjectFrameYPt))]
+    [NotifyPropertyChangedFor(nameof(ObjectFrameWPt))]
+    [NotifyPropertyChangedFor(nameof(ObjectFrameHPt))]
+    private Rect? _objectFrame;
+
+    public bool HasObjectFrame => ObjectFrame.HasValue;
+    public double ObjectFrameXPt => ObjectFrame?.X ?? 0;
+    public double ObjectFrameYPt => ObjectFrame?.Y ?? 0;
+    public double ObjectFrameWPt => ObjectFrame?.Width ?? 0;
+    public double ObjectFrameHPt => ObjectFrame?.Height ?? 0;
+
+    /// <summary>Ручки рамки в пунктах страницы; пусто — объект не растягивается.</summary>
+    [ObservableProperty]
+    private IReadOnlyList<Rect> _objectHandles = Array.Empty<Rect>();
+
     // ----- Живой штрих во время рисования (в пунктах страницы) -----
 
     /// <summary>

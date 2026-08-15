@@ -23,6 +23,7 @@ public static class CommandIds
     public const string Copy = "edit.copy";
     public const string Paste = "edit.paste";
     public const string Duplicate = "edit.duplicate";
+    public const string DuplicateObject = "edit.duplicateObject";
     public const string Delete = "edit.delete";
     public const string SelectAllOnPage = "edit.selectAllOnPage";
     public const string ObjectProperties = "edit.objectProperties";

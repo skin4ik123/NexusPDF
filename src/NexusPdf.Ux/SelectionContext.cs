@@ -78,10 +78,17 @@ public sealed record SelectionContext
     /// <summary>Идёт длительная операция — опасные команды на это время запрещены.</summary>
     public bool IsBusy { get; init; }
 
+    /// <summary>
+    /// На странице выбран наложенный объект. Отдельно от <see cref="Kind"/>:
+    /// команда может прийти из палитры или горячей клавиши, где вида
+    /// выделения нет, а объект на странице выбран.
+    /// </summary>
+    public bool HasSelectedObject { get; init; }
+
     public bool HasMultipleSelection => SelectedCount > 1;
 
     /// <summary>Выделен хоть какой-то объект внутри страницы.</summary>
-    public bool HasObjectSelection => Kind is
+    public bool HasObjectSelection => HasSelectedObject || Kind is
         SelectionKind.TextObject or SelectionKind.Image or SelectionKind.Shape or
         SelectionKind.Annotation or SelectionKind.FormField or SelectionKind.Link or
         SelectionKind.Signature;
