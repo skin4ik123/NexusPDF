@@ -514,13 +514,14 @@ public partial class DocumentView : UserControl
         _scroller.ScrollChanged += (_, args) =>
         {
             if (_vm == null) return;
-            _vm.ViewportWidth = args.ViewportWidth;
-            _vm.ViewportHeight = args.ViewportHeight;
             _vm.UpdateCurrentPage(args.VerticalOffset, args.ViewportHeight);
             // Размер окна становится известен только здесь, поэтому первая
             // подгонка страницы по ширине делается в этот момент: открывать
             // документ в 100 %, когда лист шире окна, — плохая встреча.
             _vm.ApplyInitialFit(args.ViewportWidth);
+            // И дальше на каждое изменение ширины: открылась панель справа —
+            // документ обязан вписаться в остаток окна сам, а не уехать под неё.
+            _vm.ApplyViewport(args.ViewportWidth, args.ViewportHeight);
         };
     }
 
@@ -796,6 +797,39 @@ public partial class DocumentView : UserControl
         box.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
         e.Handled = true;
     }
+
+    // ----- Изменение ширины панелей -----
+
+    private double _resizeStartX;
+    private double _resizeStartWidth;
+
+    private void OnPanelResizeStart(
+        object sender, System.Windows.Controls.Primitives.DragStartedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Primitives.Thumb { Tag: string name }) return;
+        if ((Window.GetWindow(this) as MainWindow)?.ViewModel is not { } main) return;
+        _resizeStartX = Mouse.GetPosition(this).X;
+        _resizeStartWidth = main.PanelWidth(name);
+    }
+
+    /// <summary>
+    /// Тянем край панели. Отсчёт идёт от положения мыши в самом окне, а не от
+    /// сдвига ручки: ручка едет вместе с краем панели, и её собственный сдвиг
+    /// на следующем шаге считается уже от нового места — панель от этого
+    /// дёргается и ползёт не туда.
+    /// </summary>
+    private void OnPanelResize(object sender, System.Windows.Controls.Primitives.DragDeltaEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Primitives.Thumb { Tag: string name }) return;
+        if ((Window.GetWindow(this) as MainWindow)?.ViewModel is not { } main) return;
+        var offset = Mouse.GetPosition(this).X - _resizeStartX;
+        main.SetPanelWidth(name, _resizeStartWidth, offset);
+    }
+
+    /// <summary>Ширина записывается по окончании перетаскивания, а не на каждый пиксель.</summary>
+    private void OnPanelResizeDone(
+        object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e) =>
+        (Window.GetWindow(this) as MainWindow)?.ViewModel.SavePanelWidths();
 
     /// <summary>Элемент списка под курсором по его DataContext.</summary>
     private static T? FindItemAt<T>(object originalSource) where T : class

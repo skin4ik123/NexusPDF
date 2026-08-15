@@ -731,5 +731,8 @@
   "PanelOnlyPageOff": "Panels restored.",
   "PanelHide": "Hide the panel",
   "PanelTools": "Tools",
-  "MenuPrint": "Print"
+  "MenuPrint": "Print",
+  "PanelToolsReset": "Tool layout restored to defaults.",
+  "PanelToolsResetHint": "Restore the default tool layout",
+  "PanelToolsDragHint": "Tools can be dragged with the mouse — inside a section and between sections."
 }

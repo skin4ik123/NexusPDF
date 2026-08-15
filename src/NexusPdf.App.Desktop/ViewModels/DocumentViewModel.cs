@@ -82,13 +82,73 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     public double ViewportWidth { get; set; }
     public double ViewportHeight { get; set; }
 
-    [RelayCommand]
-    private void FitWidth() => FitWidth(ViewportWidth > 0 ? ViewportWidth : 900);
+    /// <summary>Как выбирается масштаб: сам по ширине, сам по странице или вручную.</summary>
+    public enum ZoomFit
+    {
+        /// <summary>Масштаб задал пользователь — программа его не трогает.</summary>
+        Manual,
+        Width,
+        Page,
+    }
+
+    /// <summary>
+    /// Режим подгонки. Нужен, чтобы масштаб пересчитывался при КАЖДОМ изменении
+    /// ширины просмотра: открылась панель справа — документ обязан вписаться в
+    /// остаток окна сам, а не уехать под панель.
+    /// </summary>
+    [ObservableProperty]
+    private ZoomFit _fitMode = ZoomFit.Width;
 
     [RelayCommand]
-    private void FitPage() => FitPage(
-        ViewportWidth > 0 ? ViewportWidth : 900,
-        ViewportHeight > 0 ? ViewportHeight : 700);
+    private void FitWidth()
+    {
+        FitMode = ZoomFit.Width;
+        ApplyFit();
+    }
+
+    [RelayCommand]
+    private void FitPage()
+    {
+        FitMode = ZoomFit.Page;
+        ApplyFit();
+    }
+
+    private double _lastFitWidth;
+    private double _lastFitHeight;
+
+    /// <summary>
+    /// Размер видимой области изменился. Пересчёт идёт только при заметном
+    /// изменении: появление полосы прокрутки меняет ширину на пару точек, и
+    /// без порога масштаб «дышал» бы туда-обратно бесконечно.
+    /// </summary>
+    public void ApplyViewport(double widthDiu, double heightDiu)
+    {
+        if (widthDiu > 50) ViewportWidth = widthDiu;
+        if (heightDiu > 50) ViewportHeight = heightDiu;
+
+        if (Math.Abs(ViewportWidth - _lastFitWidth) < 4 &&
+            Math.Abs(ViewportHeight - _lastFitHeight) < 4)
+            return;
+
+        ApplyFit();
+    }
+
+    private void ApplyFit()
+    {
+        if (ViewportWidth <= 50) return;
+        _lastFitWidth = ViewportWidth;
+        _lastFitHeight = ViewportHeight;
+
+        switch (FitMode)
+        {
+            case ZoomFit.Width:
+                FitWidth(ViewportWidth);
+                break;
+            case ZoomFit.Page:
+                FitPage(ViewportWidth, ViewportHeight > 0 ? ViewportHeight : 700);
+                break;
+        }
+    }
 
     [ObservableProperty]
     private string _statusText = Loc.Get("Ready");
@@ -155,7 +215,19 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         ClearHighlights();
     }
 
-    public void SetZoom(double zoom) => Zoom = Math.Clamp(zoom, 0.25, 4.0);
+    /// <summary>
+    /// Масштаб, заданный пользователем: колесо, щипок, кнопки. Подгонка после
+    /// этого выключается — иначе следующее же изменение ширины окна отняло бы
+    /// у пользователя его масштаб.
+    /// </summary>
+    public void SetZoom(double zoom)
+    {
+        FitMode = ZoomFit.Manual;
+        Zoom = Math.Clamp(zoom, 0.25, 4.0);
+    }
+
+    /// <summary>Масштаб от подгонки — режим не сбрасывается.</summary>
+    private void SetZoomFitted(double zoom) => Zoom = Math.Clamp(zoom, 0.25, 4.0);
 
     [RelayCommand]
     private void ZoomIn() => SetZoom(Zoom * 1.15);
@@ -177,13 +249,14 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     {
         if (_initialFitDone || viewportWidthDiu < 50) return;
         _initialFitDone = true;
-        FitWidth(viewportWidthDiu);
+        ViewportWidth = viewportWidthDiu;
+        ApplyFit();
     }
 
     public void FitWidth(double viewportWidthDiu)
     {
         var maxPageWidthPt = Pages.Count == 0 ? 612 : Pages.Max(p => p.SizePt.WidthPoints);
-        SetZoom((viewportWidthDiu - PageMarginDiu * 2) / (maxPageWidthPt * PtToDiu));
+        SetZoomFitted((viewportWidthDiu - PageMarginDiu * 2) / (maxPageWidthPt * PtToDiu));
     }
 
     public void FitPage(double viewportWidthDiu, double viewportHeightDiu)
@@ -192,7 +265,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         var page = Pages[Math.Clamp(CurrentPageNumber - 1, 0, Pages.Count - 1)];
         var byWidth = (viewportWidthDiu - PageMarginDiu * 2) / (page.SizePt.WidthPoints * PtToDiu);
         var byHeight = (viewportHeightDiu - PageMarginDiu * 2) / (page.SizePt.HeightPoints * PtToDiu);
-        SetZoom(Math.Min(byWidth, byHeight));
+        SetZoomFitted(Math.Min(byWidth, byHeight));
     }
 
     // ----- Позиция чтения -----

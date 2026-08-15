@@ -48,14 +48,15 @@
     <Grid Grid.Row="1" Visibility="{Binding IsOrganizeMode, Converter={StaticResource InvBoolToVisLocal}}">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="Auto"/>
-        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="*" MinWidth="320"/>
         <ColumnDefinition Width="Auto"/>
         <ColumnDefinition Width="Auto"/>
         <ColumnDefinition Width="Auto"/>
         <ColumnDefinition Width="Auto"/>
       </Grid.ColumnDefinitions>
 
-      <Border Grid.Column="0" Width="176" Background="{DynamicResource PanelBg}"
+      <Border Grid.Column="0" Background="{DynamicResource PanelBg}"
+              Width="{Binding DataContext.SidePanelWidth, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=176}"
               BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,1,0"
               Visibility="{Binding DataContext.ShowSidePanel,
                            RelativeSource={RelativeSource AncestorType=Window},
@@ -66,6 +67,8 @@
           <RowDefinition Height="Auto"/>
           <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
+          <Thumb Grid.RowSpan="3" Panel.ZIndex="10" Style="{StaticResource PanelResizer}" Tag="SidePanel" HorizontalAlignment="Right"
+                 DragStarted="OnPanelResizeStart" DragDelta="OnPanelResize" DragCompleted="OnPanelResizeDone"/>
 
         <!-- Кнопка «заехать»: панель уходит в полоску значков у края окна -->
         <Button Grid.Row="0" Style="{StaticResource ToolButton}" HorizontalAlignment="Right"
@@ -360,7 +363,8 @@
       </ListBox>
 
       <!-- Панель комментариев -->
-      <Border Grid.Column="2" Width="270" Background="{DynamicResource PanelBg}"
+      <Border Grid.Column="2" Background="{DynamicResource PanelBg}"
+              Width="{Binding DataContext.CommentsPanelWidth, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=270}"
               BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1,0,0,0"
               Visibility="{Binding IsCommentsVisible, Converter={StaticResource BoolToVis}}">
         <Grid>
@@ -368,6 +372,9 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
           </Grid.RowDefinitions>
+          <Thumb Grid.RowSpan="2" Panel.ZIndex="10" Style="{StaticResource PanelResizer}"
+                 Tag="Comments" HorizontalAlignment="Left"
+                 DragStarted="OnPanelResizeStart" DragDelta="OnPanelResize" DragCompleted="OnPanelResizeDone"/>
           <Grid Grid.Row="0" Margin="12,8">
             <TextBlock Text="{l:Loc CommentsPanel}" FontWeight="SemiBold"
                        Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"/>
@@ -429,7 +436,8 @@
       <!-- Свойства выбранного объекта: появляются вместе с выделением и
            исчезают вместе с ним — постоянная пустая панель занимала бы место
            и ничего не сообщала -->
-      <Border Grid.Column="4" Width="250" Background="{DynamicResource PanelBg}"
+      <Border Grid.Column="4" Background="{DynamicResource PanelBg}"
+              Width="{Binding DataContext.PropertiesPanelWidth, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=250}"
               BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1,0,0,0">
         <Border.Visibility>
           <MultiBinding Converter="{StaticResource AllTrue}">
@@ -439,6 +447,10 @@
                      FallbackValue="True"/>
           </MultiBinding>
         </Border.Visibility>
+        <Grid>
+          <Thumb Panel.ZIndex="10" Style="{StaticResource PanelResizer}"
+                 Tag="Properties" HorizontalAlignment="Left"
+                 DragStarted="OnPanelResizeStart" DragDelta="OnPanelResize" DragCompleted="OnPanelResizeDone"/>
         <StackPanel Margin="12,10">
           <Grid>
             <TextBlock Text="{Binding SelectedObjectTitle}" FontWeight="SemiBold" FontSize="13"
@@ -523,11 +535,13 @@
                   HorizontalContentAlignment="Left" Command="{Binding DeleteObjectCommand}"
                   Content="{l:Loc UxDeleteObject}" Foreground="#DC2626"/>
         </StackPanel>
+        </Grid>
       </Border>
 
       <!-- Панель инструментов: всё, что умеет программа, видно списком, а не
            спрятано в меню. Собирается из того же реестра команд. -->
-      <Border Grid.Column="3" Width="270" Background="{DynamicResource PanelBg}"
+      <Border Grid.Column="3" Background="{DynamicResource PanelBg}"
+              Width="{Binding DataContext.ToolsPanelWidth, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=270}"
               BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1,0,0,0"
               Visibility="{Binding DataContext.ShowToolsPanel,
                            RelativeSource={RelativeSource AncestorType=Window},
@@ -537,16 +551,25 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
           </Grid.RowDefinitions>
+          <Thumb Grid.RowSpan="2" Panel.ZIndex="10" Style="{StaticResource PanelResizer}"
+                 Tag="Tools" HorizontalAlignment="Left"
+                 DragStarted="OnPanelResizeStart" DragDelta="OnPanelResize" DragCompleted="OnPanelResizeDone"/>
           <Grid Grid.Row="0" Margin="12,8,4,6">
             <TextBlock Text="{l:Loc PanelTools}" FontWeight="SemiBold"
                        Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"/>
-            <Button Style="{StaticResource ToolButton}" HorizontalAlignment="Right"
-                    ToolTip="{l:Loc PanelHide}"
-                    Command="{Binding DataContext.HidePanelCommand,
-                              RelativeSource={RelativeSource AncestorType=Window}}"
-                    CommandParameter="Tools">
-              <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE76C;" FontSize="11"/>
-            </Button>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+              <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc PanelToolsResetHint}"
+                      Command="{Binding DataContext.ResetToolsLayoutCommand,
+                                RelativeSource={RelativeSource AncestorType=Window}}">
+                <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE72C;" FontSize="11"/>
+              </Button>
+              <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc PanelHide}"
+                      Command="{Binding DataContext.HidePanelCommand,
+                                RelativeSource={RelativeSource AncestorType=Window}}"
+                      CommandParameter="Tools">
+                <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE76C;" FontSize="11"/>
+              </Button>
+            </StackPanel>
           </Grid>
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,4,8">
             <ItemsControl ItemsSource="{Binding DataContext.Tools.Groups,
@@ -558,7 +581,11 @@
                       <TextBlock Text="{Binding Title}" FontSize="11" FontWeight="SemiBold"
                                  Foreground="{DynamicResource TextSecondary}"/>
                     </Expander.Header>
-                    <ItemsControl ItemsSource="{Binding Items}" Margin="0,2,0,6">
+                    <ItemsControl ItemsSource="{Binding Items}" Margin="0,2,0,6"
+                                  dd:DragDrop.IsDragSource="True"
+                                  dd:DragDrop.IsDropTarget="True"
+                                  dd:DragDrop.DropHandler="{Binding DataContext.Tools,
+                                                            RelativeSource={RelativeSource AncestorType=Window}}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate>
                           <Button Style="{StaticResource ToolButton}" Command="{Binding Invoke}"
