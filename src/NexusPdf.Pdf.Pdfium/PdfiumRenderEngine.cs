@@ -435,6 +435,17 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
             () => PdfiumImageRecompressor.RecompressCore(
                 sourcePath, password, targetPath, targetDpi, quality, encode, ct), ct);
 
+    public Task<ScanEnhanceStats> EnhanceScansAsync(
+        string sourcePath, string? password, string targetPath,
+        ScanEnhanceOptions options, IProgress<int>? progress, CancellationToken ct) =>
+        _thread.InvokeAsync(
+            () => PdfiumScanEnhancer.EnhanceCore(sourcePath, password, targetPath, options, progress, ct), ct);
+
+    public Task<IReadOnlyList<PageSkew>> MeasureSkewAsync(
+        string sourcePath, string? password, IReadOnlyList<int>? pages, CancellationToken ct) =>
+        _thread.InvokeAsync(
+            () => PdfiumScanEnhancer.MeasureSkewCore(sourcePath, password, pages, ct), ct);
+
     private static void CreateImageDocumentCore(IReadOnlyList<ImagePageSpec> pages, string targetPath)
     {
         if (pages.Count == 0)

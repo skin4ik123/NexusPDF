@@ -781,6 +781,72 @@ public sealed partial class MainViewModel : ObservableObject
             ? (bytes / 1024.0 / 1024.0).ToString("0.#") + " MB"
             : (bytes / 1024.0).ToString("0") + " KB";
 
+    /// <summary>
+    /// Улучшение сканов: выравнивание наклона и чистка. Отдельная команда, а не
+    /// часть сжатия, — это разные задачи, и делать их «заодно» значит менять
+    /// документ там, где пользователь просил только уменьшить вес.
+    /// </summary>
+    [RelayCommand]
+    private async Task EnhanceScans()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+
+        // Предпросмотр строится на ТЕКУЩЕЙ странице: наклон у разных страниц
+        // разный, и показывать чужую было бы обманом.
+        ScanPreviewPage? preview = null;
+        try
+        {
+            var index = Math.Clamp(doc.CurrentPageNumber - 1, 0, Math.Max(0, doc.PageCount - 1));
+            var size = doc.Document.GetLogicalPageSize(index);
+            var scale = Math.Min(900.0 / Math.Max(1, size.WidthPoints), 1200.0 / Math.Max(1, size.HeightPoints));
+            var width = Math.Max(64, (int)(size.WidthPoints * scale));
+            var height = Math.Max(64, (int)(size.HeightPoints * scale));
+            var image = await doc.Document.RenderLogicalPageAsync(index, width, height, CancellationToken.None);
+            preview = new ScanPreviewPage(image.Bgra, image.PixelWidth, image.PixelHeight, index + 1);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Не удалось отрисовать страницу для предпросмотра улучшения сканов");
+        }
+
+        var options = ScanEnhanceDialog.Show(OwnerWindow, preview, doc.PageCount);
+        if (options == null) return;
+
+        var dialog = new SaveFileDialog
+        {
+            Filter = Loc.Get("PdfFilter"),
+            FileName = Path.GetFileNameWithoutExtension(doc.Title) + "-improved.pdf",
+            DefaultExt = ".pdf",
+        };
+        if (dialog.ShowDialog(OwnerWindow) != true) return;
+        if (RejectIfTargetOpenElsewhere(doc, dialog.FileName)) return;
+
+        doc.IsBusy = true;
+        doc.StatusText = Loc.Get("EnhanceStatus");
+        try
+        {
+            var stats = await _services.Tools.EnhanceScansCopyAsync(
+                doc.Document, dialog.FileName, options, null, CancellationToken.None);
+            doc.StatusText = stats.PagesStraightened > 0 || stats.SpecklesRemoved > 0
+                ? Loc.F("EnhanceDone", stats.PagesProcessed, stats.PagesStraightened,
+                    stats.MaxAngleDegrees.ToString("0.0"), stats.ImagesCleaned, stats.SpecklesRemoved)
+                : Loc.F("EnhanceNothingFound", stats.PagesProcessed);
+            Log.Information("Улучшение сканов: страниц {Pages}, выровнено {Fixed}, пятен {Speckles}",
+                stats.PagesProcessed, stats.PagesStraightened, stats.SpecklesRemoved);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка улучшения сканов");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"),
+                Loc.F("ErrorSaveFile", Path.GetFileName(dialog.FileName)), ex.ToString());
+            doc.StatusText = Loc.Get("Ready");
+        }
+        finally
+        {
+            doc.IsBusy = false;
+        }
+    }
+
     [RelayCommand]
     private async Task CompressImages()
     {

@@ -290,6 +290,7 @@ public sealed class UxCommandHub
 
         // Преобразование
         [CommandIds.CompressPages] = _ => _main.CompressImagesCommand.Execute(null),
+        [CommandIds.EnhanceScans] = _ => _main.EnhanceScansCommand.Execute(null),
         [CommandIds.OptimizeCopy] = _ => _main.OptimizeCopyCommand.Execute(null),
         [CommandIds.ExportImages] = _ => _main.ExportImagesCommand.Execute(null),
         [CommandIds.ExtractText] = _ => _main.ExtractTextCommand.Execute(null),

@@ -71,6 +71,19 @@ public interface IPdfRenderEngine : IAsyncDisposable
     Task<ImageRecompressStats> RecompressImagesAsync(
         string sourcePath, string? password, string targetPath, double targetDpi,
         int quality, EncodeImage encode, CancellationToken ct);
+
+    /// <summary>
+    /// Копия файла с выровненными и вычищенными сканами. Наклон исправляется
+    /// поворотом содержимого страницы, поэтому текстовый слой распознавания и
+    /// качество не теряются.
+    /// </summary>
+    Task<ScanEnhanceStats> EnhanceScansAsync(
+        string sourcePath, string? password, string targetPath,
+        ScanEnhanceOptions options, IProgress<int>? progress, CancellationToken ct);
+
+    /// <summary>Найденный наклон страниц БЕЗ изменения файла — для предпросмотра.</summary>
+    Task<IReadOnlyList<PageSkew>> MeasureSkewAsync(
+        string sourcePath, string? password, IReadOnlyList<int>? pages, CancellationToken ct);
 }
 
 public interface IPdfDocumentHandle : IAsyncDisposable
