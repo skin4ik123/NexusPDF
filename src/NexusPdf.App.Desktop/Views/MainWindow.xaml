@@ -502,9 +502,11 @@
       </StackPanel>
     </Border>
 
-    <TabControl Grid.Row="2" Grid.Column="1" ItemsSource="{Binding Documents}" SelectedItem="{Binding ActiveDocument}"
+    <TabControl x:Name="DocTabs" Grid.Row="2" Grid.Column="1"
+                ItemsSource="{Binding Documents}" SelectedItem="{Binding ActiveDocument}"
                 Visibility="{Binding HasDocuments, Converter={StaticResource BoolToVis}}"
                 Background="Transparent" BorderThickness="0" Padding="0"
+                PreviewMouseRightButtonDown="OnTabRightClick"
                 ItemContainerStyle="{StaticResource DocTabItem}">
       <TabControl.ItemTemplate>
         <DataTemplate DataType="{x:Type vm:DocumentViewModel}">

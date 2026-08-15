@@ -468,6 +468,124 @@ public partial class DocumentView : UserControl
         }
     }
 
+    // ----- Контекстные меню -----
+
+    /// <summary>
+    /// Меню собирается из реестра команд, поэтому названия, значки и
+    /// доступность совпадают с панелями. Окно ищется вверх по дереву: вкладку
+    /// можно открепить в отдельное окно, и там своя модель.
+    /// </summary>
+    private Services.Ux.UxCommandHub? Hub =>
+        (Window.GetWindow(this) as MainWindow)?.ViewModel.Ux;
+
+    private void OnPagesRightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (_vm == null || Hub is not { } hub) return;
+        var hit = FindPageAt(e.OriginalSource);
+        if (hit == null) return;
+        var (page, element) = hit.Value;
+        var position = e.GetPosition(element);
+
+        // Правая кнопка НЕ снимает выделение текста: иначе к моменту показа
+        // меню размечать было бы уже нечего.
+        var kind = NexusPdf.Ux.SelectionKind.Nothing;
+        NexusPdf.Pdf.Abstractions.PdfPageLink? link = null;
+
+        if (_vm.LinkAt(page, position.X, position.Y) is { } hitLink)
+        {
+            kind = NexusPdf.Ux.SelectionKind.Link;
+            link = hitLink;
+        }
+        else if (_vm.HasSelection && ReferenceEquals(_vm.SelectionPage, page) &&
+                 // Рамка строки на мелком масштабе высотой всего несколько
+                 // точек: требовать попадания в неё пиксель в пиксель — значит
+                 // отдавать пользователю меню страницы вместо меню выделения.
+                 page.SelectionRects.Any(r => Rect.Inflate(r, 6, 4).Contains(position)))
+        {
+            kind = NexusPdf.Ux.SelectionKind.Text;
+        }
+
+        var target = new Services.Ux.UxTarget
+        {
+            Context = hub.Snapshot(kind, new[] { page }),
+            Document = _vm,
+            Pages = new[] { page },
+            Link = link,
+        };
+        if (UxContextMenu.Show(hub, target, PagesList))
+            e.Handled = true;
+    }
+
+    private void OnThumbRightClick(object sender, MouseButtonEventArgs e) =>
+        ShowPageMenu(ThumbList, e);
+
+    private void OnOrganizeRightClick(object sender, MouseButtonEventArgs e) =>
+        ShowPageMenu(OrganizeList, e);
+
+    /// <summary>
+    /// Меню страниц для списка миниатюр. Щелчок по странице вне выделения
+    /// делает её единственной выбранной — иначе команда молча применилась бы
+    /// не к той странице, по которой щёлкнули.
+    /// </summary>
+    private void ShowPageMenu(ListBox list, MouseButtonEventArgs e)
+    {
+        if (_vm == null || Hub is not { } hub) return;
+        if (FindItemAt<PageViewModel>(e.OriginalSource) is not { } page) return;
+
+        var selected = list.SelectedItems.OfType<PageViewModel>().ToList();
+        if (!selected.Contains(page))
+        {
+            // У панели миниатюр выделение одиночное, и трогать там
+            // SelectedItems запрещено самим WPF — отсюда и разные ветки.
+            if (list.SelectionMode == SelectionMode.Single)
+            {
+                list.SelectedItem = page;
+            }
+            else
+            {
+                list.SelectedItems.Clear();
+                list.SelectedItems.Add(page);
+            }
+            selected = new List<PageViewModel> { page };
+        }
+
+        var target = new Services.Ux.UxTarget
+        {
+            Context = hub.Snapshot(NexusPdf.Ux.SelectionKind.Page, selected),
+            Document = _vm,
+            Pages = selected,
+        };
+        if (UxContextMenu.Show(hub, target, list))
+            e.Handled = true;
+    }
+
+    private void OnBookmarkRightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (_vm == null || Hub is not { } hub) return;
+        if (FindItemAt<BookmarkViewModel>(e.OriginalSource) is not { } bookmark) return;
+
+        var target = new Services.Ux.UxTarget
+        {
+            Context = hub.Snapshot(NexusPdf.Ux.SelectionKind.Bookmark),
+            Document = _vm,
+            Bookmark = bookmark,
+        };
+        if (sender is FrameworkElement element && UxContextMenu.Show(hub, target, element))
+            e.Handled = true;
+    }
+
+    /// <summary>Элемент списка под курсором по его DataContext.</summary>
+    private static T? FindItemAt<T>(object originalSource) where T : class
+    {
+        if (originalSource is not DependencyObject source) return null;
+        for (DependencyObject? node = source; node != null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is FrameworkElement { DataContext: T item })
+                return item;
+        }
+        return null;
+    }
+
     private void OnFindBoxKeyDown(object sender, KeyEventArgs e)
     {
         if (_vm == null) return;

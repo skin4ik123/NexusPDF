@@ -135,6 +135,12 @@
             <RadioButton GroupName="Scope" Content="{l:Loc PrintCurrent}" Margin="0,4,0,0"
                          Foreground="{DynamicResource TextBrush}"
                          IsChecked="{Binding Scope, Converter={StaticResource EnumToBool}, ConverterParameter=CurrentPage}"/>
+            <!-- Показывается только когда печать пришла из выбора страниц:
+                 иначе это заведомо пустой вариант -->
+            <RadioButton GroupName="Scope" Content="{Binding ExplicitSelectionCaption}" Margin="0,4,0,0"
+                         Foreground="{DynamicResource TextBrush}"
+                         Visibility="{Binding HasExplicitSelection, Converter={StaticResource BoolToVis}}"
+                         IsChecked="{Binding Scope, Converter={StaticResource EnumToBool}, ConverterParameter=Selected}"/>
             <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
               <RadioButton GroupName="Scope" Content="{l:Loc PrintRange}" VerticalAlignment="Center"
                            Foreground="{DynamicResource TextBrush}"

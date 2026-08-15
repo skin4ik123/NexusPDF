@@ -21,18 +21,25 @@ public partial class PrintCenterDialog : Window
     private readonly DocumentViewModel _document;
     private readonly AppServices _services;
 
-    private PrintCenterDialog(DocumentViewModel document, AppServices services)
+    private PrintCenterDialog(
+        DocumentViewModel document, AppServices services, IReadOnlyList<int>? preselectedPages)
     {
         InitializeComponent();
         _document = document;
         _services = services;
-        _model = new PrintCenterViewModel(document, services);
+        _model = new PrintCenterViewModel(document, services, preselectedPages);
         DataContext = _model;
     }
 
-    public static void Run(Window? owner, DocumentViewModel document, AppServices services)
+    /// <param name="preselectedPages">
+    /// Логические номера страниц (с нуля), выбранные до открытия окна: печать
+    /// из контекстного меню миниатюр сразу показывает именно их.
+    /// </param>
+    public static void Run(
+        Window? owner, DocumentViewModel document, AppServices services,
+        IReadOnlyList<int>? preselectedPages = null)
     {
-        var dialog = new PrintCenterDialog(document, services);
+        var dialog = new PrintCenterDialog(document, services, preselectedPages);
         if (owner is { IsLoaded: true })
             dialog.Owner = owner;
         dialog.ShowDialog();

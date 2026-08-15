@@ -301,6 +301,32 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     public bool HasSignatures => Signatures.Count > 0;
 
+    // ----- Разрешения документа -----
+
+    /// <summary>
+    /// Разрешена ли печать флагами документа. Программа их СОБЛЮДАЕТ, поэтому
+    /// команды печати обязаны выключаться заранее и объяснять причину, а не
+    /// отказывать в последний момент уже открытым диалогом.
+    /// </summary>
+    [ObservableProperty]
+    private bool _allowsPrinting = true;
+
+    public async Task LoadPermissionsAsync()
+    {
+        try
+        {
+            var flags = await Document.PrimaryHandle.GetPermissionsAsync(CancellationToken.None);
+            AllowsPrinting = NexusPdf.Printing.PrintPermissions.FromFlags(flags).AllowPrint;
+        }
+        catch (Exception ex)
+        {
+            // Не прочитались флаги — считаем разрешённым: запрещать печать
+            // из-за собственной ошибки чтения нельзя.
+            Serilog.Log.Warning(ex, "Не удалось прочитать разрешения документа");
+            AllowsPrinting = true;
+        }
+    }
+
     // Зелёный статус — только полный порядок, ВКЛЮЧАЯ доверие к цепочке:
     // криптографически верная подпись самодельного сертификата с громким
     // именем не должна выглядеть доверенной (поведение как у Adobe).
@@ -534,6 +560,9 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             var rects = await handle.GetTextRectsAsync(
                 pageIndex, start, count, CancellationToken.None);
             page.SelectionRects = rects.Select(r => TransformRectToDiu(r, page)).ToList();
+            // Те же строки в пунктах страницы: по ним ставится разметка текста
+            // и вымарывание, поэтому они не должны зависеть от масштаба показа.
+            _selectionRectsPt = rects.Select(r => TransformRectToDisplayPt(r, page)).ToList();
 
             var text = await handle.GetPageTextAsync(pageIndex, CancellationToken.None);
             SelectedText = start < text.Length
@@ -553,7 +582,87 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         _selectionPage = null;
         _selectionAnchorChar = -1;
         _selectionEndChar = -1;
+        _selectionRectsPt = Array.Empty<Rect>();
         SelectedText = "";
+    }
+
+    /// <summary>Строки текущего выделения в отображаемых пунктах страницы.</summary>
+    private IReadOnlyList<Rect> _selectionRectsPt = Array.Empty<Rect>();
+
+    /// <summary>Страница, на которой сейчас выделен текст (выделение не бывает сквозным).</summary>
+    public PageViewModel? SelectionPage => _selectionPage;
+
+    /// <summary>Цвета разметки: маркер жёлтый полупрозрачный, подчёркивание синее, зачёркивание красное.</summary>
+    private static uint MarkupColor(NexusPdf.Pdf.Abstractions.TextMarkupKind kind) => kind switch
+    {
+        NexusPdf.Pdf.Abstractions.TextMarkupKind.Highlight => 0x66FDE047,
+        NexusPdf.Pdf.Abstractions.TextMarkupKind.Underline => 0xFF2563EB,
+        _ => 0xFFDC2626,
+    };
+
+    /// <summary>
+    /// Разметка ВЫДЕЛЕННОГО текста: маркер, подчёркивание, зачёркивание.
+    /// Ставится ровно по строкам выделения, поэтому не нужно попадать рамкой в
+    /// текст мышью, и видно её сразу — до сохранения.
+    /// </summary>
+    public bool MarkupSelection(NexusPdf.Pdf.Abstractions.TextMarkupKind kind)
+    {
+        if (IsBusy || _selectionPage is not { } page || _selectionRectsPt.Count == 0)
+            return false;
+
+        var rects = _selectionRectsPt
+            .Where(r => r.Width > 0.1 && r.Height > 0.1)
+            .Select(r => new NexusPdf.Pdf.Abstractions.TextMarkupRect(r.X, r.Y, r.Width, r.Height))
+            .ToList();
+        if (rects.Count == 0)
+            return false;
+
+        Document.Session.Apply(new AddOverlayOperation(page.LogicalIndex,
+            new NexusPdf.Pdf.Abstractions.TextMarkupDraft(
+                kind, rects, MarkupColor(kind), Contents: "", Author: Environment.UserName)));
+        ClearTextSelection();
+        StatusText = Loc.Get("UxMarkupDone");
+        return true;
+    }
+
+    /// <summary>
+    /// Вымарывание ВЫДЕЛЕННОГО текста: по строке на каждую строку выделения.
+    /// Содержимое под ними уничтожается при сохранении — это не чёрная плашка
+    /// поверх текста.
+    /// </summary>
+    public bool RedactSelection()
+    {
+        if (IsBusy || _selectionPage is not { } page || _selectionRectsPt.Count == 0)
+            return false;
+
+        var applied = 0;
+        foreach (var rect in _selectionRectsPt)
+        {
+            if (rect.Width <= 0.1 || rect.Height <= 0.1) continue;
+            Document.Session.Apply(new AddOverlayOperation(page.LogicalIndex,
+                new NexusPdf.Pdf.Abstractions.RedactionDraft(rect.X, rect.Y, rect.Width, rect.Height)));
+            applied++;
+        }
+        if (applied == 0)
+            return false;
+
+        ClearTextSelection();
+        StatusText = Loc.Get("RedactHint");
+        return true;
+    }
+
+    /// <summary>Найти в документе то, что сейчас выделено (без ручного переноса в поле поиска).</summary>
+    public async Task FindSelectedTextAsync()
+    {
+        var query = SelectedText.Trim();
+        if (query.Length == 0) return;
+        // Длинный кусок в поле поиска бесполезен: ищется первая строка.
+        var firstLine = query.Split('\n', '\r').FirstOrDefault(l => l.Trim().Length > 0)?.Trim() ?? query;
+        IsFindVisible = true;
+        // Присваивание запускает поиск по мере ввода с паузой; здесь ждать
+        // паузу незачем — запрос уже готов целиком.
+        FindQuery = firstLine.Length > 120 ? firstLine[..120] : firstLine;
+        await RunSearchAsync();
     }
 
     [RelayCommand]
@@ -1039,6 +1148,20 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     /// </summary>
     private Rect TransformRectToDiu(NexusPdf.Pdf.Abstractions.PdfTextRect r, PageViewModel page)
     {
+        var pt = TransformRectToDisplayPt(r, page);
+        var scale = PtToDiu * Zoom;
+        // Минимум 2 DIU: строка высотой в волосок иначе не видна на экране.
+        return new Rect(pt.X * scale, pt.Y * scale,
+            Math.Max(2, pt.Width * scale), Math.Max(2, pt.Height * scale));
+    }
+
+    /// <summary>
+    /// Тот же перевод, но в ОТОБРАЖАЕМЫХ ПУНКТАХ страницы — системе координат
+    /// оверлеев. Масштаб показа сюда не входит: разметка и вымарывание не
+    /// должны зависеть от того, насколько документ увеличен на экране.
+    /// </summary>
+    private Rect TransformRectToDisplayPt(NexusPdf.Pdf.Abstractions.PdfTextRect r, PageViewModel page)
+    {
         var source = Document.Handles[page.PageRef.SourceId].Info.Pages[page.PageRef.SourcePageIndex];
         var w = source.WidthPoints;
         var h = source.HeightPoints;
@@ -1059,12 +1182,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             _ => c,
         }).ToArray();
 
-        var scale = PtToDiu * Zoom;
-        var x1 = Math.Min(transformed[0].X, transformed[1].X) * scale;
-        var y1 = Math.Min(transformed[0].Y, transformed[1].Y) * scale;
-        var x2 = Math.Max(transformed[0].X, transformed[1].X) * scale;
-        var y2 = Math.Max(transformed[0].Y, transformed[1].Y) * scale;
-        return new Rect(x1, y1, Math.Max(2, x2 - x1), Math.Max(2, y2 - y1));
+        var x1 = Math.Min(transformed[0].X, transformed[1].X);
+        var y1 = Math.Min(transformed[0].Y, transformed[1].Y);
+        var x2 = Math.Max(transformed[0].X, transformed[1].X);
+        var y2 = Math.Max(transformed[0].Y, transformed[1].Y);
+        return new Rect(x1, y1, x2 - x1, y2 - y1);
     }
 
     private void ClearHighlights()

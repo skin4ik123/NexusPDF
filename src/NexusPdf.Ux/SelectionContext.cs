@@ -31,6 +31,9 @@ public enum SelectionKind
     Layer,
     Attachment,
     SearchResult,
+
+    /// <summary>Вкладка открытого документа.</summary>
+    Tab,
 }
 
 /// <summary>

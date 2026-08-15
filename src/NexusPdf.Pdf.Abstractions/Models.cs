@@ -149,6 +149,38 @@ public sealed record RedactionDraft(
     double WidthPt,
     double HeightPt) : PageOverlay;
 
+/// <summary>Вид разметки выделенного текста.</summary>
+public enum TextMarkupKind
+{
+    /// <summary>Маркер: полупрозрачная заливка поверх строк.</summary>
+    Highlight,
+
+    /// <summary>Подчёркивание под базовой линией.</summary>
+    Underline,
+
+    /// <summary>Зачёркивание по середине строк.</summary>
+    StrikeOut,
+}
+
+/// <summary>Одна строка выделенного текста: рамка в отображаемых пунктах.</summary>
+public sealed record TextMarkupRect(double XPt, double YPt, double WidthPt, double HeightPt);
+
+/// <summary>
+/// Разметка ВЫДЕЛЕННОГО текста: маркер, подчёркивание, зачёркивание.
+///
+/// Хранится настоящей текстовой аннотацией PDF (Highlight/Underline/StrikeOut)
+/// с quadpoints по строкам выделения, а не прямоугольником «на глаз»: такую
+/// разметку любая программа показывает как разметку текста, её видно в списке
+/// комментариев и она снимается без следа. Рамки идут по строкам, поэтому
+/// выделение из нескольких строк не превращается в один большой блок.
+/// </summary>
+public sealed record TextMarkupDraft(
+    TextMarkupKind Kind,
+    IReadOnlyList<TextMarkupRect> Rects,
+    uint ColorArgb,
+    string Contents,
+    string Author) : PageOverlay;
+
 /// <summary>Распознанное OCR слово: рамка в отображаемых пунктах (от левого верхнего угла на момент распознавания).</summary>
 public sealed record OcrWordBox(
     string Text,

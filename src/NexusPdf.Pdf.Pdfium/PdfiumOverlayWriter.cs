@@ -126,6 +126,10 @@ internal static class PdfiumOverlayWriter
                     ApplyShape(page, shape,
                         rotation, left, bottom, contentWidth, contentHeight);
                     break;
+                case TextMarkupDraft markup:
+                    ApplyTextMarkup(page, markup,
+                        rotation, left, bottom, contentWidth, contentHeight);
+                    break;
                 case InkAnnotationDraft ink:
                     ApplyInk(page, ink,
                         rotation, left, bottom, contentWidth, contentHeight);
@@ -239,6 +243,93 @@ internal static class PdfiumOverlayWriter
                 SetAnnotString(annot, "Contents", shape.Contents);
             if (shape.Author.Length > 0)
                 SetAnnotString(annot, "T", shape.Author);
+        }
+        finally
+        {
+            fpdf_annot.FPDFPageCloseAnnot(annot);
+        }
+    }
+
+    // Подтипы разметки текста (PDF 1.7, таблица 8.20)
+    private const int AnnotHighlight = 9;
+    private const int AnnotUnderline = 10;
+    private const int AnnotStrikeOut = 12;
+
+    /// <summary>
+    /// Разметка выделенного текста настоящей аннотацией Highlight/Underline/
+    /// StrikeOut. Строки идут quadpoints'ами, поэтому многострочное выделение
+    /// размечается по строкам, а не одним блоком через весь абзац, и любая
+    /// программа показывает это как разметку текста, а не как фигуру поверх.
+    /// </summary>
+    private static void ApplyTextMarkup(
+        FpdfPageT page, TextMarkupDraft markup,
+        int rotation, double offsetX, double offsetY, double contentWidth, double contentHeight)
+    {
+        var rects = markup.Rects.Where(r => r.WidthPt > 0 && r.HeightPt > 0).ToList();
+        if (rects.Count == 0)
+            return;
+
+        var subtype = markup.Kind switch
+        {
+            TextMarkupKind.Highlight => AnnotHighlight,
+            TextMarkupKind.Underline => AnnotUnderline,
+            TextMarkupKind.StrikeOut => AnnotStrikeOut,
+            _ => throw new PdfEngineException($"Неизвестный вид разметки текста: {markup.Kind}."),
+        };
+
+        var annot = fpdf_annot.FPDFPageCreateAnnot(page, subtype);
+        if (annot == null || annot.__Instance == IntPtr.Zero)
+            throw new PdfEngineException("Не удалось создать разметку текста.");
+        try
+        {
+            var alpha = (byte)(markup.ColorArgb >> 24);
+            fpdf_annot.FPDFAnnotSetColor(annot, (FPDFANNOT_COLORTYPE)ColorTypeStroke,
+                (byte)(markup.ColorArgb >> 16), (byte)(markup.ColorArgb >> 8), (byte)markup.ColorArgb,
+                alpha == 0 ? (byte)0xFF : alpha);
+
+            // Общая рамка ставится до quadpoints: pdfium расширяет её сам, но
+            // аннотация без /Rect не считается корректной ни одним читателем.
+            double minLeft = double.MaxValue, minBottom = double.MaxValue;
+            double maxRight = double.MinValue, maxTop = double.MinValue;
+            foreach (var rect in rects)
+            {
+                var box = ToContentRect(rect.XPt, rect.YPt, rect.WidthPt, rect.HeightPt,
+                    rotation, offsetX, offsetY, contentWidth, contentHeight);
+                minLeft = Math.Min(minLeft, box.Left);
+                minBottom = Math.Min(minBottom, box.Bottom);
+                maxRight = Math.Max(maxRight, box.Right);
+                maxTop = Math.Max(maxTop, box.Top);
+            }
+            fpdf_annot.FPDFAnnotSetRect(annot, new FS_RECTF_
+            {
+                Left = (float)minLeft,
+                Bottom = (float)minBottom,
+                Right = (float)maxRight,
+                Top = (float)maxTop,
+            });
+
+            foreach (var rect in rects)
+            {
+                var box = ToContentRect(rect.XPt, rect.YPt, rect.WidthPt, rect.HeightPt,
+                    rotation, offsetX, offsetY, contentWidth, contentHeight);
+                // Порядок точек в PDF — «зигзагом»: верх-лево, верх-право,
+                // низ-лево, низ-право. Перепутать его — получить пустую или
+                // вывернутую разметку в других программах.
+                var quad = new FS_QUADPOINTSF
+                {
+                    X1 = box.Left, Y1 = box.Top,
+                    X2 = box.Right, Y2 = box.Top,
+                    X3 = box.Left, Y3 = box.Bottom,
+                    X4 = box.Right, Y4 = box.Bottom,
+                };
+                if (fpdf_annot.FPDFAnnotAppendAttachmentPoints(annot, quad) == 0)
+                    throw new PdfEngineException("Не удалось задать область разметки текста.");
+            }
+
+            if (markup.Contents.Length > 0)
+                SetAnnotString(annot, "Contents", markup.Contents);
+            if (markup.Author.Length > 0)
+                SetAnnotString(annot, "T", markup.Author);
         }
         finally
         {

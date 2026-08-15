@@ -20,6 +20,9 @@ public partial class MainWindow : Window
         InitializeComponent();
         PreviewKeyDown += OnPreviewKeyDown;
         FitToWorkArea();
+        // Реестр команд проверяет себя в конструкторе: команда без обработчика
+        // обязана обнаружиться на запуске, а не пустым пунктом меню у пользователя.
+        _ = ViewModel.Ux;
     }
 
     /// <summary>
@@ -71,6 +74,20 @@ public partial class MainWindow : Window
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        // Палитра команд: единственный способ найти команду, не зная, в какой
+        // она вкладке. Ctrl+K перехватывается до полей ввода намеренно.
+        if (e.Key == Key.K && Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            ViewModel.Ux.Invoke(NexusPdf.Ux.CommandIds.CommandPalette,
+                new Services.Ux.UxTarget
+                {
+                    Context = ViewModel.Ux.Snapshot(),
+                    Document = ViewModel.ActiveDocument,
+                });
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key != Key.Escape) return;
 
         if (ViewModel.ActiveDocument is { PendingOverlay: not null } doc)
@@ -125,6 +142,38 @@ public partial class MainWindow : Window
         if (int.TryParse(PageBox.Text.Trim(), out var page))
             doc.GoToPage(page);
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// Меню вкладки. Щелчок правой кнопкой сначала делает вкладку активной:
+    /// иначе «Сохранить» из меню одной вкладки сохранило бы другую.
+    /// </summary>
+    private void OnTabRightClick(object sender, MouseButtonEventArgs e)
+    {
+        DocumentViewModel? document = null;
+        for (DependencyObject? node = e.OriginalSource as DependencyObject;
+             node != null;
+             node = System.Windows.Media.VisualTreeHelper.GetParent(node))
+        {
+            if (node is System.Windows.Controls.TabItem { DataContext: DocumentViewModel doc })
+            {
+                document = doc;
+                break;
+            }
+            if (node is System.Windows.Controls.TabControl)
+                break;
+        }
+        if (document == null) return;
+
+        ViewModel.ActiveDocument = document;
+        var hub = ViewModel.Ux;
+        var target = new Services.Ux.UxTarget
+        {
+            Context = hub.Snapshot(NexusPdf.Ux.SelectionKind.Tab),
+            Document = document,
+        };
+        if (UxContextMenu.Show(hub, target, DocTabs))
+            e.Handled = true;
     }
 
     private void OnMenuItem(object sender, RoutedEventArgs e) => MenuToggle.IsChecked = false;

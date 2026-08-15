@@ -76,6 +76,7 @@
                   Foreground="{DynamicResource TextBrush}"
                   ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                   SelectedItemChanged="OnBookmarkSelected"
+                  PreviewMouseRightButtonDown="OnBookmarkRightClick"
                   Visibility="{Binding IsOutlineVisible, Converter={StaticResource BoolToVis}}">
           <TreeView.ItemContainerStyle>
             <Style TargetType="TreeViewItem">
@@ -115,6 +116,7 @@
                  Background="Transparent" BorderThickness="0"
                  SelectedIndex="{Binding CurrentPageNumber, Converter={StaticResource MinusOne}, Mode=OneWay}"
                  SelectionChanged="OnThumbSelectionChanged"
+                 PreviewMouseRightButtonDown="OnThumbRightClick"
                  ItemContainerStyle="{StaticResource ThumbItem}"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                  VirtualizingPanel.IsVirtualizing="True"
@@ -148,6 +150,7 @@
                VirtualizingPanel.CacheLength="1,1"
                VirtualizingPanel.CacheLengthUnit="Page"
                PreviewMouseWheel="OnPagesMouseWheel"
+               PreviewMouseRightButtonDown="OnPagesRightClick"
                PreviewMouseLeftButtonDown="OnPagesPreviewMouseDown"
                PreviewMouseMove="OnPagesPreviewMouseMove"
                PreviewMouseLeftButtonUp="OnPagesPreviewMouseUp"
@@ -259,6 +262,9 @@
                                  Visibility="{Binding IsEllipseShape, Converter={StaticResource BoolToVis}}"/>
                         <!-- Нарисованное от руки: геометрия уже в пунктах страницы,
                              масштаб накладывает слой предпросмотра -->
+                        <!-- Разметка выделенного текста: заливка по строкам -->
+                        <Path Data="{Binding MarkupGeometry}" Fill="{Binding Fill}"
+                              Visibility="{Binding IsMarkup, Converter={StaticResource BoolToVis}}"/>
                         <Path Data="{Binding InkGeometry}" Stroke="{Binding Stroke}"
                               StrokeThickness="{Binding StrokeThickness}"
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round"
@@ -422,6 +428,7 @@
                dd:DragDrop.IsDragSource="True"
                dd:DragDrop.IsDropTarget="True"
                dd:DragDrop.DropHandler="{Binding}"
+               PreviewMouseRightButtonDown="OnOrganizeRightClick"
                KeyDown="OnOrganizeKeyDown">
         <ListBox.ItemsPanel>
           <ItemsPanelTemplate>

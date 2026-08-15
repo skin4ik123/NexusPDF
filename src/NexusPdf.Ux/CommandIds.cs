@@ -49,6 +49,8 @@ public static class CommandIds
     public const string CompressPages = "pages.compress";
 
     // Содержимое
+    public const string InsertSignatureImage = "content.insertSignature";
+    public const string EditRegionInPaint = "content.editRegionInPaint";
     public const string AddText = "content.addText";
     public const string EditText = "content.editText";
     public const string InsertImage = "content.insertImage";
@@ -67,6 +69,8 @@ public static class CommandIds
     public const string Highlight = "comments.highlight";
     public const string Underline = "comments.underline";
     public const string Strikeout = "comments.strikeout";
+    public const string AddRect = "comments.rect";
+    public const string AddEllipse = "comments.ellipse";
     public const string DrawPencil = "comments.pencil";
     public const string DrawLine = "comments.line";
     public const string DrawArrow = "comments.arrow";
@@ -106,7 +110,29 @@ public static class CommandIds
     public const string Print = "print.open";
     public const string BatchPrint = "print.batch";
 
+    // Преобразование и пакетная обработка
+    public const string ExportImages = "convert.exportImages";
+    public const string ExtractText = "convert.extractText";
+    public const string CreateFromImages = "convert.fromImages";
+    public const string MergePdfs = "convert.merge";
+    public const string CompareDocuments = "convert.compare";
+    public const string OptimizeCopy = "convert.optimize";
+    public const string BatchProcess = "convert.batch";
+
+    // Документ целиком
+    public const string ShowLayers = "document.layers";
+    public const string ShowAttachments = "document.attachments";
+
     // Окно
     public const string CommandPalette = "window.commandPalette";
     public const string NewWindow = "window.new";
+    public const string NextTab = "window.nextTab";
+    public const string PreviousTab = "window.previousTab";
+    public const string DetachTab = "window.detachTab";
+    public const string ToggleOrganize = "window.toggleOrganize";
+    public const string ToggleOutline = "window.toggleOutline";
+    public const string ToggleCommentsPanel = "window.toggleComments";
+
+    // Справка
+    public const string About = "help.about";
 }
