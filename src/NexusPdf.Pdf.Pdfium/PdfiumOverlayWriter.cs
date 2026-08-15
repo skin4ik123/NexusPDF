@@ -132,6 +132,10 @@ internal static class PdfiumOverlayWriter
                     break;
                 case PageRasterReplacement:
                     break; // уже применена выше
+                case TextObjectReplacement textReplacement:
+                    ApplyTextObjectReplacement(page, textReplacement);
+                    contentAdded = true;
+                    break;
                 case ImageObjectReplacement imageReplacement:
                     ApplyImageObjectReplacement(document, page, imageReplacement);
                     contentAdded = true;
@@ -453,6 +457,32 @@ internal static class PdfiumOverlayWriter
 
             fpdf_edit.FPDFPageInsertObject(page, obj); // объект переходит во владение страницы
         }
+    }
+
+    /// <summary>
+    /// Замена содержимого существующего текстового объекта. Шрифт, кегль,
+    /// цвет и матрица принадлежат самому объекту и не трогаются, поэтому
+    /// правленая строка встаёт на место прежней в том же оформлении.
+    /// </summary>
+    private static void ApplyTextObjectReplacement(FpdfPageT page, TextObjectReplacement replacement)
+    {
+        const int pageObjectText = 1; // FPDF_PAGEOBJ_TEXT
+        var count = fpdf_edit.FPDFPageCountObjects(page);
+        if (replacement.ObjectIndex < 0 || replacement.ObjectIndex >= count)
+            throw new PdfEngineException(
+                "Текст для замены не найден: содержимое страницы изменилось.");
+
+        var obj = fpdf_edit.FPDFPageGetObject(page, replacement.ObjectIndex);
+        if (obj == null || obj.__Instance == IntPtr.Zero ||
+            fpdf_edit.FPDFPageObjGetType(obj) != pageObjectText)
+            throw new PdfEngineException(
+                "Объект по указанному номеру больше не является текстом.");
+
+        var buffer = new ushort[replacement.Text.Length + 1];
+        for (var i = 0; i < replacement.Text.Length; i++)
+            buffer[i] = replacement.Text[i];
+        if (fpdf_edit.FPDFTextSetText(obj, ref buffer[0]) == 0)
+            throw new PdfEngineException("Не удалось записать новый текст в объект страницы.");
     }
 
     /// <summary>

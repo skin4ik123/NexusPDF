@@ -671,6 +671,62 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>Правка существующей строки: клик по тексту открывает его в диалоге.</summary>
+    [RelayCommand]
+    private void EditExistingText()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy || doc.PageCount == 0) return;
+        doc.BeginPlacement((page, x, y) =>
+        {
+            _ = EditExistingTextCoreAsync(doc, page, x, y);
+            return null;
+        });
+        doc.StatusText = Loc.Get("TextEditHint");
+    }
+
+    private async Task EditExistingTextCoreAsync(
+        DocumentViewModel doc, PageViewModel page, double xPt, double yPt)
+    {
+        try
+        {
+            var handle = doc.Document.Handles[page.PageRef.SourceId];
+            var target = await handle.GetTextObjectAtAsync(
+                page.PageRef.SourcePageIndex, page.PageRef.RotationOffset, xPt, yPt,
+                CancellationToken.None);
+            if (target == null)
+            {
+                doc.StatusText = Loc.Get("TextEditNotFound");
+                return;
+            }
+
+            var edited = TextEditDialog.Edit(OwnerWindow, target.Text, target.FontName,
+                target.IsEmbeddedFont, target.FontSizePt,
+                text => handle.CanFontRenderTextAsync(
+                    page.PageRef.SourcePageIndex, target.ObjectIndex, text, CancellationToken.None));
+            if (edited == null || edited == target.Text)
+            {
+                doc.StatusText = Loc.Get("Ready");
+                return;
+            }
+
+            doc.Document.Session.Apply(new NexusPdf.Domain.AddOverlayOperation(page.LogicalIndex,
+                new NexusPdf.Pdf.Abstractions.TextObjectReplacement(target.ObjectIndex, edited)));
+            var dpiScale = OwnerWindow != null
+                ? System.Windows.Media.VisualTreeHelper.GetDpi(OwnerWindow).DpiScaleX
+                : 1.0;
+            page.ForceRefresh(dpiScale);
+            doc.StatusText = Loc.Get("TextEditDone");
+            Log.Information("Текст объекта {Index} на странице {Page} изменён",
+                target.ObjectIndex, page.LogicalIndex + 1);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка правки текста страницы");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("TextEditTitle"), ex.Message, ex.ToString());
+            doc.StatusText = Loc.Get("Ready");
+        }
+    }
+
     // ----- Рисование от руки -----
 
     /// <summary>Палитра рисования: контрастные цвета, различимые и на белом, и на скане.</summary>

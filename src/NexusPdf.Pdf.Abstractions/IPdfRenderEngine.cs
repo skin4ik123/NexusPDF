@@ -74,6 +74,17 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     /// </summary>
     Task<PdfImageObject?> GetImageObjectAtAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct);
 
+    /// <summary>Текстовый объект страницы под точкой (отображаемые пункты) или null.</summary>
+    Task<PdfTextObject?> GetTextObjectAtAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct);
+
+    /// <summary>
+    /// Может ли шрифт указанного текстового объекта нарисовать переданный
+    /// текст. Проверяется НЕ по таблицам, а рисованием пробного объекта тем же
+    /// шрифтом: у встроенного подмножества нужных букв может не оказаться, и
+    /// тогда правка молча дала бы пустое место.
+    /// </summary>
+    Task<bool> CanFontRenderTextAsync(int pageIndex, int objectIndex, string text, CancellationToken ct);
+
     /// <summary>
     /// Все ссылки страницы с рамками в координатах страницы PDF. Читаются один
     /// раз на страницу: попадание курсора проверяется без обращения к движку.

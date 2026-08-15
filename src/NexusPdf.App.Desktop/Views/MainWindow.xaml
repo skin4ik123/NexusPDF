@@ -125,6 +125,11 @@
             <TextBlock Text="▮" FontSize="14" Foreground="#DC2626"/>
           </Button>
 
+          <Button Style="{StaticResource ToolButton}" Command="{Binding EditExistingTextCommand}"
+                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc TextEditTool}">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8D2;"/>
+          </Button>
+
           <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
 
           <!-- Рисование: карандаш, линия, стрелка -->
