@@ -451,17 +451,37 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         }
 
         if (item.AnnotIndex < 0) return;
-        // Существующая аннотация: логическая страница ищется по источнику —
-        // строка панели переживает перестановку страниц.
-        for (var i = 0; i < pages.Count; i++)
+        // Существующая аннотация. Сначала — страница, с которой строка была
+        // построена (критично при ДУБЛЯХ одной исходной страницы: у копий
+        // одинаковый источник, и поиск «первой подходящей» пометил бы не ту).
+        var target = -1;
+        var byNumber = item.PageNumber - 1;
+        if (byNumber >= 0 && byNumber < pages.Count &&
+            pages[byNumber].SourceId == item.SourceId &&
+            pages[byNumber].SourcePageIndex == item.SourcePageIndex)
         {
-            if (pages[i].SourceId != item.SourceId ||
-                pages[i].SourcePageIndex != item.SourcePageIndex)
-                continue;
-            if (!pages[i].RemovedAnnotationList.Contains(item.AnnotIndex))
-                Document.Session.Apply(new RemoveExistingAnnotationOperation(i, item.AnnotIndex));
-            return;
+            target = byNumber;
         }
+        else
+        {
+            // Порядок страниц изменился: среди копий источника предпочитаем
+            // ту, где эта аннотация ещё не помечена.
+            for (var i = 0; i < pages.Count; i++)
+            {
+                if (pages[i].SourceId != item.SourceId ||
+                    pages[i].SourcePageIndex != item.SourcePageIndex)
+                    continue;
+                if (!pages[i].RemovedAnnotationList.Contains(item.AnnotIndex))
+                {
+                    target = i;
+                    break;
+                }
+                if (target < 0)
+                    target = i;
+            }
+        }
+        if (target >= 0 && !pages[target].RemovedAnnotationList.Contains(item.AnnotIndex))
+            Document.Session.Apply(new RemoveExistingAnnotationOperation(target, item.AnnotIndex));
     }
 
     [RelayCommand]

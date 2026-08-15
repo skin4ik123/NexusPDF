@@ -95,6 +95,26 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
 
         try
         {
+            // Дубликаты одной исходной страницы в ОДНОМ вызове FPDF_ImportPages
+            // получают общий клон косвенного массива /Annots (единая карта
+            // объектов pdfium): удаление аннотаций с одной копии мутировало бы
+            // и вторую. Такие страницы импортируются изолированными вызовами.
+            var keyCounts = new Dictionary<(PdfiumDocumentHandle, int), int>();
+            var removalKeys = new HashSet<(PdfiumDocumentHandle, int)>();
+            foreach (var page in pages)
+            {
+                var key = ((PdfiumDocumentHandle)page.Source, page.SourcePageIndex);
+                keyCounts[key] = keyCounts.TryGetValue(key, out var n) ? n + 1 : 1;
+                if (page.RemovedAnnotations is { Count: > 0 })
+                    removalKeys.Add(key);
+            }
+
+            bool NeedsIsolation(ComposedPage page)
+            {
+                var key = ((PdfiumDocumentHandle)page.Source, page.SourcePageIndex);
+                return keyCounts[key] > 1 && removalKeys.Contains(key);
+            }
+
             // Последовательные страницы одного источника импортируются одним вызовом:
             // FPDF_ImportPages сохраняет порядок перечисления в диапазоне.
             var insertAt = 0;
@@ -102,9 +122,18 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
             while (i < pages.Count)
             {
                 var source = (PdfiumDocumentHandle)pages[i].Source;
-                var j = i;
-                while (j < pages.Count && ReferenceEquals(pages[j].Source, source))
-                    j++;
+                int j;
+                if (NeedsIsolation(pages[i]))
+                {
+                    j = i + 1;
+                }
+                else
+                {
+                    j = i;
+                    while (j < pages.Count && ReferenceEquals(pages[j].Source, source) &&
+                           !NeedsIsolation(pages[j]))
+                        j++;
+                }
 
                 var range = string.Join(",", pages.Skip(i).Take(j - i).Select(p => p.SourcePageIndex + 1));
                 if (fpdf_ppo.FPDF_ImportPages(newDoc, source.NativeDoc, range, insertAt) == 0)
@@ -133,9 +162,41 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
                     if (removed is { Count: > 0 })
                     {
                         // Индексы даны для исходной страницы; после импорта они
-                        // совпадают. Удаление от большего к меньшему — индексы
-                        // оставшихся не сдвигаются под ногами.
-                        foreach (var annotIndex in removed.Distinct().OrderByDescending(i => i))
+                        // совпадают. У заметок Acrobat есть парная Popup-аннотация —
+                        // без каскада она осталась бы с висячей ссылкой /Parent.
+                        var expanded = new List<int>();
+                        foreach (var annotIndex in removed.Distinct())
+                        {
+                            expanded.Add(annotIndex);
+                            var annot = fpdf_annot.FPDFPageGetAnnot(page, annotIndex);
+                            if (annot == null || annot.__Instance == IntPtr.Zero)
+                                continue;
+                            try
+                            {
+                                var popup = fpdf_annot.FPDFAnnotGetLinkedAnnot(annot, "Popup");
+                                if (popup != null && popup.__Instance != IntPtr.Zero)
+                                {
+                                    try
+                                    {
+                                        var popupIndex = fpdf_annot.FPDFPageGetAnnotIndex(page, popup);
+                                        if (popupIndex >= 0)
+                                            expanded.Add(popupIndex);
+                                    }
+                                    finally
+                                    {
+                                        fpdf_annot.FPDFPageCloseAnnot(popup);
+                                    }
+                                }
+                            }
+                            finally
+                            {
+                                fpdf_annot.FPDFPageCloseAnnot(annot);
+                            }
+                        }
+
+                        // Удаление от большего к меньшему — индексы оставшихся
+                        // не сдвигаются под ногами.
+                        foreach (var annotIndex in expanded.Distinct().OrderByDescending(i => i))
                         {
                             if (fpdf_annot.FPDFPageRemoveAnnot(page, annotIndex) == 0)
                                 throw new PdfEngineException(
