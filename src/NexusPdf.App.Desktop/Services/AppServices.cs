@@ -1,6 +1,7 @@
 using NexusPdf.Application;
 using NexusPdf.Infrastructure;
 using NexusPdf.Pdf.Abstractions;
+using NexusPdf.Pdf.MuPdf;
 using NexusPdf.Pdf.Qpdf;
 
 namespace NexusPdf.App.Desktop.Services;
@@ -16,7 +17,8 @@ public sealed class AppServices : IAsyncDisposable
         Cache = new RenderCache(settings.RenderCacheMegabytes);
         SaveService = new SaveService(engine);
         Qpdf = new QpdfEngine();
-        Tools = new DocumentToolsService(engine, Qpdf, Qpdf);
+        Compression = new MuPdfCompressionEngine();
+        Tools = new DocumentToolsService(engine, Qpdf, Qpdf, Compression);
         PrintJobs = new NexusPdf.App.Desktop.Services.Printing.PrintJobService();
         Signatures = new SignatureStore();
         OcrEngine = CreateRecognizer(settings);
@@ -52,6 +54,9 @@ public sealed class AppServices : IAsyncDisposable
     public RenderCache Cache { get; }
     public SaveService SaveService { get; }
     public QpdfEngine Qpdf { get; }
+
+    /// <summary>Движок сжатия (MuPDF): изображения, шрифты и структура за один проход.</summary>
+    public IPdfCompressionEngine Compression { get; }
     public DocumentToolsService Tools { get; }
     /// <summary>Отправка заданий центра печати в очередь Windows.</summary>
     public NexusPdf.App.Desktop.Services.Printing.PrintJobService PrintJobs { get; }

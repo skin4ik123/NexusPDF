@@ -227,43 +227,69 @@ public static class Program
             {
                 if (positional.Count != 2)
                     throw new UsageException("compress: нужны <вход.pdf> и <выход.pdf>.");
+                var preset = Get(options, "preset", "smart").ToLowerInvariant();
+                var presetKind = preset switch
+                {
+                    "smart" or "умное" => NexusPdf.Ux.CompressionPresetKind.Smart,
+                    "quality" or "бережное" => NexusPdf.Ux.CompressionPresetKind.Quality,
+                    "balanced" => NexusPdf.Ux.CompressionPresetKind.Balanced,
+                    "max" or "aggressive" => NexusPdf.Ux.CompressionPresetKind.Aggressive,
+                    "structure" => NexusPdf.Ux.CompressionPresetKind.Structure,
+                    "custom" => NexusPdf.Ux.CompressionPresetKind.Custom,
+                    _ => throw new UsageException(
+                        "--preset: smart | quality | balanced | max | structure | custom."),
+                };
                 var dpi = ParseDouble(options, "dpi", 150);
                 if (dpi is < 24 or > 600)
                     throw new UsageException("--dpi: допустимы значения 24–600.");
                 var quality = (int)ParseDouble(options, "quality", 75);
                 if (quality is < 10 or > 100)
                     throw new UsageException("--quality: допустимы значения 10–100.");
+                // Явные числа означают «делай как сказано», без пресета.
+                if (options.ContainsKey("dpi") || options.ContainsKey("quality"))
+                    presetKind = NexusPdf.Ux.CompressionPresetKind.Custom;
+                var subsetFonts = !options.ContainsKey("keep-fonts");
                 RequireNotExists(positional[1], options);
+
+                NexusPdf.Ux.DocumentImageProfile profile;
                 try
                 {
                     await using var probe = await engine.OpenAsync(positional[0], null, ct);
+                    var summary = await probe.GetImageSummaryAsync(
+                        NexusPdf.Ux.DocumentImageProfile.SampleLimit, ct);
+                    profile = new NexusPdf.Ux.DocumentImageProfile(
+                        probe.Info.PageCount, summary.Images, summary.TextLength,
+                        summary.SampledPages, summary.AverageImageDpi);
                 }
                 catch (PdfPasswordRequiredException)
                 {
-                    // SaveAsCopy молча снял бы шифрование — честный отказ.
+                    // Пересохранение молча сняло бы шифрование — честный отказ.
                     throw new InvalidOperationException(
                         "Файл защищён паролем: пересжатие сняло бы защиту. Сначала снимите пароль (qpdf --decrypt).");
                 }
 
-                var before = new FileInfo(positional[0]).Length;
-                var tmp = positional[1] + ".nexustmp";
-                NexusPdf.Pdf.Abstractions.ImageRecompressStats stats;
-                try
-                {
-                    stats = await engine.RecompressImagesAsync(positional[0], null, tmp, dpi,
-                        (bgra, w, h) => EncodeJpegRaw(bgra, w, h, quality), ct);
-                    File.Move(tmp, positional[1], overwrite: true);
-                }
-                finally
-                {
-                    try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* лучшая попытка */ }
-                }
-                var after = new FileInfo(positional[1]).Length;
+                var settings = NexusPdf.Ux.CompressionPresets.Resolve(presetKind, profile, dpi, quality);
                 Console.WriteLine(
-                    $"Готово: {before / 1024} КиБ → {after / 1024} КиБ; " +
-                    $"изображений пересжато {stats.Recompressed}, пропущено {stats.Skipped}");
-                if (after >= before)
-                    Console.Error.WriteLine("Предупреждение: файл не стал меньше — исходные изображения уже компактны.");
+                    $"Режим: {preset}; изображения до {settings.Dpi:0} DPI, качество {settings.Quality}" +
+                    (settings.StructureOnly ? " (изображения не трогаются)" : "") +
+                    $"; документ {(profile.LooksScanned ? "похож на скан" : "похож на вёрстку")}");
+
+                var before = new FileInfo(positional[0]).Length;
+                var compression = new NexusPdf.Pdf.MuPdf.MuPdfCompressionEngine();
+                if (!compression.IsAvailable)
+                    throw new InvalidOperationException(compression.UnavailableReason);
+                var result = await compression.CompressAsync(
+                    positional[0], positional[1],
+                    new NexusPdf.Pdf.Abstractions.PdfCompressionRequest(
+                        settings.Dpi, settings.Quality, settings.StructureOnly, subsetFonts),
+                    ct);
+
+                var after = result.BytesAfter;
+                Console.WriteLine($"Готово: {before / 1024} КиБ → {after / 1024} КиБ " +
+                                  $"({(before - after) * 100.0 / Math.Max(1, before):0.#}% меньше)");
+                if (result.KeptOriginal)
+                    Console.Error.WriteLine(
+                        "Предупреждение: файл не стал меньше — оставлен исходный вариант.");
                 return 0;
             }
 
@@ -440,11 +466,18 @@ public static class Program
     }
 
     /// <summary>BGRA-растр → JPEG с заданным качеством (для пересжатия изображений).</summary>
-    private static byte[] EncodeJpegRaw(byte[] bgra, int width, int height, int quality)
+    private static byte[] EncodeJpegRaw(
+        byte[] bgra, int width, int height, NexusPdf.Pdf.Abstractions.ImageEncodingChoice choice)
     {
-        var source = BitmapSource.Create(
+        BitmapSource source = BitmapSource.Create(
             width, height, 96, 96, PixelFormats.Bgra32, null, bgra, width * 4);
-        var encoder = new JpegBitmapEncoder { QualityLevel = quality };
+        if (choice.IsGray)
+        {
+            var gray = new FormatConvertedBitmap(source, PixelFormats.Gray8, null, 0);
+            gray.Freeze();
+            source = gray;
+        }
+        var encoder = new JpegBitmapEncoder { QualityLevel = choice.Quality };
         encoder.Frames.Add(BitmapFrame.Create(source));
         using var stream = new MemoryStream();
         encoder.Save(stream);

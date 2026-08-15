@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:l="clr-namespace:NexusPdf.App.Desktop.Localization"
         Title="{l:Loc CompressTitle}"
-        Width="460" SizeToContent="Height" ResizeMode="NoResize"
+        Width="520" SizeToContent="Height" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{DynamicResource PanelBg}">
   <StackPanel Margin="20">
@@ -16,23 +16,53 @@
     <TextBlock Text="{l:Loc CompressIntro}" Foreground="{DynamicResource TextSecondary}" FontSize="12"
                TextWrapping="Wrap" Margin="0,10,0,0"/>
 
-    <TextBlock Text="{l:Loc CompressDpi}" Foreground="{DynamicResource TextSecondary}" FontSize="12"
-               Margin="0,12,0,4"/>
-    <ComboBox x:Name="DpiCombo" Width="220" HorizontalAlignment="Left" SelectedIndex="0">
-      <ComboBoxItem Content="{l:Loc CompressDpi150}"/>
-      <ComboBoxItem Content="{l:Loc CompressDpi96}"/>
-      <ComboBoxItem Content="{l:Loc CompressDpi72}"/>
-    </ComboBox>
+    <!-- Что за документ: сказать это до сжатия честнее, чем после. -->
+    <Border Background="{DynamicResource CardBg}" CornerRadius="6" Padding="10,8" Margin="0,12,0,0">
+      <StackPanel Orientation="Horizontal">
+        <TextBlock Text="&#xE946;" FontFamily="Segoe MDL2 Assets" FontSize="14"
+                   Foreground="{DynamicResource Accent}" VerticalAlignment="Top" Margin="0,1,8,0"/>
+        <TextBlock x:Name="ProfileText" Foreground="{DynamicResource TextSecondary}" FontSize="12"
+                   TextWrapping="Wrap" MaxWidth="420"/>
+      </StackPanel>
+    </Border>
 
-    <TextBlock Text="{l:Loc CompressQuality}" Foreground="{DynamicResource TextSecondary}" FontSize="12"
-               Margin="0,12,0,4"/>
-    <ComboBox x:Name="QualityCombo" Width="220" HorizontalAlignment="Left" SelectedIndex="0">
-      <ComboBoxItem Content="{l:Loc CompressQ75}"/>
-      <ComboBoxItem Content="{l:Loc CompressQ85}"/>
-      <ComboBoxItem Content="{l:Loc CompressQ60}"/>
+    <TextBlock Text="{l:Loc CompressPreset}" Foreground="{DynamicResource TextSecondary}" FontSize="12"
+               Margin="0,14,0,4"/>
+    <ComboBox x:Name="PresetCombo" Width="460" HorizontalAlignment="Left" SelectedIndex="0"
+              SelectionChanged="OnPresetChanged">
+      <ComboBoxItem Content="{l:Loc CompressPresetSmart}"/>
+      <ComboBoxItem Content="{l:Loc CompressPresetQuality}"/>
+      <ComboBoxItem Content="{l:Loc CompressPresetBalanced}"/>
+      <ComboBoxItem Content="{l:Loc CompressPresetAggressive}"/>
+      <ComboBoxItem Content="{l:Loc CompressPresetStructure}"/>
+      <ComboBoxItem Content="{l:Loc CompressPresetCustom}"/>
     </ComboBox>
+    <TextBlock x:Name="PresetHint" Foreground="{DynamicResource TextSecondary}" FontSize="11"
+               TextWrapping="Wrap" Margin="0,6,0,0"/>
 
-    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+    <!-- Ручные настройки нужны редко, поэтому раскрываются только для «своего». -->
+    <StackPanel x:Name="CustomPanel" Visibility="Collapsed" Margin="0,12,0,0">
+      <TextBlock Text="{l:Loc CompressDpi}" Foreground="{DynamicResource TextSecondary}" FontSize="12"/>
+      <ComboBox x:Name="DpiCombo" Width="260" HorizontalAlignment="Left" SelectedIndex="0" Margin="0,4,0,0">
+        <ComboBoxItem Content="{l:Loc CompressDpi150}"/>
+        <ComboBoxItem Content="{l:Loc CompressDpi96}"/>
+        <ComboBoxItem Content="{l:Loc CompressDpi72}"/>
+      </ComboBox>
+      <TextBlock Text="{l:Loc CompressQuality}" Foreground="{DynamicResource TextSecondary}" FontSize="12"
+                 Margin="0,10,0,4"/>
+      <ComboBox x:Name="QualityCombo" Width="260" HorizontalAlignment="Left" SelectedIndex="0">
+        <ComboBoxItem Content="{l:Loc CompressQ75}"/>
+        <ComboBoxItem Content="{l:Loc CompressQ85}"/>
+        <ComboBoxItem Content="{l:Loc CompressQ60}"/>
+      </ComboBox>
+    </StackPanel>
+
+    <CheckBox x:Name="SubsetFontsBox" Content="{l:Loc CompressSubsetFonts}" IsChecked="True"
+              Foreground="{DynamicResource TextBrush}" Margin="0,14,0,0"/>
+    <TextBlock Text="{l:Loc CompressSubsetFontsHint}" Foreground="{DynamicResource TextSecondary}"
+               FontSize="11" TextWrapping="Wrap" Margin="26,2,0,0"/>
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
       <Button Content="{l:Loc CompressAction}" Style="{StaticResource PrimaryButton}" MinWidth="150"
               IsDefault="True" Click="OnCompress"/>
       <Button Content="{l:Loc Cancel}" Style="{StaticResource LinkButton}" Margin="8,0,0,0" IsCancel="True"/>

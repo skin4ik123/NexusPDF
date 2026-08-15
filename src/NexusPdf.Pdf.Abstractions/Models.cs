@@ -104,6 +104,18 @@ public sealed record PdfTextObject(
 public sealed record TextObjectReplacement(int ObjectIndex, string Text) : PageOverlay;
 
 /// <summary>Найденное на странице растровое изображение: индекс объекта, его растр и рамка в отображаемых пунктах.</summary>
+/// <summary>
+/// Сводка по изображениям начала документа: на её основе выбирается режим
+/// сжатия. Считается по метаданным и матрицам, БЕЗ декодирования пикселей —
+/// иначе «посмотреть, что за файл» стоило бы столько же, сколько само сжатие.
+/// </summary>
+/// <param name="SampledPages">Сколько страниц просмотрено.</param>
+/// <param name="Images">Изображений на них.</param>
+/// <param name="TextLength">Символов текста на них же.</param>
+/// <param name="AverageImageDpi">Среднее фактическое разрешение изображений.</param>
+public sealed record PdfImageSummary(
+    int SampledPages, int Images, int TextLength, double AverageImageDpi);
+
 public sealed record PdfImageObject(
     int ObjectIndex,
     byte[] Bgra,

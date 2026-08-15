@@ -8,6 +8,7 @@
     <Project Path="src/NexusPdf.Ocr/NexusPdf.Ocr.csproj" />
     <Project Path="src/NexusPdf.Ocr.Paddle/NexusPdf.Ocr.Paddle.csproj" />
     <Project Path="src/NexusPdf.Pdf.Abstractions/NexusPdf.Pdf.Abstractions.csproj" />
+    <Project Path="src/NexusPdf.Pdf.MuPdf/NexusPdf.Pdf.MuPdf.csproj" />
     <Project Path="src/NexusPdf.Pdf.Pdfium/NexusPdf.Pdf.Pdfium.csproj" />
     <Project Path="src/NexusPdf.Pdf.Qpdf/NexusPdf.Pdf.Qpdf.csproj" />
     <Project Path="src/NexusPdf.Printing/NexusPdf.Printing.csproj" />
