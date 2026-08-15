@@ -1,0 +1,180 @@
+using NexusPdf.Pdf.Abstractions;
+using RapidOcrNet;
+
+namespace NexusPdf.Ocr.Paddle;
+
+/// <summary>Распознанное слово: текст, рамка в пикселях растра и уверенность 0–100.</summary>
+public sealed record PaddleWord(string Text, double X, double Y, double Width, double Height, float Confidence);
+
+public sealed record PaddlePageResult(IReadOnlyList<PaddleWord> Words, float MeanConfidence);
+
+/// <summary>
+/// Распознавание текста PaddleOCR через RapidOcrNet (ONNX Runtime, офлайн).
+/// Детектор строк общий для всех языков, распознаватель выбирается языковым
+/// пакетом: набор символов задаётся ИМЕННО словарём пакета, поэтому модель и
+/// словарь всегда берутся парой.
+/// Экземпляр RapidOcr не потокобезопасен — вызовы сериализуются общим замком.
+/// </summary>
+public sealed class PaddleOcrEngine : IDisposable
+{
+    private readonly string? _modelsDir;
+    private readonly string _packId;
+    private readonly object _gate = new();
+    private RapidOcr? _ocr;
+    private bool _initFailed;
+    private string? _initError;
+    private bool _disposed;
+
+    public PaddleOcrEngine(string packId = "cyrillic") : this(AppContext.BaseDirectory, packId) { }
+
+    public PaddleOcrEngine(string baseDirectory, string packId)
+    {
+        _packId = packId;
+        _modelsDir = ResolveModelsDir(baseDirectory);
+    }
+
+    public bool IsAvailable => _modelsDir != null && !_initFailed && FindRecognizer() != null;
+
+    public string? UnavailableReason => IsAvailable
+        ? null
+        : _modelsDir == null
+            ? "Модели OCR не найдены. Запустите tools/fetch-ocrmodels.ps1 или переустановите приложение."
+            : _initError ?? "Языковой пакет распознавания не установлен.";
+
+    /// <summary>Поиск tools\ocrmodels рядом с приложением и до шести уровней вверх — как у qpdf.</summary>
+    private static string? ResolveModelsDir(string baseDirectory)
+    {
+        var dir = new DirectoryInfo(baseDirectory);
+        for (var depth = 0; dir != null && depth < 7; depth++, dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, "tools", "ocrmodels");
+            if (File.Exists(Path.Combine(candidate, "PP-OCRv6_det_medium.onnx")))
+                return candidate;
+        }
+        return null;
+    }
+
+    /// <summary>Файлы распознавателя выбранного пакета: модель и её словарь.</summary>
+    private (string Model, string Dict)? FindRecognizer()
+    {
+        if (_modelsDir == null) return null;
+        // Имена файлов пакета определяются каталогом ocrmodels.lock.json; здесь
+        // достаточно найти пару «модель + словарь» по префиксу пакета.
+        var model = Directory.EnumerateFiles(_modelsDir, "*_rec_*.onnx")
+            .FirstOrDefault(f => Path.GetFileName(f).StartsWith(_packId + "_", StringComparison.OrdinalIgnoreCase));
+        if (model == null) return null;
+        var dict = Directory.EnumerateFiles(_modelsDir, "*.txt")
+            .FirstOrDefault(f => Path.GetFileName(f).Contains(_packId, StringComparison.OrdinalIgnoreCase));
+        return dict == null ? null : (model, dict);
+    }
+
+    /// <summary>
+    /// Классификатор поворота строк скачивается в наш каталог моделей вместе с
+    /// остальными. Комплектный файл пакета RapidOcrNet намеренно не
+    /// используется: он кладётся рядом со СВОЕЙ сборкой и до потребителей не
+    /// доезжает — на этом движок молча не поднимался.
+    /// </summary>
+    private string? FindClassifier() =>
+        _modelsDir == null
+            ? null
+            : Directory.EnumerateFiles(_modelsDir, "*cls*.onnx").FirstOrDefault();
+
+    public Task<PaddlePageResult> RecognizeAsync(RenderedPageImage image, CancellationToken ct) =>
+        Task.Run(() => Recognize(image, ct), ct);
+
+    private PaddlePageResult Recognize(RenderedPageImage image, CancellationToken ct)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ct.ThrowIfCancellationRequested();
+
+        lock (_gate)
+        {
+            // Молча вернуть пустой результат нельзя: снаружи это выглядит как
+            // «страница пустая», хотя на деле движок не поднялся.
+            var ocr = EnsureEngine()
+                ?? throw new InvalidOperationException(_initError ?? "Движок PaddleOCR недоступен.");
+
+            using var bitmap = ToSkBitmap(image);
+            var result = ocr.Detect(bitmap, RapidOcrOptions.Default);
+
+            var words = new List<PaddleWord>();
+            var scores = new List<float>();
+            foreach (var block in result.TextBlocks)
+            {
+                if (string.IsNullOrWhiteSpace(block.Text)) continue;
+                var score = block.CharScores is { Length: > 0 } ? block.CharScores.Average() : 0f;
+                scores.Add(score);
+
+                var xs = block.BoxPoints.Select(p => (double)p.X).ToList();
+                var ys = block.BoxPoints.Select(p => (double)p.Y).ToList();
+                words.Add(new PaddleWord(
+                    block.Text.Trim(),
+                    xs.Min(), ys.Min(),
+                    xs.Max() - xs.Min(), ys.Max() - ys.Min(),
+                    score * 100f));
+            }
+
+            return new PaddlePageResult(words, scores.Count > 0 ? scores.Average() * 100f : 0f);
+        }
+    }
+
+    private RapidOcr? EnsureEngine()
+    {
+        if (_ocr != null) return _ocr;
+        if (_initFailed) return null;
+
+        var files = FindRecognizer();
+        if (files == null)
+        {
+            _initFailed = true;
+            _initError = "Языковой пакет распознавания не установлен.";
+            return null;
+        }
+
+        var cls = FindClassifier();
+        if (cls == null)
+        {
+            _initFailed = true;
+            _initError = "Не найден классификатор поворота строк из комплекта RapidOcrNet.";
+            return null;
+        }
+
+        try
+        {
+            var ocr = new RapidOcr();
+            var det = Path.Combine(_modelsDir!, "PP-OCRv6_det_medium.onnx");
+            ocr.InitModels(det, cls, files.Value.Model, files.Value.Dict);
+            _ocr = ocr;
+            return ocr;
+        }
+        catch (Exception ex)
+        {
+            _initFailed = true;
+            _initError = "Движок PaddleOCR не инициализировался: " + ex.Message;
+            return null;
+        }
+    }
+
+    /// <summary>BGRA-растр страницы → SKBitmap, который ждёт RapidOcrNet.</summary>
+    private static SkiaSharp.SKBitmap ToSkBitmap(RenderedPageImage image)
+    {
+        var info = new SkiaSharp.SKImageInfo(
+            image.PixelWidth, image.PixelHeight,
+            SkiaSharp.SKColorType.Bgra8888, SkiaSharp.SKAlphaType.Premul);
+        var bitmap = new SkiaSharp.SKBitmap(info);
+        System.Runtime.InteropServices.Marshal.Copy(
+            image.Bgra, 0, bitmap.GetPixels(), image.Bgra.Length);
+        return bitmap;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        lock (_gate)
+        {
+            _ocr?.Dispose();
+            _ocr = null;
+        }
+    }
+}

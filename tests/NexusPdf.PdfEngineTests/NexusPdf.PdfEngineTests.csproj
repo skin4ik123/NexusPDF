@@ -29,6 +29,7 @@
     <ProjectReference Include="..\..\src\NexusPdf.Application\NexusPdf.Application.csproj" />
     <ProjectReference Include="..\..\src\NexusPdf.Infrastructure\NexusPdf.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\NexusPdf.Pdf.Qpdf\NexusPdf.Pdf.Qpdf.csproj" />
+    <ProjectReference Include="..\..\src\NexusPdf.Ocr.Paddle\NexusPdf.Ocr.Paddle.csproj" />
   </ItemGroup>
 
 </Project>
