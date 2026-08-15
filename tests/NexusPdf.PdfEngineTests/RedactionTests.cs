@@ -91,6 +91,36 @@ public sealed class RedactionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Ocr_Layer_Words_Under_Redaction_Do_Not_Leak()
+    {
+        // Репро утечки из ревизии: OCR-слой со словами, одно из которых под
+        // вымаркой — оно НЕ должно вернуться невидимым текстом поверх чёрного.
+        var path = PdfFixture.WriteToTemp("ocrleak.pdf",
+            new PdfFixture.PageSpec(612, 792, Text: " "));
+        var document = await OpenedDocument.OpenAsync(_pdfium, path, null, CancellationToken.None);
+        await using (document)
+        {
+            document.Session.Apply(new AddOverlayOperation(0, new OcrTextLayerOverlay(new[]
+            {
+                new OcrWordBox("PUBLICWORD", 50, 100, 120, 14),
+                new OcrWordBox("HIDDENWORD", 50, 400, 120, 14),
+            })));
+            document.Session.Apply(new AddOverlayOperation(0,
+                new RedactionDraft(30, 380, 200, 60))); // накрывает HIDDENWORD
+
+            var saved = Path.Combine(Path.GetDirectoryName(path)!, "ocrleak-redacted.pdf");
+            await new SaveService(_pdfium).SaveCopyAsync(document, saved, CancellationToken.None);
+
+            await using var reopened = await _pdfium.OpenAsync(saved, null, CancellationToken.None);
+            var text = await reopened.GetPageTextAsync(0, CancellationToken.None);
+            Assert.Contains("PUBLICWORD", text);       // слова вне вымарки живы
+            Assert.DoesNotContain("HIDDENWORD", text); // под вымаркой — уничтожено
+            var bytes = System.Text.Encoding.Latin1.GetString(await File.ReadAllBytesAsync(saved));
+            Assert.DoesNotContain("HIDDENWORD", bytes);
+        }
+    }
+
+    [Fact]
     public async Task Redaction_Draft_Is_Undoable_Before_Save()
     {
         var path = PdfFixture.WriteToTemp("undo.pdf", new PdfFixture.PageSpec(612, 792));

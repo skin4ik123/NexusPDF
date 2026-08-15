@@ -513,6 +513,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
                         s.FillArgb != 0 && s.BorderWidthPt == 0 ? Loc.Get("AnnotHighlight")
                             : s.IsEllipse ? Loc.Get("AnnotEllipse") : Loc.Get("AnnotRect"),
                         s.Author, s.Contents),
+                    NexusPdf.Pdf.Abstractions.RedactionDraft =>
+                        (Loc.Get("AnnotRedaction"), "", Loc.Get("AnnotRedactionText")),
                     _ => ("", "", ""),
                 };
                 if (label.Length > 0)

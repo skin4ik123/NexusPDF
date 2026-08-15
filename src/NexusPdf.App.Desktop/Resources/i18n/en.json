@@ -141,6 +141,8 @@
   "FormModeShort": "Forms",
   "FormModeHint": "Click a form field and type; save the document to commit the values",
   "FormFlattenedWarning": "Saved. Due to structural edits the interactive form was flattened to static content",
+  "AnnotRedaction": "Redaction",
+  "AnnotRedactionText": "Content under the area will be removed on save",
   "RedactTool": "Redact area (content is REMOVED on save)",
   "RedactHint": "Drag a box over the area: on save the content underneath is DESTROYED and the page becomes an image (Ctrl+Z to undo before saving).",
   "RedactionApplied": "Redactions applied: content removed, redacted pages rasterized.",
