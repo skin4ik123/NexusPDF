@@ -206,6 +206,40 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
         }
     }
 
+    public Task<PdfComboInfo?> GetFormComboAtAsync(
+        int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() =>
+            {
+                if (_forms == null) return null;
+                var size = Info.Pages[pageIndex];
+                var displayedW = extraQuarterTurns % 2 == 0 ? size.WidthPoints : size.HeightPoints;
+                var displayedH = extraQuarterTurns % 2 == 0 ? size.HeightPoints : size.WidthPoints;
+                return _forms.GetComboAt(pageIndex, extraQuarterTurns, xPt, yPt, displayedW, displayedH);
+            }, ct);
+        }
+    }
+
+    public Task SetFormComboSelectionAsync(
+        int pageIndex, int extraQuarterTurns, double xPt, double yPt, int optionIndex, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() =>
+            {
+                if (_forms == null) return;
+                var size = Info.Pages[pageIndex];
+                var displayedW = extraQuarterTurns % 2 == 0 ? size.WidthPoints : size.HeightPoints;
+                var displayedH = extraQuarterTurns % 2 == 0 ? size.HeightPoints : size.WidthPoints;
+                _forms.SetComboSelection(pageIndex, extraQuarterTurns, xPt, yPt, displayedW, displayedH, optionIndex);
+            }, ct);
+        }
+    }
+
     public Task FormCharAsync(char character, CancellationToken ct)
     {
         lock (_admissionGate)

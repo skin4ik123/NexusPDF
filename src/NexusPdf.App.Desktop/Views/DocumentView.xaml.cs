@@ -24,13 +24,71 @@ public partial class DocumentView : UserControl
         {
             _vm.ScrollToPageRequested -= OnScrollToPage;
             _vm.PropertyChanged -= OnVmPropertyChanged;
+            _vm.FormComboRequested -= OnFormComboRequested;
         }
+        CloseComboPopup();
         _vm = e.NewValue as DocumentViewModel;
         if (_vm != null)
         {
             _vm.ScrollToPageRequested += OnScrollToPage;
             _vm.PropertyChanged += OnVmPropertyChanged;
+            _vm.FormComboRequested += OnFormComboRequested;
             UpdatePlacementCursor();
+        }
+    }
+
+    // ----- Собственный попап выпадающего списка формы -----
+
+    private System.Windows.Controls.Primitives.Popup? _comboPopup;
+
+    private void OnFormComboRequested(object? sender, DocumentViewModel.FormComboRequest request)
+    {
+        CloseComboPopup();
+        var vm = _vm;
+        if (vm == null) return;
+
+        var list = new ListBox
+        {
+            ItemsSource = request.Combo.Options,
+            MaxHeight = 240,
+            MinWidth = Math.Max(120, request.Combo.WidthPt * request.Page.DisplayScale),
+        };
+        list.SetResourceReference(BackgroundProperty, "InputBg");
+        list.SetResourceReference(ForegroundProperty, "TextBrush");
+        list.SelectedIndex = request.Combo.SelectedIndex; // ДО подписки: без ложного срабатывания
+        list.SelectionChanged += async (_, _) =>
+        {
+            var index = list.SelectedIndex;
+            CloseComboPopup();
+            if (index >= 0)
+                await vm.FormComboSelectAsync(request.Page, request.Combo, index, request.DpiScale);
+        };
+
+        var container = PagesList.ItemContainerGenerator.ContainerFromItem(request.Page) as FrameworkElement;
+        var border = new Border
+        {
+            Child = list,
+            BorderThickness = new Thickness(1),
+        };
+        border.SetResourceReference(Border.BorderBrushProperty, "PanelBorder");
+        _comboPopup = new System.Windows.Controls.Primitives.Popup
+        {
+            PlacementTarget = container ?? PagesList,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Relative,
+            HorizontalOffset = request.Combo.XPt * request.Page.DisplayScale,
+            VerticalOffset = (request.Combo.YPt + request.Combo.HeightPt) * request.Page.DisplayScale,
+            StaysOpen = false,
+            Child = border,
+            IsOpen = true,
+        };
+    }
+
+    private void CloseComboPopup()
+    {
+        if (_comboPopup != null)
+        {
+            _comboPopup.IsOpen = false;
+            _comboPopup = null;
         }
     }
 

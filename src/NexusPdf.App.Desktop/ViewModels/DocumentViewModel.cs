@@ -342,15 +342,43 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         RebuildPages(); // растры перечитываются с полями/новыми значениями
     }
 
+    /// <summary>Запрос показа собственного выпадающего списка combo/list-поля (pdfium попапов не рисует).</summary>
+    public sealed record FormComboRequest(PageViewModel Page, NexusPdf.Pdf.Abstractions.PdfComboInfo Combo, double DpiScale);
+
+    public event EventHandler<FormComboRequest>? FormComboRequested;
+
     public async Task FormClickAsync(PageViewModel page, double xPt, double yPt, double dpiScale)
     {
         if (!IsFormMode || IsBusy) return;
         // Формы принадлежат первичному источнику; вставленные чужие страницы не интерактивны.
         if (page.PageRef.SourceId != Document.PrimarySourceId) return;
 
+        // Выпадающие списки рисуем сами: у pdfium нет собственных попапов.
+        var combo = await Document.PrimaryHandle.GetFormComboAtAsync(
+            page.PageRef.SourcePageIndex, page.PageRef.RotationOffset, xPt, yPt, CancellationToken.None);
+        if (combo != null)
+        {
+            _formActivePage = page;
+            FormComboRequested?.Invoke(this, new FormComboRequest(page, combo, dpiScale));
+            return;
+        }
+
         await Document.PrimaryHandle.FormClickAsync(
             page.PageRef.SourcePageIndex, page.PageRef.RotationOffset, xPt, yPt, CancellationToken.None);
         _formActivePage = page;
+        MarkFormModified();
+        await RefreshFormPageAsync(page, dpiScale);
+    }
+
+    /// <summary>Выбор пункта выпадающего списка (вызывается попапом из View).</summary>
+    public async Task FormComboSelectAsync(
+        PageViewModel page, NexusPdf.Pdf.Abstractions.PdfComboInfo combo, int optionIndex, double dpiScale)
+    {
+        if (!IsFormMode || IsBusy) return;
+        await Document.PrimaryHandle.SetFormComboSelectionAsync(
+            page.PageRef.SourcePageIndex, page.PageRef.RotationOffset,
+            combo.XPt + combo.WidthPt / 2, combo.YPt + combo.HeightPt / 2,
+            optionIndex, CancellationToken.None);
         MarkFormModified();
         await RefreshFormPageAsync(page, dpiScale);
     }
