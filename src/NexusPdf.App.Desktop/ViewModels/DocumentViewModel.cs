@@ -141,6 +141,19 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     private void ZoomActual() => SetZoom(1.0);
 
     /// <summary>Подгон по ширине: вычисляется по самой широкой странице и ширине видимой области (DIU).</summary>
+    private bool _initialFitDone;
+
+    /// <summary>
+    /// Однократная подгонка по ширине при первом показе документа. Дальше
+    /// масштаб принадлежит пользователю и сам не меняется.
+    /// </summary>
+    public void ApplyInitialFit(double viewportWidthDiu)
+    {
+        if (_initialFitDone || viewportWidthDiu < 50) return;
+        _initialFitDone = true;
+        FitWidth(viewportWidthDiu);
+    }
+
     public void FitWidth(double viewportWidthDiu)
     {
         var maxPageWidthPt = Pages.Count == 0 ? 612 : Pages.Max(p => p.SizePt.WidthPoints);

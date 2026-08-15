@@ -257,6 +257,13 @@
                                  Stroke="{Binding Stroke}" StrokeThickness="{Binding StrokeThickness}"
                                  Fill="{Binding Fill}"
                                  Visibility="{Binding IsEllipseShape, Converter={StaticResource BoolToVis}}"/>
+                        <!-- Нарисованное от руки: геометрия уже в пунктах страницы,
+                             масштаб накладывает слой предпросмотра -->
+                        <Path Data="{Binding InkGeometry}" Stroke="{Binding Stroke}"
+                              StrokeThickness="{Binding StrokeThickness}"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              StrokeLineJoin="Round"
+                              Visibility="{Binding IsInk, Converter={StaticResource BoolToVis}}"/>
                       </Grid>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>

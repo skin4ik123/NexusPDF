@@ -423,6 +423,10 @@ public partial class DocumentView : UserControl
             _vm.ViewportWidth = args.ViewportWidth;
             _vm.ViewportHeight = args.ViewportHeight;
             _vm.UpdateCurrentPage(args.VerticalOffset, args.ViewportHeight);
+            // Размер окна становится известен только здесь, поэтому первая
+            // подгонка страницы по ширине делается в этот момент: открывать
+            // документ в 100 %, когда лист шире окна, — плохая встреча.
+            _vm.ApplyInitialFit(args.ViewportWidth);
         };
     }
 
