@@ -110,7 +110,8 @@
           </Button>
           <Button Style="{StaticResource ToolButton}" Command="{Binding AddHighlightCommand}"
                   IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc HighlightTool}">
-            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE7E6;"/>
+            <!-- E7E6 на 16 px читается как тележка из магазина; E891 — маркер с линией -->
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE891;"/>
           </Button>
           <Button Style="{StaticResource ToolButton}" Command="{Binding AddRectShapeCommand}"
                   IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc RectTool}">
@@ -127,7 +128,8 @@
 
           <Button Style="{StaticResource ToolButton}" Command="{Binding EditExistingTextCommand}"
                   IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc TextEditTool}">
-            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8D2;"/>
+            <!-- E8D2 — это «Aa», то есть размер шрифта; правку содержимого обозначает E932 -->
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE932;"/>
           </Button>
 
           <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
@@ -208,7 +210,8 @@
                         ToolTip="{l:Loc FormMode}"
                         Visibility="{Binding ActiveDocument.HasAcroForm, FallbackValue=Collapsed, Converter={StaticResource BoolToVis}}">
             <StackPanel Orientation="Horizontal">
-              <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE70F;"/>
+              <!-- был тот же карандаш, что у рисования: два разных режима одним значком -->
+              <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE762;"/>
               <TextBlock Text="{l:Loc FormModeShort}" Margin="6,0,0,0"/>
             </StackPanel>
           </ToggleButton>
@@ -224,26 +227,14 @@
           </ToggleButton>
           <Popup IsOpen="{Binding IsChecked, ElementName=MenuToggle}" StaysOpen="False"
                  PlacementTarget="{Binding ElementName=MenuToggle}" Placement="Bottom"
-                 AllowsTransparency="True" Closed="OnMenuClosed">
+                 AllowsTransparency="True" Opened="OnMenuOpened" Closed="OnMenuClosed">
             <Border Background="{DynamicResource PanelBg}" BorderBrush="{DynamicResource PanelBorder}"
                     BorderThickness="1" CornerRadius="6" Padding="6" Margin="0,4,8,8" MinWidth="230">
+              <!-- Высота ограничивается в OnMenuOpened по фактической высоте окна:
+                   без этого список из ~28 пунктов просто уезжал за край экрана. -->
+              <ScrollViewer x:Name="MenuScroll" VerticalScrollBarVisibility="Auto"
+                            HorizontalScrollBarVisibility="Disabled">
               <StackPanel>
-                <TextBlock Text="{l:Loc Theme}" Foreground="{DynamicResource TextSecondary}"
-                           FontSize="11" Margin="6,4"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeLight}"
-                        Command="{Binding SetThemeCommand}" CommandParameter="light" Click="OnMenuItem"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeDark}"
-                        Command="{Binding SetThemeCommand}" CommandParameter="dark" Click="OnMenuItem"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeSystem}"
-                        Command="{Binding SetThemeCommand}" CommandParameter="system" Click="OnMenuItem"/>
-                <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
-                <TextBlock Text="{l:Loc Language}" Foreground="{DynamicResource TextSecondary}"
-                           FontSize="11" Margin="6,4"/>
-                <Button Style="{StaticResource LinkButton}" Content="Русский"
-                        Command="{Binding SetLanguageCommand}" CommandParameter="ru" Click="OnMenuItem"/>
-                <Button Style="{StaticResource LinkButton}" Content="English"
-                        Command="{Binding SetLanguageCommand}" CommandParameter="en" Click="OnMenuItem"/>
-                <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
                 <TextBlock Text="{l:Loc DecorSection}" Foreground="{DynamicResource TextSecondary}"
                            FontSize="11" Margin="6,4"/>
                 <Button Style="{StaticResource LinkButton}" Content="{l:Loc HeaderFooterMenu}"
@@ -329,9 +320,33 @@
                 <Button Style="{StaticResource LinkButton}" Content="{l:Loc DetachTab}"
                         Command="{Binding DetachTabCommand}" IsEnabled="{Binding HasDocuments}"
                         Click="OnMenuItem"/>
+                <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
+
+                <!-- Настройки внизу: они нужны раз в жизни, а действия с
+                     документом — постоянно, поэтому наверху теперь они. -->
+                <TextBlock Text="{l:Loc Theme}" Foreground="{DynamicResource TextSecondary}"
+                           FontSize="11" Margin="6,4"/>
+                <StackPanel Orientation="Horizontal" Margin="4,0">
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeLight}" Margin="0,0,10,0"
+                          Command="{Binding SetThemeCommand}" CommandParameter="light" Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeDark}" Margin="0,0,10,0"
+                          Command="{Binding SetThemeCommand}" CommandParameter="dark" Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeSystem}"
+                          Command="{Binding SetThemeCommand}" CommandParameter="system" Click="OnMenuItem"/>
+                </StackPanel>
+                <TextBlock Text="{l:Loc Language}" Foreground="{DynamicResource TextSecondary}"
+                           FontSize="11" Margin="6,4"/>
+                <StackPanel Orientation="Horizontal" Margin="4,0">
+                  <Button Style="{StaticResource LinkButton}" Content="Русский" Margin="0,0,10,0"
+                          Command="{Binding SetLanguageCommand}" CommandParameter="ru" Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="English"
+                          Command="{Binding SetLanguageCommand}" CommandParameter="en" Click="OnMenuItem"/>
+                </StackPanel>
+                <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
                 <Button Style="{StaticResource LinkButton}" Content="{l:Loc About}"
                         Command="{Binding AboutCommand}" Click="OnMenuItem"/>
               </StackPanel>
+              </ScrollViewer>
             </Border>
           </Popup>
         </StackPanel>

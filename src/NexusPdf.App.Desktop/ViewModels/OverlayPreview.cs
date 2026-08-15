@@ -16,6 +16,10 @@ public sealed class OverlayPreview
     public bool IsNote { get; private init; }
     public bool IsRectShape { get; private init; }
     public bool IsEllipseShape { get; private init; }
+    public bool IsInk { get; private init; }
+
+    /// <summary>Готовая геометрия штрихов рисунка в пунктах страницы.</summary>
+    public Geometry? InkGeometry { get; private init; }
     public Brush Stroke { get; private init; } = Brushes.Transparent;
     public double StrokeThickness { get; private init; }
     public string Text { get; private init; } = "";
@@ -120,6 +124,40 @@ public sealed class OverlayPreview
                     WidthPt = redaction.WidthPt,
                     HeightPt = redaction.HeightPt,
                 };
+            case InkAnnotationDraft ink:
+            {
+                // Без этой ветки нарисованное было видно только ПОСЛЕ сохранения:
+                // штрих ложился в модель, но на экране не появлялся, и выглядело
+                // это так, будто инструмент не работает.
+                var geometry = new PathGeometry();
+                foreach (var stroke in ink.Strokes)
+                {
+                    if (stroke.Count < 2) continue;
+                    var figure = new PathFigure
+                    {
+                        StartPoint = new System.Windows.Point(stroke[0].XPt, stroke[0].YPt),
+                        IsClosed = false,
+                        IsFilled = false,
+                    };
+                    for (var i = 1; i < stroke.Count; i++)
+                    {
+                        figure.Segments.Add(new LineSegment(
+                            new System.Windows.Point(stroke[i].XPt, stroke[i].YPt), true));
+                    }
+                    figure.Freeze();
+                    geometry.Figures.Add(figure);
+                }
+                if (geometry.Figures.Count == 0)
+                    return null;
+                geometry.Freeze();
+                return new OverlayPreview
+                {
+                    IsInk = true,
+                    InkGeometry = geometry,
+                    Stroke = MakeBrush(ink.StrokeArgb),
+                    StrokeThickness = ink.WidthPt,
+                };
+            }
             default:
                 return null;
         }

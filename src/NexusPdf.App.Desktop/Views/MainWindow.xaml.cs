@@ -19,6 +19,29 @@ public partial class MainWindow : Window
         viewModel.OwnerWindow = this;
         InitializeComponent();
         PreviewKeyDown += OnPreviewKeyDown;
+        FitToWorkArea();
+    }
+
+    /// <summary>
+    /// Стартовый размер из разметки (1200×800) больше рабочей области на
+    /// ноутбучных экранах вроде 1440×900 при системном масштабе 125–150 %:
+    /// окно уезжало за край, и часть интерфейса была недоступна. Здесь оно
+    /// вписывается в рабочую область, а на тесных экранах разворачивается.
+    /// </summary>
+    private void FitToWorkArea()
+    {
+        var work = SystemParameters.WorkArea;
+        if (work.Width <= 0 || work.Height <= 0)
+            return;
+
+        if (work.Width < Width + 40 || work.Height < Height + 40)
+        {
+            WindowState = WindowState.Maximized;
+            return;
+        }
+
+        Width = Math.Min(Width, work.Width - 40);
+        Height = Math.Min(Height, work.Height - 40);
     }
 
     public static readonly RoutedCommand ToggleFullScreenCommand = new();
@@ -107,4 +130,15 @@ public partial class MainWindow : Window
     private void OnMenuItem(object sender, RoutedEventArgs e) => MenuToggle.IsChecked = false;
 
     private void OnMenuClosed(object sender, EventArgs e) => MenuToggle.IsChecked = false;
+
+    /// <summary>
+    /// Меню открывается под панелью инструментов, поэтому его высота
+    /// ограничивается остатком окна. Иначе список пунктов уезжает за нижний
+    /// край экрана и до дальних пунктов не добраться вообще.
+    /// </summary>
+    private void OnMenuOpened(object sender, EventArgs e)
+    {
+        var available = ActualHeight - MenuToggle.TranslatePoint(new Point(0, MenuToggle.ActualHeight), this).Y;
+        MenuScroll.MaxHeight = Math.Max(240, available - 24);
+    }
 }
