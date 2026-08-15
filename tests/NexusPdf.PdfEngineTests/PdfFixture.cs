@@ -191,6 +191,56 @@ public static class PdfFixture
         return buffer.ToArray();
     }
 
+    /// <summary>Одностраничный PDF с вложенным файлом (/Names /EmbeddedFiles).</summary>
+    public static byte[] BuildWithAttachment(string attachmentName, string attachmentContent)
+    {
+        var objects = new List<string>
+        {
+            // 1: каталог со списком вложений
+            $"<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles << /Names " +
+            $"[({attachmentName}) 4 0 R] >> >> >>",
+            // 2: дерево страниц
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            // 3: страница
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] >>",
+            // 4: описание файла
+            $"<< /Type /Filespec /F ({attachmentName}) /UF ({attachmentName}) " +
+            $"/Desc (Test attachment) /EF << /F 5 0 R >> " +
+            $"/Params << /Size {attachmentContent.Length} /CreationDate (D:20260101000000Z) >> >>",
+            // 5: сам поток вложения
+            $"<< /Type /EmbeddedFile /Subtype /text#2Fplain /Length {attachmentContent.Length} >>\n" +
+            $"stream\n{attachmentContent}\nendstream",
+        };
+
+        var buffer = new MemoryStream();
+        void WriteRaw(string s) => buffer.Write(Encoding.ASCII.GetBytes(s));
+
+        WriteRaw("%PDF-1.7\n");
+        buffer.Write(new byte[] { (byte)'%', 0xE2, 0xE3, 0xCF, 0xD3, (byte)'\n' });
+        var offsets = new long[objects.Count + 1];
+        for (var i = 0; i < objects.Count; i++)
+        {
+            offsets[i + 1] = buffer.Position;
+            WriteRaw($"{i + 1} 0 obj\n{objects[i]}\nendobj\n");
+        }
+        var xrefPosition = buffer.Position;
+        WriteRaw($"xref\n0 {objects.Count + 1}\n");
+        WriteRaw("0000000000 65535 f \n");
+        for (var i = 1; i <= objects.Count; i++)
+            WriteRaw($"{offsets[i]:0000000000} 00000 n \n");
+        WriteRaw($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xrefPosition}\n%%EOF\n");
+        return buffer.ToArray();
+    }
+
+    public static string WriteAttachmentToTemp(string fileName, string attachmentName, string content)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, fileName);
+        File.WriteAllBytes(path, BuildWithAttachment(attachmentName, content));
+        return path;
+    }
+
     public static string WriteOutlineToTemp(string fileName)
     {
         var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));

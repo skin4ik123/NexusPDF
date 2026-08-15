@@ -74,6 +74,15 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     /// </summary>
     Task<PdfImageObject?> GetImageObjectAtAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct);
 
+    /// <summary>Вложенные в документ файлы (имя, описание, размер). Пустой список — вложений нет.</summary>
+    Task<IReadOnlyList<PdfAttachment>> GetAttachmentsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Содержимое вложения. Файл на диск программа не пишет и не открывает —
+    /// это решает вызывающий код после явного согласия пользователя.
+    /// </summary>
+    Task<byte[]> ReadAttachmentAsync(int index, CancellationToken ct);
+
     /// <summary>Текстовый объект страницы под точкой (отображаемые пункты) или null.</summary>
     Task<PdfTextObject?> GetTextObjectAtAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct);
 

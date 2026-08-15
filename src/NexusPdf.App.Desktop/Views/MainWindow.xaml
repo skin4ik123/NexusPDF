@@ -285,6 +285,10 @@
                           Click="OnMenuItem"/>
                   <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
                 </StackPanel>
+                <Button Style="{StaticResource LinkButton}" Content="{l:Loc AttachmentsMenu}"
+                        Command="{Binding ShowAttachmentsCommand}" IsEnabled="{Binding HasDocuments}"
+                        Click="OnMenuItem"/>
+                <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
                 <StackPanel Visibility="{Binding HasImageEditor, Converter={StaticResource BoolToVis}}">
                   <Button Style="{StaticResource LinkButton}" Content="{l:Loc PaintEditMenu}"
                           Command="{Binding EditPageInPaintCommand}" IsEnabled="{Binding HasDocuments}"
