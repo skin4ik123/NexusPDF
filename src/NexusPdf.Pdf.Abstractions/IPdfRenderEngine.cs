@@ -135,6 +135,15 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     /// <summary>Существующие аннотации страницы (без Link/Popup) — для панели комментариев.</summary>
     Task<IReadOnlyList<PdfAnnotationInfo>> GetAnnotationsAsync(int pageIndex, CancellationToken ct);
 
+    // ----- Разрешения документа -----
+
+    /// <summary>
+    /// Флаги разрешений из словаря шифрования PDF. Значение 0xFFFFFFFF означает,
+    /// что документ не защищён и разрешено всё. Используется, чтобы соблюдать
+    /// запрет печати, а не обходить его.
+    /// </summary>
+    Task<uint> GetPermissionsAsync(CancellationToken ct);
+
     // ----- Интерактивные формы (AcroForm) -----
 
     /// <summary>0 — форм нет, 1 — AcroForm, 2/3 — XFA (не поддерживается для заполнения).</summary>

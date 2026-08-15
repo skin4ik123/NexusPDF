@@ -49,6 +49,31 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
         _suspendRecalc = false;
 
         Recalculate();
+        _ = LoadPermissionsAsync();
+    }
+
+    /// <summary>
+    /// Разрешения документа. Читаются асинхронно и пересчитывают план: запрет
+    /// печати обязан блокировать кнопку, а не всплывать после отправки.
+    /// </summary>
+    private PrintPermissions _permissions = PrintPermissions.Unrestricted;
+
+    private async Task LoadPermissionsAsync()
+    {
+        try
+        {
+            var flags = await _document.Document.PrimaryHandle
+                .GetPermissionsAsync(CancellationToken.None);
+            _permissions = PrintPermissions.FromFlags(flags);
+        }
+        catch (Exception ex)
+        {
+            // Не смогли прочитать — считаем, что ограничений нет: молча
+            // запрещать печать обычного документа хуже, чем не заметить запрет.
+            Serilog.Log.Warning(ex, "Не удалось прочитать разрешения документа");
+            _permissions = PrintPermissions.Unrestricted;
+        }
+        Recalculate();
     }
 
     // ----- Принтер -----
@@ -270,7 +295,7 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
             Duplex = Duplex,
             CollationBy = caps.SupportsCollation ? CollationExecutor.Printer : CollationExecutor.Application,
         };
-        plan = plan with { Issues = Preflight.Analyze(plan) };
+        plan = plan with { Issues = Preflight.Analyze(plan, _permissions) };
         Plan = plan;
 
         Issues.Clear();

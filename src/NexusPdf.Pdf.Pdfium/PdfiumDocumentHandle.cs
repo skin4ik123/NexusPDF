@@ -278,6 +278,19 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
 
     // ----- Формы -----
 
+    public Task<uint> GetPermissionsAsync(CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            // У незашифрованного документа PDFium возвращает все единицы —
+            // это и есть «ограничений нет», а не «всё запрещено».
+            // Биндинг отдаёт ulong; значащие только младшие 32 бита.
+            return _thread.InvokeAsync(
+                () => (uint)fpdfview.FPDF_GetDocPermissions(NativeDoc), ct);
+        }
+    }
+
     public Task<int> GetFormTypeAsync(CancellationToken ct)
     {
         lock (_admissionGate)

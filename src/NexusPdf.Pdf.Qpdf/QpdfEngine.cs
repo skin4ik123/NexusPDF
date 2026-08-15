@@ -88,14 +88,31 @@ public sealed class QpdfEngine : IPdfStructureEngine, IPdfSecurityEngine, IPdfVa
         return RunExpectSuccessAsync(args, "Оптимизация", ct);
     }
 
-    public Task EncryptAsync(string sourcePath, string targetPath, string userPassword, string? ownerPassword, CancellationToken ct)
+    /// <param name="allowPrint">
+    /// false — в защищённой копии печать запрещается флагом разрешений PDF.
+    /// Нужен и для тестов соблюдения запрета, и для будущей настройки прав.
+    /// </param>
+    public Task EncryptAsync(
+        string sourcePath, string targetPath, string userPassword, string? ownerPassword,
+        CancellationToken ct) =>
+        EncryptAsync(sourcePath, targetPath, userPassword, ownerPassword, ct, allowPrint: true);
+
+    public Task EncryptAsync(
+        string sourcePath, string targetPath, string userPassword, string? ownerPassword,
+        CancellationToken ct, bool allowPrint)
     {
         if (string.IsNullOrEmpty(userPassword))
             throw new ArgumentException("Пароль открытия не может быть пустым.", nameof(userPassword));
         var owner = string.IsNullOrEmpty(ownerPassword) ? userPassword : ownerPassword;
-        return RunExpectSuccessAsync(
-            new[] { "--encrypt", userPassword, owner, "256", "--", sourcePath, targetPath },
-            "Шифрование", ct);
+
+        var args = new List<string> { "--encrypt", userPassword, owner, "256" };
+        if (!allowPrint)
+            args.Add("--print=none");
+        args.Add("--");
+        args.Add(sourcePath);
+        args.Add(targetPath);
+
+        return RunExpectSuccessAsync(args.ToArray(), "Шифрование", ct);
     }
 
     public Task DecryptAsync(string sourcePath, string targetPath, string password, CancellationToken ct) =>
