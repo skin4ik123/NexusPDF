@@ -57,6 +57,17 @@
           <TextBlock Text="{Binding PrinterStatusText}" Foreground="{DynamicResource TextBrush}" FontSize="12"/>
           <TextBlock Text="{Binding SelectedPrinter.Location}" Foreground="{DynamicResource TextSecondary}"
                      FontSize="12" Margin="14,0,0,0"/>
+          <TextBlock Text="{l:Loc PrintProfile}" Style="{StaticResource FieldLabel}" Margin="24,0,8,0"/>
+          <ComboBox Width="190" ItemsSource="{Binding Profiles}" SelectedItem="{Binding SelectedProfile}"
+                    DisplayMemberPath="Name" AutomationProperties.Name="{l:Loc PrintProfile}"/>
+          <Button Style="{StaticResource ToolButton}" Margin="6,0,0,0" Click="OnSaveProfile"
+                  ToolTip="{l:Loc PrintProfileSave}">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE74E;" FontSize="12"/>
+          </Button>
+          <Button Style="{StaticResource ToolButton}" Command="{Binding DeleteProfileCommand}"
+                  IsEnabled="{Binding CanDeleteProfile}" ToolTip="{l:Loc PrintProfileDelete}">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE74D;" FontSize="12"/>
+          </Button>
         </StackPanel>
       </Grid>
     </Border>
@@ -248,6 +259,30 @@
             <CheckBox Content="{l:Loc PrintAsImage}" IsChecked="{Binding PrintAsImage}" Margin="0,8,0,0"
                       Foreground="{DynamicResource TextBrush}"/>
 
+            <TextBlock Text="{l:Loc PrintGroupMarks}" Style="{StaticResource GroupCaption}"/>
+            <CheckBox Content="{l:Loc PrintMarkCrop}" Foreground="{DynamicResource TextBrush}"
+                      IsChecked="{Binding MarkCrop}"/>
+            <CheckBox Content="{l:Loc PrintMarkRegistration}" Margin="0,4,0,0" Foreground="{DynamicResource TextBrush}"
+                      IsChecked="{Binding MarkRegistration}"/>
+            <CheckBox Content="{l:Loc PrintMarkBleed}" Margin="0,4,0,0" Foreground="{DynamicResource TextBrush}"
+                      IsChecked="{Binding MarkBleed}"/>
+            <CheckBox Content="{l:Loc PrintMarkFold}" Margin="0,4,0,0" Foreground="{DynamicResource TextBrush}"
+                      IsChecked="{Binding MarkFold}"/>
+            <CheckBox Content="{l:Loc PrintMarkPageInfo}" Margin="0,4,0,0" Foreground="{DynamicResource TextBrush}"
+                      IsChecked="{Binding MarkPageInfo}"/>
+            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+              <TextBlock Text="{l:Loc PrintBleed}" Style="{StaticResource FieldLabel}"/>
+              <TextBox Text="{Binding BleedMm, Delay=400}" Width="54" Style="{StaticResource ThemedTextBox}"
+                       AutomationProperties.Name="{l:Loc PrintBleed}"/>
+              <TextBlock Text="мм" Style="{StaticResource FieldLabel}" Margin="6,0,0,0"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+              <TextBlock Text="{l:Loc PrintUserMargin}" Style="{StaticResource FieldLabel}"/>
+              <TextBox Text="{Binding UserMarginMm, Delay=400}" Width="54" Style="{StaticResource ThemedTextBox}"
+                       AutomationProperties.Name="{l:Loc PrintUserMargin}"/>
+              <TextBlock Text="мм" Style="{StaticResource FieldLabel}" Margin="6,0,0,0"/>
+            </StackPanel>
+
             <ItemsControl ItemsSource="{Binding Issues}" Margin="0,14,0,0">
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
@@ -271,9 +306,22 @@
     <Border Grid.Row="2" Background="{DynamicResource ToolbarBg}"
             BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,1,0,0" Padding="16,10">
       <Grid>
-        <TextBlock Text="{Binding SummaryText}" Foreground="{DynamicResource TextSecondary}"
-                   FontSize="12" VerticalAlignment="Center"/>
+        <StackPanel VerticalAlignment="Center">
+          <TextBlock Text="{Binding SummaryText}" Foreground="{DynamicResource TextSecondary}" FontSize="12"/>
+          <StackPanel Orientation="Horizontal" Margin="0,6,0,0"
+                      Visibility="{Binding IsSubmitting, Converter={StaticResource BoolToVis}}">
+            <ProgressBar Value="{Binding SubmitProgress}" Maximum="100" Width="240" Height="6"
+                         VerticalAlignment="Center"/>
+            <TextBlock Text="{Binding SubmitStatus}" Foreground="{DynamicResource TextBrush}"
+                       FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center"/>
+          </StackPanel>
+        </StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+          <!-- Отмена подготовки видна только пока она идёт: длинное задание
+               обязано прерываться, а не «доедать» тысячу листов. -->
+          <Button Content="{l:Loc PrintStop}" Style="{StaticResource LinkButton}"
+                  Command="{Binding CancelSubmitCommand}"
+                  Visibility="{Binding IsSubmitting, Converter={StaticResource BoolToVis}}"/>
           <Button Content="{l:Loc PrintSaveToFile}" Style="{StaticResource LinkButton}"
                   IsEnabled="{Binding CanSaveToFile}" Click="OnSaveToFile"/>
           <Button x:Name="PrintButton" Content="{l:Loc Print}" Style="{StaticResource PrimaryButton}"

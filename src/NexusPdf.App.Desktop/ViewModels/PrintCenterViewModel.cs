@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.Input;
 using NexusPdf.App.Desktop.Localization;
 using NexusPdf.App.Desktop.Services;
 using NexusPdf.Application;
+using NexusPdf.Infrastructure;
 using NexusPdf.Printing;
 using NexusPdf.Printing.Windows;
 
@@ -45,6 +46,7 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
 
         _suspendRecalc = true;
         LoadPrinters();
+        LoadProfiles();
         CurrentPageNumber = document.CurrentPageNumber;
         _suspendRecalc = false;
 
@@ -142,6 +144,214 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
         SelectedPrinter = Printers.FirstOrDefault(p => p.IsDefault) ?? Printers.FirstOrDefault();
         OnPropertyChanged(nameof(HasPrinter));
         OnPropertyChanged(nameof(PrinterStatusText));
+    }
+
+    // ----- Профили -----
+
+    private readonly PrintProfileStore _profileStore = new();
+
+    public ObservableCollection<PrintProfile> Profiles { get; } = new();
+
+    [ObservableProperty]
+    private PrintProfile? _selectedProfile;
+
+    partial void OnSelectedProfileChanged(PrintProfile? value)
+    {
+        if (value == null || _applyingProfile) return;
+        ApplyProfile(value);
+    }
+
+    private bool _applyingProfile;
+
+    private void LoadProfiles()
+    {
+        Profiles.Clear();
+        foreach (var profile in _profileStore.LoadAll())
+            Profiles.Add(profile);
+
+        // Профиль показывается выбранным, но НЕ применяется: применение
+        // затёрло бы настройки, уже подогнанные под возможности принтера
+        // (например, серый режим на монохромном устройстве).
+        _applyingProfile = true;
+        SelectedProfile ??= Profiles.FirstOrDefault();
+        _applyingProfile = false;
+    }
+
+    /// <summary>
+    /// Раскладывает профиль по настройкам окна одним пересчётом: применять
+    /// два десятка свойств по одному значило бы два десятка пересборок плана.
+    /// </summary>
+    private void ApplyProfile(PrintProfile profile)
+    {
+        _applyingProfile = true;
+        _suspendRecalc = true;
+        try
+        {
+            Imposition = profile.Imposition;
+            SizeMode = profile.Size;
+            CustomScalePercent = profile.CustomScale * 100;
+            Orientation = profile.Orientation;
+            NUpRows = profile.NUpRows;
+            NUpColumns = profile.NUpColumns;
+            PosterScalePercent = profile.PosterScale * 100;
+            PosterOverlapMm = Units.PointsToUnit(profile.PosterOverlapPt, LengthUnit.Millimeters);
+            SignatureSize = profile.SignatureSize;
+            CompensateCreep = profile.CompensateCreep;
+            Duplex = profile.Duplex;
+            Color = profile.Color;
+            Annotations = profile.Annotations;
+            PrintAsImage = profile.PrintAsImage;
+            MarkPreset = profile.Marks;
+            BleedMm = Units.PointsToUnit(profile.BleedPt, LengthUnit.Millimeters);
+            UserMarginMm = Units.PointsToUnit(profile.UserMarginPt, LengthUnit.Millimeters);
+            Parity = profile.Parity;
+
+            if (profile.PaperName.Length > 0)
+            {
+                var paper = PaperSizes.FirstOrDefault(p => p.Name == profile.PaperName);
+                if (paper != null) SelectedPaper = paper;
+            }
+        }
+        finally
+        {
+            _suspendRecalc = false;
+            _applyingProfile = false;
+        }
+        Recalculate();
+    }
+
+    /// <summary>Сохраняет текущие настройки под указанным именем.</summary>
+    public void SaveProfile(string name)
+    {
+        var profile = PrintProfile.FromSettings(name, BuildSettings(),
+            SelectedPrinter?.PrinterName ?? "", SelectedPaper?.Name ?? "")
+            with { Parity = Parity };
+        _profileStore.Save(profile);
+
+        LoadProfiles();
+        _applyingProfile = true;
+        SelectedProfile = Profiles.FirstOrDefault(p =>
+            string.Equals(p.Name, name, StringComparison.CurrentCultureIgnoreCase));
+        _applyingProfile = false;
+    }
+
+    public bool CanDeleteProfile => SelectedProfile is { IsBuiltIn: false };
+
+    [RelayCommand]
+    private void DeleteProfile()
+    {
+        if (SelectedProfile is not { IsBuiltIn: false } profile) return;
+        _profileStore.Delete(profile.Name);
+        LoadProfiles();
+        _applyingProfile = true;
+        SelectedProfile = Profiles.FirstOrDefault();
+        _applyingProfile = false;
+    }
+
+    // ----- Метки и поля -----
+
+    /// <summary>
+    /// Набор меток. Каждая метка — отдельное свойство, а не флаг через
+    /// конвертер: обратное преобразование одного бита не знает остальных,
+    /// и такой конвертер неизбежно терял бы соседние галочки.
+    /// </summary>
+    private PrinterMarks _markPreset = PrinterMarks.None;
+
+    public PrinterMarks MarkPreset
+    {
+        get => _markPreset;
+        set
+        {
+            if (_markPreset == value) return;
+            _markPreset = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(MarkCrop));
+            OnPropertyChanged(nameof(MarkRegistration));
+            OnPropertyChanged(nameof(MarkBleed));
+            OnPropertyChanged(nameof(MarkFold));
+            OnPropertyChanged(nameof(MarkPageInfo));
+            Recalculate();
+        }
+    }
+
+    private void SetMark(PrinterMarks flag, bool on) =>
+        MarkPreset = on ? MarkPreset | flag : MarkPreset & ~flag;
+
+    public bool MarkCrop
+    {
+        get => MarkPreset.HasFlag(PrinterMarks.CropMarks);
+        set => SetMark(PrinterMarks.CropMarks, value);
+    }
+
+    public bool MarkRegistration
+    {
+        get => MarkPreset.HasFlag(PrinterMarks.RegistrationMarks);
+        set => SetMark(PrinterMarks.RegistrationMarks, value);
+    }
+
+    public bool MarkBleed
+    {
+        get => MarkPreset.HasFlag(PrinterMarks.BleedMarks);
+        set => SetMark(PrinterMarks.BleedMarks, value);
+    }
+
+    public bool MarkFold
+    {
+        get => MarkPreset.HasFlag(PrinterMarks.FoldMarks);
+        set => SetMark(PrinterMarks.FoldMarks, value);
+    }
+
+    public bool MarkPageInfo
+    {
+        get => MarkPreset.HasFlag(PrinterMarks.PageInformation);
+        set => SetMark(PrinterMarks.PageInformation, value);
+    }
+
+    [ObservableProperty] private double _bleedMm;
+    partial void OnBleedMmChanged(double value) => Recalculate();
+
+    [ObservableProperty] private double _userMarginMm;
+    partial void OnUserMarginMmChanged(double value) => Recalculate();
+
+    // ----- Ход отправки -----
+
+    [ObservableProperty] private bool _isSubmitting;
+
+    [ObservableProperty] private double _submitProgress;
+
+    [ObservableProperty] private string _submitStatus = "";
+
+    private CancellationTokenSource? _submitCts;
+
+    /// <summary>Токен текущей отправки: длинное задание обязано прерываться.</summary>
+    public CancellationToken BeginSubmit(string status)
+    {
+        _submitCts?.Cancel();
+        _submitCts = new CancellationTokenSource();
+        IsSubmitting = true;
+        SubmitProgress = 0;
+        SubmitStatus = status;
+        return _submitCts.Token;
+    }
+
+    public void ReportSubmit(int done, int total)
+    {
+        SubmitProgress = total <= 0 ? 0 : (double)done / total * 100.0;
+        SubmitStatus = Loc.F("PrintSubmitProgress", done, total);
+    }
+
+    public void EndSubmit()
+    {
+        IsSubmitting = false;
+        SubmitProgress = 0;
+        SubmitStatus = "";
+    }
+
+    [RelayCommand]
+    private void CancelSubmit()
+    {
+        _submitCts?.Cancel();
+        SubmitStatus = Loc.Get("PrintCancelling");
     }
 
     // ----- Страницы -----
@@ -284,6 +494,10 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
 
         var settings = BuildSettings();
         var sheets = _engine.BuildSheets(pages, settings, paper, caps);
+        sheets = _engine.ApplyMarksAndOverlays(sheets, settings, new OverlayContext(
+            System.IO.Path.GetFileName(_document.Title), 1, sheets.Count,
+            1, Math.Max(1, Copies), DateTime.Now.ToString("dd.MM.yyyy"),
+            caps.PrinterName, Environment.UserName));
 
         var plan = new PrintJobPlan
         {
@@ -330,6 +544,13 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
         {
             Scale = Math.Max(0.01, PosterScalePercent / 100.0),
             OverlapPt = Units.UnitToPoints(Math.Max(0, PosterOverlapMm), LengthUnit.Millimeters),
+        },
+        UserMarginsPt = MarginsPt.Uniform(
+            Units.UnitToPoints(Math.Max(0, UserMarginMm), LengthUnit.Millimeters)),
+        Marks = new MarkSettings
+        {
+            Marks = MarkPreset,
+            BleedPt = Units.UnitToPoints(Math.Max(0, BleedMm), LengthUnit.Millimeters),
         },
         Booklet = new BookletSettings
         {

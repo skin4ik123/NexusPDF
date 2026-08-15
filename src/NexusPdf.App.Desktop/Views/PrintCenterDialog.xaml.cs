@@ -62,6 +62,15 @@ public partial class PrintCenterDialog : Window
         }
     }
 
+    private void OnSaveProfile(object sender, RoutedEventArgs e)
+    {
+        var name = TextPromptDialog.Ask(this,
+            Loc.Get("PrintProfileSave"), Loc.Get("PrintProfileName"),
+            _model.SelectedProfile is { IsBuiltIn: false } p ? p.Name : "");
+        if (string.IsNullOrWhiteSpace(name)) return;
+        _model.SaveProfile(name.Trim());
+    }
+
     private async void OnSaveToFile(object sender, RoutedEventArgs e)
     {
         if (_model.Plan is not { } plan) return;
@@ -75,15 +84,22 @@ public partial class PrintCenterDialog : Window
         };
         if (dialog.ShowDialog(this) != true) return;
 
-        IsEnabled = false;
+        var ct = _model.BeginSubmit(Loc.Get("PrintSaveToFile"));
         try
         {
+            var progress = new Progress<(int Done, int Total)>(p => _model.ReportSubmit(p.Done, p.Total));
             var result = await new PrintToFileService(_services.Engine)
-                .SaveAsync(_document.Document, plan, dialog.FileName, 300, null, CancellationToken.None);
+                .SaveAsync(_document.Document, plan, dialog.FileName, 300, progress, ct);
 
             InfoDialog.Show(this, Loc.Get("PrintSaveToFile"),
                 Loc.F("PrintSavedToFile", result.SheetsWritten, Math.Round(result.EffectiveDpi)));
             DialogResult = true;
+        }
+        catch (OperationCanceledException)
+        {
+            // Остановка — не ошибка: окно остаётся открытым, чтобы можно было
+            // поправить настройки и попробовать снова.
+            InfoDialog.Show(this, Loc.Get("PrintSaveToFile"), Loc.F("PrintCancelled", 0));
         }
         catch (Exception ex)
         {
@@ -92,7 +108,7 @@ public partial class PrintCenterDialog : Window
         }
         finally
         {
-            IsEnabled = true;
+            _model.EndSubmit();
         }
     }
 
@@ -100,15 +116,22 @@ public partial class PrintCenterDialog : Window
     {
         if (_model.Plan is not { } plan || _model.SelectedPrinter == null) return;
 
-        IsEnabled = false;
+        var ct = _model.BeginSubmit(Loc.Get("Printing"));
         try
         {
-            var job = await _services.PrintJobs.SubmitAsync(
-                _document.Document, plan, progress: null, CancellationToken.None);
+            var progress = new Progress<Services.Printing.PrintProgress>(
+                p => _model.ReportSubmit(p.SheetsDone, p.SheetsTotal));
+            var job = await _services.PrintJobs.SubmitAsync(_document.Document, plan, progress, ct);
 
             InfoDialog.Show(this, Loc.Get("Print"),
                 Loc.F("PrintJobQueued", job.SheetsSent, plan.PrinterName));
             DialogResult = true;
+        }
+        catch (OperationCanceledException)
+        {
+            // Часть листов уже могла уйти в очередь — говорим об этом прямо,
+            // а не делаем вид, что ничего не произошло.
+            InfoDialog.Show(this, Loc.Get("Print"), Loc.F("PrintCancelled", 0));
         }
         catch (Exception ex)
         {
@@ -117,7 +140,7 @@ public partial class PrintCenterDialog : Window
         }
         finally
         {
-            IsEnabled = true;
+            _model.EndSubmit();
         }
     }
 
