@@ -823,6 +823,46 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    // ----- Рельс инструментов (левая колонка) -----
+
+    /// <summary>
+    /// Группы инструментов рельса. Панель сверху показывает настройки только
+    /// ВЫБРАННОЙ группы: раньше все двадцать кнопок и палитра рисования жили
+    /// в одной строке и не помещались.
+    /// </summary>
+    public enum ToolGroup { None, Pages, Comment, Edit, Forms, Protect }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasToolGroup))]
+    [NotifyPropertyChangedFor(nameof(IsGroupPages))]
+    [NotifyPropertyChangedFor(nameof(IsGroupComment))]
+    [NotifyPropertyChangedFor(nameof(IsGroupEdit))]
+    [NotifyPropertyChangedFor(nameof(IsGroupForms))]
+    [NotifyPropertyChangedFor(nameof(IsGroupProtect))]
+    private ToolGroup _activeToolGroup = ToolGroup.None;
+
+    public bool HasToolGroup => ActiveToolGroup != ToolGroup.None;
+    public bool IsGroupPages => ActiveToolGroup == ToolGroup.Pages;
+    public bool IsGroupComment => ActiveToolGroup == ToolGroup.Comment;
+    public bool IsGroupEdit => ActiveToolGroup == ToolGroup.Edit;
+    public bool IsGroupForms => ActiveToolGroup == ToolGroup.Forms;
+    public bool IsGroupProtect => ActiveToolGroup == ToolGroup.Protect;
+
+    [RelayCommand]
+    private void SelectToolGroup(string? name)
+    {
+        if (!Enum.TryParse<ToolGroup>(name, out var group))
+            return;
+        ActiveToolGroup = ActiveToolGroup == group ? ToolGroup.None : group;
+
+        if (ActiveDocument is not { } doc) return;
+        // «Страницы» — это режим просмотра, а не набор кнопок, поэтому рельс
+        // переключает его напрямую.
+        doc.IsOrganizeMode = ActiveToolGroup == ToolGroup.Pages;
+        if (ActiveToolGroup != ToolGroup.Comment)
+            doc.SelectDrawTool(DocumentViewModel.DrawTool.None);
+    }
+
     // ----- Рисование от руки -----
 
     /// <summary>Палитра рисования: контрастные цвета, различимые и на белом, и на скане.</summary>

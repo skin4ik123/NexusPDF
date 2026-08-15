@@ -39,14 +39,21 @@
   </Window.InputBindings>
 
   <Grid>
+    <!-- 0 — файловая строка, 1 — контекстная панель группы,
+         2 — рельс + документ, 3 — строка состояния -->
     <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
       <RowDefinition Height="Auto"/>
       <RowDefinition Height="*"/>
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="Auto"/>
+      <ColumnDefinition Width="*"/>
+    </Grid.ColumnDefinitions>
 
     <!-- Панель инструментов -->
-    <Border Grid.Row="0" Background="{DynamicResource ToolbarBg}"
+    <Border Grid.Row="0" Grid.ColumnSpan="2" Background="{DynamicResource ToolbarBg}"
             BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,0,1">
       <Grid Margin="8,4">
         <StackPanel Orientation="Horizontal">
@@ -88,22 +95,24 @@
 
           <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
 
-          <ToggleButton Style="{StaticResource ToolButton}"
-                        IsChecked="{Binding ActiveDocument.IsOrganizeMode, FallbackValue=False}"
-                        IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc OrganizeTooltip}">
-            <StackPanel Orientation="Horizontal">
-              <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xF0E2;"/>
-              <TextBlock Text="{l:Loc ViewOrganize}" Margin="6,0,0,0"/>
-            </StackPanel>
-          </ToggleButton>
-
+          <!-- «Страницы» больше нет: этот режим включает рельс слева -->
           <Button Style="{StaticResource ToolButton}" Command="{Binding ToggleFindActiveCommand}"
                   IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc FindTooltip}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE721;"/>
           </Button>
 
-          <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
+        </StackPanel>
+      </Grid>
+    </Border>
 
+    <!-- Контекстная панель выбранной группы инструментов -->
+    <Border Grid.Row="1" Grid.ColumnSpan="2" Background="{DynamicResource PanelBg}"
+            BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,0,1"
+            Visibility="{Binding HasToolGroup, Converter={StaticResource BoolToVis}}">
+      <Grid Margin="10,4">
+        <!-- Комментарии и рисование -->
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                    Visibility="{Binding IsGroupComment, Converter={StaticResource BoolToVis}}">
           <Button Style="{StaticResource ToolButton}" Command="{Binding AddNoteCommand}"
                   IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc NoteTool}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE90A;"/>
@@ -121,17 +130,6 @@
                   IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc EllipseTool}">
             <TextBlock Text="◯" FontSize="13"/>
           </Button>
-          <Button Style="{StaticResource ToolButton}" Command="{Binding AddRedactionCommand}"
-                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc RedactTool}">
-            <TextBlock Text="▮" FontSize="14" Foreground="#DC2626"/>
-          </Button>
-
-          <Button Style="{StaticResource ToolButton}" Command="{Binding EditExistingTextCommand}"
-                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc TextEditTool}">
-            <!-- E8D2 — это «Aa», то есть размер шрифта; правку содержимого обозначает E932 -->
-            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE932;"/>
-          </Button>
-
           <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
 
           <!-- Рисование: карандаш, линия, стрелка -->
@@ -198,26 +196,102 @@
                     Visibility="{Binding ActiveDocument.CanRestoreFreeStroke,
                                  FallbackValue=Collapsed, Converter={StaticResource BoolToVis}}"/>
           </StackPanel>
+          <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
           <ToggleButton Style="{StaticResource ToolButton}"
                         IsChecked="{Binding ActiveDocument.IsCommentsVisible, Mode=OneWay}"
                         Command="{Binding ToggleCommentsActiveCommand}"
                         IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc CommentsPanel}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8BD;"/>
           </ToggleButton>
+        </StackPanel>
+
+        <!-- Правка содержимого -->
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                    Visibility="{Binding IsGroupEdit, Converter={StaticResource BoolToVis}}">
+          <Button Style="{StaticResource ToolButton}" Command="{Binding EditExistingTextCommand}"
+                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc TextEditTool}">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE932;"/>
+              <TextBlock Text="{l:Loc TextEditShort}" Margin="6,0,0,0"/>
+            </StackPanel>
+          </Button>
+          <Button Style="{StaticResource ToolButton}" Command="{Binding AddTextOverlayCommand}"
+                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc AddTextMenu}">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8D2;"/>
+          </Button>
+          <Button Style="{StaticResource ToolButton}" Command="{Binding InsertImageOverlayCommand}"
+                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc InsertImageMenu}">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xEB9F;"/>
+          </Button>
+          <Button Style="{StaticResource ToolButton}" Command="{Binding InsertSignatureCommand}"
+                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc InsertSignatureMenu}">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE70F;"/>
+          </Button>
+          <StackPanel Orientation="Horizontal"
+                      Visibility="{Binding HasImageEditor, Converter={StaticResource BoolToVis}}">
+            <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
+            <Button Style="{StaticResource ToolButton}" Command="{Binding EditImageInPaintCommand}"
+                    IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc PaintEditImageMenu}">
+              <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE771;"/>
+            </Button>
+            <Button Style="{StaticResource ToolButton}" Command="{Binding EditRegionInPaintCommand}"
+                    IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc PaintEditRegionMenu}">
+              <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE7C4;"/>
+            </Button>
+          </StackPanel>
+        </StackPanel>
+
+        <!-- Формы -->
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                    Visibility="{Binding IsGroupForms, Converter={StaticResource BoolToVis}}">
           <ToggleButton Style="{StaticResource ToolButton}"
                         IsChecked="{Binding ActiveDocument.IsFormMode, Mode=OneWay}"
                         Command="{Binding ToggleFormModeActiveCommand}"
-                        ToolTip="{l:Loc FormMode}"
-                        Visibility="{Binding ActiveDocument.HasAcroForm, FallbackValue=Collapsed, Converter={StaticResource BoolToVis}}">
+                        ToolTip="{l:Loc FormMode}">
             <StackPanel Orientation="Horizontal">
-              <!-- был тот же карандаш, что у рисования: два разных режима одним значком -->
               <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE762;"/>
               <TextBlock Text="{l:Loc FormModeShort}" Margin="6,0,0,0"/>
             </StackPanel>
           </ToggleButton>
+          <TextBlock Text="{l:Loc FormHint}" VerticalAlignment="Center" Margin="12,0,0,0"
+                     FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
         </StackPanel>
 
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+        <!-- Защита -->
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                    Visibility="{Binding IsGroupProtect, Converter={StaticResource BoolToVis}}">
+          <Button Style="{StaticResource ToolButton}" Command="{Binding AddRedactionCommand}"
+                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc RedactTool}">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="▮" FontSize="14" Foreground="#DC2626"/>
+              <TextBlock Text="{l:Loc RedactShort}" Margin="6,0,0,0"/>
+            </StackPanel>
+          </Button>
+          <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
+          <Button Style="{StaticResource ToolButton}" Command="{Binding ProtectWithPasswordCommand}"
+                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc ProtectPdf}">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE72E;"/>
+          </Button>
+          <Button Style="{StaticResource ToolButton}" Command="{Binding SignWithCertificateCommand}"
+                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc SignMenu}">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8EC;"/>
+          </Button>
+        </StackPanel>
+
+        <!-- Страницы: подсказка режима систематизации -->
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                    Visibility="{Binding IsGroupPages, Converter={StaticResource BoolToVis}}">
+          <TextBlock Text="{l:Loc OrganizeHint}" VerticalAlignment="Center"
+                     FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Правый край файловой строки: отдельный слой, чтобы кнопки не наезжали
+         на левую группу при узком окне -->
+    <Border Grid.Row="0" Grid.ColumnSpan="2" Background="Transparent"
+            HorizontalAlignment="Right" Margin="0,4,8,0">
+      <StackPanel Orientation="Horizontal">
           <Button Style="{StaticResource ToolButton}" Command="{Binding NewWindowCommand}"
                   ToolTip="{l:Loc NewWindow}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE78B;"/>
@@ -349,12 +423,12 @@
               </ScrollViewer>
             </Border>
           </Popup>
-        </StackPanel>
-      </Grid>
+      </StackPanel>
     </Border>
 
     <!-- Стартовый экран -->
-    <Grid Grid.Row="1" Visibility="{Binding HasDocuments, Converter={StaticResource InvBoolToVis}}">
+    <Grid Grid.Row="2" Grid.ColumnSpan="2"
+          Visibility="{Binding HasDocuments, Converter={StaticResource InvBoolToVis}}">
       <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="520">
         <TextBlock Text="NexusPDF" FontSize="34" FontWeight="SemiBold"
                    Foreground="{DynamicResource TextBrush}" HorizontalAlignment="Center"/>
@@ -397,7 +471,34 @@
     </Grid>
 
     <!-- Документы -->
-    <TabControl Grid.Row="1" ItemsSource="{Binding Documents}" SelectedItem="{Binding ActiveDocument}"
+    <!-- Рельс инструментов: группы, а не двадцать безымянных значков в строке -->
+    <Border Grid.Row="2" Grid.Column="0" Width="76"
+            Background="{DynamicResource PanelBg}"
+            BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,1,0"
+            Visibility="{Binding HasDocuments, Converter={StaticResource BoolToVis}}">
+      <StackPanel Margin="0,6">
+        <ToggleButton Style="{StaticResource RailButton}" Tag="&#xE8A9;" Content="{l:Loc RailPages}"
+                      IsChecked="{Binding IsGroupPages, Mode=OneWay}"
+                      Command="{Binding SelectToolGroupCommand}" CommandParameter="Pages"
+                      ToolTip="{l:Loc OrganizeTooltip}"/>
+        <ToggleButton Style="{StaticResource RailButton}" Tag="&#xE90A;" Content="{l:Loc RailComment}"
+                      IsChecked="{Binding IsGroupComment, Mode=OneWay}"
+                      Command="{Binding SelectToolGroupCommand}" CommandParameter="Comment"/>
+        <ToggleButton Style="{StaticResource RailButton}" Tag="&#xE932;" Content="{l:Loc RailEdit}"
+                      IsChecked="{Binding IsGroupEdit, Mode=OneWay}"
+                      Command="{Binding SelectToolGroupCommand}" CommandParameter="Edit"/>
+        <ToggleButton Style="{StaticResource RailButton}" Tag="&#xE762;" Content="{l:Loc RailForms}"
+                      IsChecked="{Binding IsGroupForms, Mode=OneWay}"
+                      Command="{Binding SelectToolGroupCommand}" CommandParameter="Forms"
+                      Visibility="{Binding ActiveDocument.HasAcroForm, FallbackValue=Collapsed,
+                                   Converter={StaticResource BoolToVis}}"/>
+        <ToggleButton Style="{StaticResource RailButton}" Tag="&#xE72E;" Content="{l:Loc RailProtect}"
+                      IsChecked="{Binding IsGroupProtect, Mode=OneWay}"
+                      Command="{Binding SelectToolGroupCommand}" CommandParameter="Protect"/>
+      </StackPanel>
+    </Border>
+
+    <TabControl Grid.Row="2" Grid.Column="1" ItemsSource="{Binding Documents}" SelectedItem="{Binding ActiveDocument}"
                 Visibility="{Binding HasDocuments, Converter={StaticResource BoolToVis}}"
                 Background="Transparent" BorderThickness="0" Padding="0"
                 ItemContainerStyle="{StaticResource DocTabItem}">
@@ -427,7 +528,7 @@
     </TabControl>
 
     <!-- Строка состояния -->
-    <Border Grid.Row="2" Background="{DynamicResource ToolbarBg}"
+    <Border Grid.Row="3" Grid.ColumnSpan="2" Background="{DynamicResource ToolbarBg}"
             BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,1,0,0">
       <Grid Margin="10,3">
         <StackPanel Orientation="Horizontal">
