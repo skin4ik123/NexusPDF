@@ -1,4 +1,4 @@
-using NexusPdf.Pdf.Abstractions;
+﻿using NexusPdf.Pdf.Abstractions;
 using Tesseract;
 
 namespace NexusPdf.Ocr;
@@ -14,9 +14,13 @@ public sealed record OcrPageResult(IReadOnlyList<OcrWord> Words, float MeanConfi
 /// Пока моделей нет — движок честно недоступен, кнопка OCR не показывается.
 /// TesseractEngine не потокобезопасен: все вызовы сериализуются общим замком.
 /// </summary>
-public sealed class TesseractOcrEngine : IDisposable
+public sealed class TesseractOcrEngine : ITextRecognizer
 {
     public const string Languages = "rus+eng";
+
+    public string Id => "tesseract";
+
+    public string DisplayName => "Tesseract 5 (быстрый)";
 
     private readonly string? _tessdataPath;
     private readonly object _gate = new();

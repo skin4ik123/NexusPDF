@@ -1011,8 +1011,14 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         var page = Pages[match.LogicalPageIndex];
         try
         {
-            var rects = await Document.Handles[page.PageRef.SourceId].GetTextRectsAsync(
-                page.PageRef.SourcePageIndex, match.CharIndex, match.Length, CancellationToken.None);
+            // Координаты берутся С ТОЙ ЖЕ страницы, по которой шёл поиск:
+            // на странице с несохранённым слоем OCR или добавленной надписью
+            // исходный лист не знает этих символов, и подсветка либо
+            // пропадала, либо вставала не на то слово.
+            var (handle, pageIndex) = await Document.ResolveTextPageAsync(
+                match.LogicalPageIndex, CancellationToken.None);
+            var rects = await handle.GetTextRectsAsync(
+                pageIndex, match.CharIndex, match.Length, CancellationToken.None);
             page.Highlights = rects
                 .Select(r => TransformRectToDiu(r, page))
                 .ToList();

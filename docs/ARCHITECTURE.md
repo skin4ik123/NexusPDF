@@ -12,13 +12,18 @@ Domain                           — DocumentSession, PageRef, операции,
 Pdf.Abstractions                 — интерфейсы движков и модели данных
    ▲
    ├── Pdf.Pdfium                — рендер/текст/компоновка (PDFium)
-   ├── Pdf.Qpdf                  — структура/шифрование (qpdf, план: этап 3/6)
-   └── Ocr.Tesseract             — OCR (план: этап 7)
+   └── Pdf.Qpdf                  — структура/шифрование (qpdf)
 
+Ocr                              — ITextRecognizer + Tesseract 5 (запасной)
+Ocr.Paddle                       — PaddleOCR PP-OCRv6 через RapidOcrNet,
+                                   16 языковых пакетов (движок по умолчанию)
 Infrastructure                   — настройки, логи, атомарная запись,
                                    одиночный экземпляр, crash-сентинел
-PdfWorker                        — каркас изолированного процесса (план: этап 3)
+Cli                              — NexusPdfCli: пакетные операции и OCR
 ```
+
+Движки распознавания взаимозаменяемы за `ITextRecognizer`: выбор движка и
+языкового пакета живёт в настройках и меняется прямо в окне распознавания.
 
 Правила зависимостей: `Domain` и `Application` не знают о WPF и о конкретных
 PDF-SDK; движки видят только `Pdf.Abstractions`. UI получает движки через

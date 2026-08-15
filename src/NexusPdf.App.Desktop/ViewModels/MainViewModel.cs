@@ -517,7 +517,7 @@ public sealed partial class MainViewModel : ObservableObject
         doc.IsBusy = true; // клики по страницам во время распознавания игнорируются
         try
         {
-            OcrDialog.Run(OwnerWindow, _services.Ocr, doc);
+            OcrDialog.Run(OwnerWindow, _services, doc);
         }
         finally
         {

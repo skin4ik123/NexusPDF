@@ -65,9 +65,10 @@ public sealed class ConvertService
         for (var i = 0; i < pages.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
-            var page = pages[i];
-            var text = await document.Handles[page.SourceId]
-                .GetPageTextAsync(page.SourcePageIndex, ct).ConfigureAwait(false);
+            // Текст берётся со страницы С ПРАВКАМИ: экспорт сразу после
+            // распознавания не должен молча отдавать пустой исходный лист.
+            var (handle, pageIndex) = await document.ResolveTextPageAsync(i, ct).ConfigureAwait(false);
+            var text = await handle.GetPageTextAsync(pageIndex, ct).ConfigureAwait(false);
             if (i > 0)
                 builder.AppendLine().AppendLine($"===== Страница {i + 1} =====");
             builder.Append(text.ReplaceLineEndings());

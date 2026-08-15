@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace NexusPdf.Infrastructure;
@@ -11,6 +11,12 @@ public sealed class AppSettings
     public List<string> LastSessionFiles { get; set; } = new();
     public int RenderCacheMegabytes { get; set; } = 256;
     public bool SingleInstance { get; set; } = true;
+
+    /// <summary>Движок распознавания: paddle — точнее, tesseract — быстрее.</summary>
+    public string OcrEngine { get; set; } = "paddle";
+
+    /// <summary>Языковой пакет распознавания (идентификатор из ocrmodels.lock.json).</summary>
+    public string OcrLanguagePack { get; set; } = "cyrillic";
     public bool KeepBackupOnSave { get; set; }
     public double LastZoom { get; set; } = 1.0;
 

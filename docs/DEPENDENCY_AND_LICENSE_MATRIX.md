@@ -27,7 +27,10 @@ OSMF EULA; закреплена версия 5.0.2.
 
 | Зависимость | Назначение | Лицензия | Примечание |
 | --- | --- | --- | --- |
-| Tesseract + tessdata (rus, eng, ukr, kat) | локальный OCR | Apache-2.0 | этап 7; языковые пакеты из tesseract-ocr/tessdata_fast |
+| RapidOcrNet + ONNX Runtime | локальный OCR по умолчанию (PaddleOCR PP-OCRv6) | Apache-2.0 / MIT | 16 языковых пакетов, версии и SHA-256 закреплены в `tools/ocrmodels.lock.json` |
+| Модели и словари PaddleOCR PP-OCRv5/v6 | наборы символов и распознаватели | Apache-2.0 | загружаются `tools/fetch-ocrmodels.ps1`, поставляются в `tools/ocrmodels` |
+| SkiaSharp, Clipper2 | растр и геометрия внутри RapidOcrNet | MIT / BSL-1.0 | транзитивные зависимости |
+| Tesseract + tessdata (rus, eng, ukr, kat) | запасной локальный OCR | Apache-2.0 | этап 7; языковые пакеты из tesseract-ocr/tessdata_fast |
 
 ## Осознанно отклонённые
 
