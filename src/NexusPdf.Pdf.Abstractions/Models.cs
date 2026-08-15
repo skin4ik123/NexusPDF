@@ -90,6 +90,15 @@ public sealed record OcrWordBox(
 /// </summary>
 public sealed record OcrTextLayerOverlay(IReadOnlyList<OcrWordBox> Words) : PageOverlay;
 
+/// <summary>
+/// Ссылка PDF в точке: либо внешний адрес (Uri), либо переход на страницу
+/// документа (TargetPageIndex >= 0). Оба поля пустыми не бывают.
+/// </summary>
+public sealed record PdfLinkInfo(string? Uri, int TargetPageIndex);
+
+/// <summary>Ссылка страницы вместе с её рамкой в координатах страницы PDF (для подсветки и наведения).</summary>
+public sealed record PdfPageLink(PdfTextRect RectPt, string? Uri, int TargetPageIndex);
+
 /// <summary>Выпадающий список/список формы в точке клика: опции, выбор и рамка поля в отображаемых пунктах.</summary>
 public sealed record PdfComboInfo(
     IReadOnlyList<string> Options,

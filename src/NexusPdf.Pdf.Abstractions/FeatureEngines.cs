@@ -37,25 +37,9 @@ public interface IPdfValidationEngine : IEngineFeature
     Task<PdfValidationResult> ValidateAsync(string filePath, string? password, CancellationToken ct);
 }
 
-/// <summary>Редактирование существующего содержимого (текстовые объекты, изображения).</summary>
-public interface IPdfContentEditEngine : IEngineFeature { }
-
-/// <summary>Аннотации и комментарии.</summary>
-public interface IPdfAnnotationEngine : IEngineFeature { }
-
-/// <summary>Интерактивные формы (AcroForm).</summary>
-public interface IPdfFormEngine : IEngineFeature { }
-
-/// <summary>Криптографические цифровые подписи.</summary>
-public interface IPdfSignatureEngine : IEngineFeature { }
-
-public sealed record OcrPageResult(string Text, double MeanConfidence);
-
-/// <summary>Локальное распознавание текста. Планируемая реализация — Tesseract.</summary>
-public interface IOcrEngine : IEngineFeature
-{
-    Task<OcrPageResult> RecognizeAsync(RenderedPageImage page, IReadOnlyList<string> languages, CancellationToken ct);
-}
-
-/// <summary>Импорт/экспорт других форматов.</summary>
-public interface IDocumentConversionEngine : IEngineFeature { }
+// Здесь намеренно нет интерфейсов-маркеров для аннотаций, форм, подписей, OCR
+// и конвертации. Эти функции реализованы конкретными типами
+// (PdfiumDocumentHandle, NexusPdf.Ocr.TesseractOcrEngine, PdfIncrementalSigner,
+// ConvertService), а пустой интерфейс «на будущее» создаёт ложное впечатление
+// абстракции и, как показал аудит, расходится с реальностью: единственная
+// реализация IOcrEngine сообщала «OCR недоступен», когда OCR уже работал.

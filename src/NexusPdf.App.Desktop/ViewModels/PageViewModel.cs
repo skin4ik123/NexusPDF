@@ -79,6 +79,20 @@ public sealed partial class PageViewModel : ObservableObject
     [ObservableProperty]
     private IReadOnlyList<Rect> _highlights = Array.Empty<Rect>();
 
+    /// <summary>Прямоугольники ВЫДЕЛЕННОГО мышью текста (отдельно от подсветки поиска).</summary>
+    [ObservableProperty]
+    private IReadOnlyList<Rect> _selectionRects = Array.Empty<Rect>();
+
+    /// <summary>
+    /// Ссылки страницы в DIU: читаются из документа один раз, дальше попадание
+    /// курсора проверяется без обращения к движку (иначе нативный вызов на
+    /// каждое движение мыши).
+    /// </summary>
+    public IReadOnlyList<(Rect Area, NexusPdf.Pdf.Abstractions.PdfPageLink Link)> LinkAreas { get; set; } =
+        Array.Empty<(Rect, NexusPdf.Pdf.Abstractions.PdfPageLink)>();
+
+    public bool LinksLoaded { get; set; }
+
     // ----- Живая рамка при drag-размещении аннотации (в пунктах страницы) -----
 
     [ObservableProperty]

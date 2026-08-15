@@ -54,6 +54,27 @@ public partial class App : System.Windows.Application
             args.Handled = true;
         };
 
+        // Сбой в ФОНОВОЙ работе без этих подписок не попадал ни в журнал, ни к
+        // пользователю: в программе десятки fire-and-forget задач (ввод в поля
+        // форм, миниатюры, проверка подписей).
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.ExceptionObject is Exception ex)
+                Log.Fatal(ex, "Необработанное исключение вне интерфейса (IsTerminating={Terminating})",
+                    args.IsTerminating);
+            else
+                Log.Fatal("Необработанное исключение вне интерфейса: {Object}", args.ExceptionObject);
+            Log.CloseAndFlush(); // процесс может завершиться сразу после обработчика
+        };
+
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            Log.Error(args.Exception, "Ошибка фоновой задачи осталась незамеченной");
+            args.SetObserved(); // иначе финализатор завершил бы процесс
+        };
+
+        BindingErrorTracing.Attach();
+
         var window = WindowManager.OpenWindow(_services, null);
         window.ViewModel.ShowCrashRestoreBanner = crashed && settings.LastSessionFiles.Count > 0;
 

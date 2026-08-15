@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using NexusPdf.App.Desktop.Localization;
 using NexusPdf.App.Desktop.ViewModels;
 
 namespace NexusPdf.App.Desktop.Views;
@@ -25,6 +26,7 @@ public partial class DocumentView : UserControl
             _vm.ScrollToPageRequested -= OnScrollToPage;
             _vm.PropertyChanged -= OnVmPropertyChanged;
             _vm.FormComboRequested -= OnFormComboRequested;
+            _vm.ExternalLinkRequested -= OnExternalLinkRequested;
         }
         CloseComboPopup();
         _vm = e.NewValue as DocumentViewModel;
@@ -33,7 +35,42 @@ public partial class DocumentView : UserControl
             _vm.ScrollToPageRequested += OnScrollToPage;
             _vm.PropertyChanged += OnVmPropertyChanged;
             _vm.FormComboRequested += OnFormComboRequested;
+            _vm.ExternalLinkRequested += OnExternalLinkRequested;
             UpdatePlacementCursor();
+        }
+    }
+
+    /// <summary>
+    /// Внешний адрес из документа открывается ТОЛЬКО после подтверждения и с
+    /// показом полного адреса: документ — недоверенный источник.
+    /// </summary>
+    private void OnExternalLinkRequested(object? sender, string uri)
+    {
+        var safe = Uri.TryCreate(uri, UriKind.Absolute, out var parsed) &&
+                   (parsed.Scheme == Uri.UriSchemeHttp || parsed.Scheme == Uri.UriSchemeHttps ||
+                    parsed.Scheme == Uri.UriSchemeMailto);
+        if (!safe)
+        {
+            ErrorDialog.Show(Window.GetWindow(this), Loc.Get("LinkTitle"),
+                Loc.Get("LinkUnsupportedScheme"), uri);
+            return;
+        }
+
+        if (!ConfirmDialog.Ask(Window.GetWindow(this), Loc.Get("LinkTitle"),
+                Loc.Get("LinkConfirmQuestion"), uri, Loc.Get("LinkOpen")))
+            return;
+
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(parsed!.AbsoluteUri)
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Не удалось открыть ссылку");
+            ErrorDialog.Show(Window.GetWindow(this), Loc.Get("LinkTitle"), ex.Message, uri);
         }
     }
 
@@ -158,7 +195,31 @@ public partial class DocumentView : UserControl
             return;
         }
 
-        if (_vm.PendingOverlay == null) return;
+        if (_vm.PendingOverlay == null)
+        {
+            // Обычный просмотр: клик по ссылке — переход, иначе начало выделения текста.
+            var readHit = FindPageAt(e.OriginalSource);
+            if (readHit == null) return;
+            var (readPage, readElement) = readHit.Value;
+            var readScale = readPage.DisplayScale;
+            if (readScale <= 0) return;
+            var readPos = e.GetPosition(readElement);
+
+            if (_vm.LinkAt(readPage, readPos.X, readPos.Y) is { } link)
+            {
+                _vm.ActivateLink(link);
+                e.Handled = true;
+                return;
+            }
+
+            _selectionPage = readPage;
+            _selectionElement = readElement;
+            _selectionStarted = false;
+            _ = BeginSelectionAsync(readPage, readPos.X / readScale, readPos.Y / readScale);
+            PagesList.Focus(); // Ctrl+C должен дойти до документа
+            return;
+        }
+
         var hit = FindPageAt(e.OriginalSource);
         if (hit == null) return;
         var (page, element) = hit.Value;
@@ -181,8 +242,57 @@ public partial class DocumentView : UserControl
         e.Handled = true;
     }
 
+    // ----- Выделение текста и ссылки -----
+
+    private PageViewModel? _selectionPage;
+    private FrameworkElement? _selectionElement;
+    private bool _selectionStarted;
+
+    private async Task BeginSelectionAsync(PageViewModel page, double xPt, double yPt)
+    {
+        if (_vm == null) return;
+        _selectionStarted = await _vm.BeginTextSelectionAsync(page, xPt, yPt);
+        if (!_selectionStarted)
+            _vm.ClearTextSelection(); // клик по пустому месту снимает прежнее выделение
+    }
+
     private void OnPagesPreviewMouseMove(object sender, MouseEventArgs e)
     {
+        // Протяжка выделения текста.
+        if (_selectionPage != null && _selectionElement != null && _vm != null)
+        {
+            if (e.LeftButton != MouseButtonState.Pressed)
+            {
+                _selectionPage = null;
+                _selectionElement = null;
+            }
+            else if (_selectionStarted)
+            {
+                var scale = _selectionPage.DisplayScale;
+                if (scale > 0)
+                {
+                    var pos = e.GetPosition(_selectionElement);
+                    _ = _vm.UpdateTextSelectionAsync(_selectionPage, pos.X / scale, pos.Y / scale);
+                }
+                e.Handled = true;
+                return;
+            }
+        }
+
+        // Курсор-рука над ссылкой (попадание проверяется по кэшу, без вызовов движка).
+        if (_vm != null && _dragPage == null && FindPageAt(e.OriginalSource) is { } hoverHit)
+        {
+            var (hoverPage, hoverElement) = hoverHit;
+            _ = _vm.EnsureLinksAsync(hoverPage);
+            var hoverPos = e.GetPosition(hoverElement);
+            var overLink = _vm.LinkAt(hoverPage, hoverPos.X, hoverPos.Y) != null;
+            var wanted = overLink ? Cursors.Hand
+                : _vm.PendingOverlay != null ? Cursors.Cross
+                : Cursors.IBeam;
+            if (PagesList.Cursor != wanted)
+                PagesList.Cursor = wanted;
+        }
+
         if (_dragPage == null || _dragElement == null) return;
         // Кнопку отпустили вне окна / capture отобран системой — сбрасываем,
         // иначе устаревший _dragStartPt породил бы ложную аннотацию.
@@ -196,6 +306,12 @@ public partial class DocumentView : UserControl
 
     private void OnPagesPreviewMouseUp(object sender, MouseButtonEventArgs e)
     {
+        if (_selectionPage != null)
+        {
+            _selectionPage = null;
+            _selectionElement = null;
+            // Выделение остаётся на экране до следующего клика — его можно копировать.
+        }
         if (_dragPage == null || _dragElement == null) return;
         var page = _dragPage;
         var rect = DragRectPt(e);
@@ -301,7 +417,33 @@ public partial class DocumentView : UserControl
 
     private void OnPagesKeyDown(object sender, KeyEventArgs e)
     {
-        // До первого клика в поле клавиатура остаётся у прокрутки/навигации.
+        if (_vm == null) return;
+
+        // Копирование и выделение всей страницы работают в обычном просмотре.
+        if (e.Key == Key.C && Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            if (_vm.CopySelectionCommand.CanExecute(null))
+            {
+                _vm.CopySelectionCommand.Execute(null);
+                e.Handled = true;
+            }
+            return;
+        }
+        if (e.Key == Key.A && Keyboard.Modifiers == ModifierKeys.Control && !_vm.IsFormMode)
+        {
+            _vm.SelectAllOnPageCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == Key.Escape && _vm.HasSelection)
+        {
+            _vm.ClearTextSelection();
+            e.Handled = true;
+            return;
+        }
+
+        // Дальше — ввод в поля формы; до первого клика в поле клавиатура
+        // остаётся у прокрутки и навигации.
         if (_vm is not { IsFormMode: true, HasActiveFormPage: true }) return;
         var dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
         switch (e.Key)

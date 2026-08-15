@@ -344,6 +344,200 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
         }, ct);
     }
 
+    /// <summary>Отображаемые пункты (от левого верхнего угла) → координаты страницы PDF.</summary>
+    private (double X, double Y) DisplayedToPage(
+        FpdfPageT page, int pageIndex, int extraQuarterTurns, double xPt, double yPt)
+    {
+        var size = Info.Pages[pageIndex];
+        var rotate = ((extraQuarterTurns % 4) + 4) % 4;
+        var displayedW = rotate % 2 == 0 ? size.WidthPoints : size.HeightPoints;
+        var displayedH = rotate % 2 == 0 ? size.HeightPoints : size.WidthPoints;
+        double pageX = 0, pageY = 0;
+        fpdfview.FPDF_DeviceToPage(page, 0, 0,
+            (int)Math.Round(displayedW), (int)Math.Round(displayedH), rotate,
+            (int)Math.Round(xPt), (int)Math.Round(yPt), ref pageX, ref pageY);
+        return (pageX, pageY);
+    }
+
+    public Task<int> GetCharIndexAtAsync(
+        int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() =>
+            {
+                var page = fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
+                if (page == null || page.__Instance == IntPtr.Zero)
+                    return -1;
+                try
+                {
+                    var textPage = fpdf_text.FPDFTextLoadPage(page);
+                    if (textPage == null || textPage.__Instance == IntPtr.Zero)
+                        return -1;
+                    try
+                    {
+                        var (px, py) = DisplayedToPage(page, pageIndex, extraQuarterTurns, xPt, yPt);
+                        // Допуск ~половина строки: клик редко попадает точно в глиф.
+                        return fpdf_text.FPDFTextGetCharIndexAtPos(textPage, px, py, 6.0, 6.0);
+                    }
+                    finally
+                    {
+                        fpdf_text.FPDFTextClosePage(textPage);
+                    }
+                }
+                finally
+                {
+                    fpdfview.FPDF_ClosePage(page);
+                }
+            }, ct);
+        }
+    }
+
+    public Task<PdfLinkInfo?> GetLinkAtAsync(
+        int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync<PdfLinkInfo?>(() =>
+            {
+                var page = fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
+                if (page == null || page.__Instance == IntPtr.Zero)
+                    return null;
+                try
+                {
+                    var (px, py) = DisplayedToPage(page, pageIndex, extraQuarterTurns, xPt, yPt);
+                    var link = fpdf_doc.FPDFLinkGetLinkAtPoint(page, px, py);
+                    if (link == null || link.__Instance == IntPtr.Zero)
+                        return null;
+                    return DescribeLink(link);
+                }
+                finally
+                {
+                    fpdfview.FPDF_ClosePage(page);
+                }
+            }, ct);
+        }
+    }
+
+    public Task<IReadOnlyList<PdfPageLink>> GetPageLinksAsync(int pageIndex, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync<IReadOnlyList<PdfPageLink>>(() =>
+            {
+                var page = fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
+                if (page == null || page.__Instance == IntPtr.Zero)
+                    return Array.Empty<PdfPageLink>();
+                try
+                {
+                    // Перечисляем Link-аннотации страницы и разрешаем каждую
+                    // через FPDFLink_GetLinkAtPoint в центре её рамки: так
+                    // используются только те вызовы, которые уже проверены
+                    // тестами, без ручного конструирования нативных хэндлов.
+                    var links = new List<PdfPageLink>();
+                    var annotCount = fpdf_annot.FPDFPageGetAnnotCount(page);
+                    for (var i = 0; i < annotCount; i++)
+                    {
+                        var annot = fpdf_annot.FPDFPageGetAnnot(page, i);
+                        if (annot == null || annot.__Instance == IntPtr.Zero)
+                            continue;
+                        try
+                        {
+                            if (fpdf_annot.FPDFAnnotGetSubtype(annot) != AnnotSubtypeLink)
+                                continue;
+                            var rect = new FS_RECTF_();
+                            if (fpdf_annot.FPDFAnnotGetRect(annot, rect) == 0)
+                                continue;
+                            var link = fpdf_doc.FPDFLinkGetLinkAtPoint(page,
+                                (rect.Left + rect.Right) / 2.0, (rect.Top + rect.Bottom) / 2.0);
+                            if (link == null || link.__Instance == IntPtr.Zero)
+                                continue;
+                            var info = DescribeLink(link);
+                            if (info == null)
+                                continue;
+                            links.Add(new PdfPageLink(
+                                new PdfTextRect(
+                                    Math.Min(rect.Left, rect.Right), Math.Max(rect.Top, rect.Bottom),
+                                    Math.Max(rect.Left, rect.Right), Math.Min(rect.Top, rect.Bottom)),
+                                info.Uri, info.TargetPageIndex));
+                        }
+                        finally
+                        {
+                            fpdf_annot.FPDFPageCloseAnnot(annot);
+                        }
+                    }
+                    return links;
+                }
+                finally
+                {
+                    fpdfview.FPDF_ClosePage(page);
+                }
+            }, ct);
+        }
+    }
+
+    /// <summary>Назначение ссылки: страница документа или внешний адрес. null — не поддерживается.</summary>
+    private PdfLinkInfo? DescribeLink(FpdfLinkT link)
+    {
+        var dest = fpdf_doc.FPDFLinkGetDest(NativeDoc, link);
+        if (dest != null && dest.__Instance != IntPtr.Zero)
+        {
+            var target = fpdf_doc.FPDFDestGetDestPageIndex(NativeDoc, dest);
+            if (target >= 0)
+                return new PdfLinkInfo(null, target);
+        }
+
+        var action = fpdf_doc.FPDFLinkGetAction(link);
+        if (action == null || action.__Instance == IntPtr.Zero)
+            return null;
+        switch (fpdf_doc.FPDFActionGetType(action))
+        {
+            case ActionTypeGoto:
+            {
+                var actionDest = fpdf_doc.FPDFActionGetDest(NativeDoc, action);
+                if (actionDest == null || actionDest.__Instance == IntPtr.Zero)
+                    return null;
+                var target = fpdf_doc.FPDFDestGetDestPageIndex(NativeDoc, actionDest);
+                return target >= 0 ? new PdfLinkInfo(null, target) : null;
+            }
+            case ActionTypeUri:
+            {
+                var uri = GetActionUri(action);
+                return uri.Length > 0 ? new PdfLinkInfo(uri, -1) : null;
+            }
+            default:
+                // Launch и Remote-Goto намеренно НЕ поддерживаются: запуск
+                // внешних файлов из документа небезопасен.
+                return null;
+        }
+    }
+
+    private const int ActionTypeGoto = 1;   // PDFACTION_GOTO
+    private const int ActionTypeUri = 3;    // PDFACTION_URI
+    private const int AnnotSubtypeLink = 2; // FPDF_ANNOT_LINK
+
+    private string GetActionUri(FpdfActionT action)
+    {
+        var length = fpdf_doc.FPDFActionGetURIPath(NativeDoc, action, IntPtr.Zero, 0);
+        if (length <= 1)
+            return "";
+        var buffer = System.Runtime.InteropServices.Marshal.AllocHGlobal((int)length);
+        try
+        {
+            fpdf_doc.FPDFActionGetURIPath(NativeDoc, action, buffer, length);
+            // URI хранится однобайтовой строкой с завершающим нулём.
+            return System.Runtime.InteropServices.Marshal
+                .PtrToStringAnsi(buffer, (int)length - 1) ?? "";
+        }
+        finally
+        {
+            System.Runtime.InteropServices.Marshal.FreeHGlobal(buffer);
+        }
+    }
+
     public Task<IReadOnlyList<PdfTextRect>> GetTextRectsAsync(int pageIndex, int startCharIndex, int charCount, CancellationToken ct)
     {
         lock (_admissionGate)
