@@ -56,52 +56,37 @@
     <Border Grid.Row="0" Grid.ColumnSpan="2" Background="{DynamicResource ToolbarBg}"
             BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,0,1">
       <Grid Margin="8,4">
-        <StackPanel Orientation="Horizontal">
-          <Button Style="{StaticResource ToolButton}" Command="{Binding OpenCommand}"
-                  ToolTip="{l:Loc OpenTooltip}">
-            <StackPanel Orientation="Horizontal">
-              <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8E5;"/>
-              <TextBlock Text="{l:Loc Open}" Margin="6,0,0,0"/>
-            </StackPanel>
-          </Button>
-          <Button Style="{StaticResource ToolButton}" Command="{Binding SaveCommand}"
-                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc SaveTooltip}">
-            <StackPanel Orientation="Horizontal">
-              <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE74E;"/>
-              <TextBlock Text="{l:Loc Save}" Margin="6,0,0,0"/>
-            </StackPanel>
-          </Button>
-          <Button Style="{StaticResource ToolButton}" Command="{Binding SaveAsCommand}"
-                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc SaveAsTooltip}">
-            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE792;"/>
-          </Button>
-          <Button Style="{StaticResource ToolButton}" Command="{Binding PrintActiveCommand}"
-                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc PrintTooltip}">
-            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE749;"/>
-          </Button>
-
-          <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
-
-          <Button Style="{StaticResource ToolButton}" Command="{Binding UndoActiveCommand}"
-                  IsEnabled="{Binding ActiveDocument.CanUndo, FallbackValue=False}"
-                  ToolTip="{l:Loc UndoTooltip}">
-            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE7A7;"/>
-          </Button>
-          <Button Style="{StaticResource ToolButton}" Command="{Binding RedoActiveCommand}"
-                  IsEnabled="{Binding ActiveDocument.CanRedo, FallbackValue=False}"
-                  ToolTip="{l:Loc RedoTooltip}">
-            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE7A6;"/>
-          </Button>
-
-          <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
-
-          <!-- «Страницы» больше нет: этот режим включает рельс слева -->
-          <Button Style="{StaticResource ToolButton}" Command="{Binding ToggleFindActiveCommand}"
-                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc FindTooltip}">
-            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE721;"/>
-          </Button>
-
-        </StackPanel>
+        <!-- Быстрая панель собирается из реестра команд по списку из настроек:
+             названия, значки, подсказки и доступность у неё те же, что у
+             одноимённых пунктов меню, а состав пользователь меняет сам. -->
+        <ItemsControl ItemsSource="{Binding QuickPanel.Items}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal"/>
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Grid>
+                <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"
+                        Visibility="{Binding IsSeparator, Converter={StaticResource BoolToVis}}"/>
+                <Button Style="{StaticResource ToolButton}" Command="{Binding Invoke}"
+                        ToolTip="{Binding Tooltip}"
+                        AutomationProperties.Name="{Binding Title}"
+                        Visibility="{Binding IsSeparator, Converter={StaticResource InvBoolToVis}}">
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource ToolGlyph}" Text="{Binding Glyph}"/>
+                    <TextBlock Text="{Binding Title}" Margin="6,0,0,0"
+                               VerticalAlignment="Center"
+                               Visibility="{Binding DataContext.ShowQuickPanelLabels,
+                                            RelativeSource={RelativeSource AncestorType=Window},
+                                            Converter={StaticResource BoolToVis}}"/>
+                  </StackPanel>
+                </Button>
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
       </Grid>
     </Border>
 
@@ -321,6 +306,9 @@
                   <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeSystem}"
                           Command="{Binding SetThemeCommand}" CommandParameter="system" Click="OnMenuItem"/>
                 </StackPanel>
+                <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxQuickPanelMenu}"
+                        HorizontalAlignment="Left" Margin="6,4,0,0"
+                        Command="{Binding ConfigureQuickPanelCommand}" Click="OnMenuItem"/>
                 <TextBlock Text="{l:Loc UxDensity}" Foreground="{DynamicResource TextSecondary}"
                            FontSize="11" Margin="6,4"/>
                 <StackPanel Orientation="Horizontal" Margin="4,0">
