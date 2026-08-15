@@ -34,6 +34,19 @@ if (-not (Test-Path "$root\tools\qpdf\qpdf.exe")) {
     & "$root\tools\fetch-qpdf.ps1" -Version $lock.version -ExpectedSha256 $lock.sha256
 }
 
+# PaddleOCR models: restore ALL pinned language packs if missing (tools/ocrmodels.lock.json).
+# Проверяется каждый файл каталога, а не один «маркерный»: частично
+# загруженный набор молча оставил бы половину языков нерабочей.
+$ocrLock = Get-Content "$root\tools\ocrmodels.lock.json" -Raw | ConvertFrom-Json
+$ocrNeeded = @($ocrLock.shared | ForEach-Object { $_.name })
+foreach ($p in $ocrLock.packs) { $ocrNeeded += $p.model.name; $ocrNeeded += $p.dict.name }
+$ocrMissing = @($ocrNeeded | Where-Object { -not (Test-Path (Join-Path "$root\tools\ocrmodels" $_)) })
+if ($ocrMissing.Count -gt 0) {
+    Write-Host "== Fetching OCR models ($($ocrMissing.Count) files missing) =="
+    & "$root\tools\fetch-ocrmodels.ps1" -All
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+}
+
 # Tesseract language models: restore pinned files if missing (tools/tessdata.lock.json)
 if (-not (Test-Path "$root\tools\tessdata\rus.traineddata") -or
     -not (Test-Path "$root\tools\tessdata\eng.traineddata")) {
@@ -68,6 +81,11 @@ New-Item -ItemType Directory -Force (Join-Path $publishDir "tools/qpdf") | Out-N
 Copy-Item "$root\tools\qpdf\*" (Join-Path $publishDir "tools/qpdf") -Force
 New-Item -ItemType Directory -Force (Join-Path $publishDir "tools/tessdata") | Out-Null
 Copy-Item "$root\tools\tessdata\*.traineddata" (Join-Path $publishDir "tools/tessdata") -Force
+# Модели PaddleOCR и каталог языковых пакетов: движок ищет их как tools\ocrmodels
+# рядом с приложением, каталог — как tools\ocrmodels.lock.json.
+New-Item -ItemType Directory -Force (Join-Path $publishDir "tools/ocrmodels") | Out-Null
+Copy-Item "$root\tools\ocrmodels\*" (Join-Path $publishDir "tools/ocrmodels") -Force
+Copy-Item "$root\tools\ocrmodels.lock.json" (Join-Path $publishDir "tools") -Force
 Copy-Item "$root\docs\THIRD_PARTY_NOTICES.md" $publishDir -Force
 Copy-Item "$root\installer\Assets\license.ru.txt" (Join-Path $publishDir "LICENSE.ru.txt") -Force
 

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using NexusPdf.Ocr.Paddle;
 using NexusPdf.Pdf.Pdfium;
 using Xunit.Abstractions;
@@ -76,7 +76,7 @@ public sealed class AllLanguagePacksTests
             try
             {
                 var sw = Stopwatch.StartNew();
-                var result = await engine.RecognizeAsync(image, CancellationToken.None);
+                var result = await engine.RecognizeAsync(image, 150, CancellationToken.None);
                 var chars = result.Words.Sum(w => w.Text.Length);
                 _output.WriteLine(
                     $"{pack.Id,-20} строк {result.Words.Count,4}, символов {chars,5}, " +

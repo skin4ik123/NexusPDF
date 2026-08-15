@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\NexusPdf.Pdf.Abstractions\NexusPdf.Pdf.Abstractions.csproj" />
+    <ProjectReference Include="..\NexusPdf.Ocr\NexusPdf.Ocr.csproj" />
   </ItemGroup>
 
 </Project>

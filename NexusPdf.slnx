@@ -6,9 +6,11 @@
     <Project Path="src/NexusPdf.Domain/NexusPdf.Domain.csproj" />
     <Project Path="src/NexusPdf.Infrastructure/NexusPdf.Infrastructure.csproj" />
     <Project Path="src/NexusPdf.Ocr/NexusPdf.Ocr.csproj" />
+    <Project Path="src/NexusPdf.Ocr.Paddle/NexusPdf.Ocr.Paddle.csproj" />
     <Project Path="src/NexusPdf.Pdf.Abstractions/NexusPdf.Pdf.Abstractions.csproj" />
     <Project Path="src/NexusPdf.Pdf.Pdfium/NexusPdf.Pdf.Pdfium.csproj" />
     <Project Path="src/NexusPdf.Pdf.Qpdf/NexusPdf.Pdf.Qpdf.csproj" />
+    <Project Path="src/NexusPdf.Signing/NexusPdf.Signing.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/NexusPdf.PdfEngineTests/NexusPdf.PdfEngineTests.csproj" />

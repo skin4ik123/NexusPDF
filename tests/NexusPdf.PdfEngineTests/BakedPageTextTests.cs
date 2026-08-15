@@ -84,6 +84,46 @@ public sealed class BakedPageTextTests : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// Найденное должно ещё и ПОДСВЕЧИВАТЬСЯ. Окно берёт координаты по номеру
+    /// символа из результата поиска — значит, спрашивать их надо у той же
+    /// страницы, по которой шёл поиск. Пока спрашивали у исходной, счётчик
+    /// показывал «1 из 1», а на странице не подсвечивалось ничего.
+    /// </summary>
+    [Fact]
+    public async Task Search_Match_Has_Highlight_Rectangles_Without_Saving()
+    {
+        var dir = NewDir();
+        var path = Path.Combine(dir, "scan.pdf");
+        File.WriteAllBytes(path, PdfFixture.Build(new PdfFixture.PageSpec(612, 792, Text: "")));
+
+        var document = await OpenedDocument.OpenAsync(_pdfium, path, null, CancellationToken.None);
+        await using (document)
+        {
+            document.Session.Apply(new AddOverlayOperation(0, new OcrTextLayerOverlay(new[]
+            {
+                new OcrWordBox("SEAFARER", 100, 100, 90, 14),
+            })));
+
+            var match = Assert.Single(await new SearchService()
+                .SearchAsync(document, "SEAFARER", false, CancellationToken.None));
+
+            var (handle, pageIndex) = await document.ResolveTextPageAsync(
+                match.LogicalPageIndex, CancellationToken.None);
+            var rects = await handle.GetTextRectsAsync(
+                pageIndex, match.CharIndex, match.Length, CancellationToken.None);
+
+            Assert.NotEmpty(rects);
+            Assert.All(rects, r => Assert.True(r.Right > r.Left && r.Top > r.Bottom,
+                "прямоугольник подсветки должен быть непустым"));
+
+            // Исходная страница этих символов не знает — там подсветки нет.
+            var raw = await document.PrimaryHandle.GetTextRectsAsync(
+                0, match.CharIndex, match.Length, CancellationToken.None);
+            Assert.Empty(raw);
+        }
+    }
+
     [Fact]
     public async Task Added_Text_Is_Selectable_Without_Saving()
     {

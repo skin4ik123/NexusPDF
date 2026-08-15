@@ -1,4 +1,4 @@
-﻿<Project>
+<Project>
   <PropertyGroup>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
@@ -7,10 +7,10 @@
     <Product>NexusPDF</Product>
     <Company>NexusPDF</Company>
     <Copyright>В© 2026 NexusPDF</Copyright>
-    <Version>0.16.1</Version>
-    <AssemblyVersion>0.16.1.0</AssemblyVersion>
-    <FileVersion>0.16.1.0</FileVersion>
-    <InformationalVersion>0.16.1-alpha.1</InformationalVersion>
+    <Version>0.17.0</Version>
+    <AssemblyVersion>0.17.0.0</AssemblyVersion>
+    <FileVersion>0.17.0.0</FileVersion>
+    <InformationalVersion>0.17.0-alpha.1</InformationalVersion>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest</AnalysisLevel>
     <NeutralLanguage>ru</NeutralLanguage>

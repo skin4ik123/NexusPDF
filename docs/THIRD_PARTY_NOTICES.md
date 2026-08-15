@@ -16,3 +16,10 @@ SPDX; при сборке установщика этот файл включа�
 - **Tesseract .NET wrapper** — © Charles Weld и участники, Apache-2.0.
 - **Leptonica** — © Dan Bloomberg и участники, BSD-2-Clause.
 - **tessdata_fast** (языковые модели rus/eng) — © Google и участники, Apache-2.0.
+- **RapidOcrNet** — © RapidAI и участники, Apache-2.0.
+- **ONNX Runtime** (`Microsoft.ML.OnnxRuntime`) — © Microsoft, MIT.
+- **PaddleOCR** — модели распознавания PP-OCRv5/PP-OCRv6 и словари символов,
+  © PaddlePaddle Authors и участники, Apache-2.0. Файлы моделей и их
+  контрольные суммы перечислены в `tools/ocrmodels.lock.json`.
+- **SkiaSharp** — © Microsoft и Google, MIT (нативная **Skia** — BSD-3-Clause).
+- **Clipper2** — © Angus Johnson, BSL-1.0.

@@ -1,12 +1,8 @@
+﻿using NexusPdf.Ocr;
 using NexusPdf.Pdf.Abstractions;
 using RapidOcrNet;
 
 namespace NexusPdf.Ocr.Paddle;
-
-/// <summary>Распознанное слово: текст, рамка в пикселях растра и уверенность 0–100.</summary>
-public sealed record PaddleWord(string Text, double X, double Y, double Width, double Height, float Confidence);
-
-public sealed record PaddlePageResult(IReadOnlyList<PaddleWord> Words, float MeanConfidence);
 
 /// <summary>
 /// Распознавание текста PaddleOCR через RapidOcrNet (ONNX Runtime, офлайн).
@@ -15,8 +11,16 @@ public sealed record PaddlePageResult(IReadOnlyList<PaddleWord> Words, float Mea
 /// словарь всегда берутся парой.
 /// Экземпляр RapidOcr не потокобезопасен — вызовы сериализуются общим замком.
 /// </summary>
-public sealed class PaddleOcrEngine : IDisposable
+public sealed class PaddleOcrEngine : ITextRecognizer
 {
+    public string Id => "paddle";
+
+    /// <summary>Название с языковым пакетом: в журнале должно быть видно, чем именно читали.</summary>
+    public string DisplayName =>
+        "PaddleOCR PP-OCRv6 — " +
+        (Catalog.FirstOrDefault(p => string.Equals(p.Id, _packId, StringComparison.OrdinalIgnoreCase))?.Title
+         ?? _packId);
+
     private readonly string? _modelsDir;
     private readonly string _packId;
     private readonly object _gate = new();
@@ -74,7 +78,12 @@ public sealed class PaddleOcrEngine : IDisposable
 
     /// <summary>Языковой пакет распознавания: идентификатор, название и его файлы.</summary>
     public sealed record LanguagePack(
-        string Id, string Title, string Languages, bool IsDefault, string ModelFile, string DictFile);
+        string Id, string Title, string Languages, bool IsDefault, string ModelFile, string DictFile)
+    {
+        // Без этого экранный диктор читал бы весь дамп записи вместо названия:
+        // DisplayMemberPath меняет только картинку, но не имя для UI Automation.
+        public override string ToString() => Title;
+    }
 
     private static IReadOnlyList<LanguagePack>? _catalog;
 
@@ -135,10 +144,14 @@ public sealed class PaddleOcrEngine : IDisposable
             ? null
             : Directory.EnumerateFiles(_modelsDir, "*cls*.onnx").FirstOrDefault();
 
-    public Task<PaddlePageResult> RecognizeAsync(RenderedPageImage image, CancellationToken ct) =>
+    /// <param name="renderDpi">
+    /// Не используется: PaddleOCR сам приводит строки к нужному размеру.
+    /// Параметр есть ради общего контракта с Tesseract, которому DPI важен.
+    /// </param>
+    public Task<OcrPageResult> RecognizeAsync(RenderedPageImage image, int renderDpi, CancellationToken ct) =>
         Task.Run(() => Recognize(image, ct), ct);
 
-    private PaddlePageResult Recognize(RenderedPageImage image, CancellationToken ct)
+    private OcrPageResult Recognize(RenderedPageImage image, CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ct.ThrowIfCancellationRequested();
@@ -153,7 +166,7 @@ public sealed class PaddleOcrEngine : IDisposable
             using var bitmap = ToSkBitmap(image);
             var result = ocr.Detect(bitmap, RapidOcrOptions.Default);
 
-            var words = new List<PaddleWord>();
+            var words = new List<OcrWord>();
             var scores = new List<float>();
             foreach (var block in result.TextBlocks)
             {
@@ -163,14 +176,14 @@ public sealed class PaddleOcrEngine : IDisposable
 
                 var xs = block.BoxPoints.Select(p => (double)p.X).ToList();
                 var ys = block.BoxPoints.Select(p => (double)p.Y).ToList();
-                words.Add(new PaddleWord(
+                words.Add(new OcrWord(
                     block.Text.Trim(),
                     xs.Min(), ys.Min(),
                     xs.Max() - xs.Min(), ys.Max() - ys.Min(),
                     score * 100f));
             }
 
-            return new PaddlePageResult(words, scores.Count > 0 ? scores.Average() * 100f : 0f);
+            return new OcrPageResult(words, scores.Count > 0 ? scores.Average() * 100f : 0f);
         }
     }
 

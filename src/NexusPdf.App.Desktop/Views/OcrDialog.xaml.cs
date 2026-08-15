@@ -13,24 +13,86 @@ namespace NexusPdf.App.Desktop.Views;
 /// </summary>
 public partial class OcrDialog : Window
 {
-    private readonly OcrService _service;
+    private readonly Services.AppServices _services;
     private readonly DocumentViewModel _document;
     private CancellationTokenSource? _cts;
     private bool _cancelRequested;
 
-    private OcrDialog(OcrService service, DocumentViewModel document)
+    /// <summary>Строка списка движков: идентификатор и подпись.</summary>
+    private sealed record EngineChoice(string Id, string Title)
     {
-        InitializeComponent();
-        _service = service;
-        _document = document;
+        public override string ToString() => Title;
     }
 
-    public static void Run(Window? owner, OcrService service, DocumentViewModel document)
+    private OcrDialog(Services.AppServices services, DocumentViewModel document)
     {
-        var dialog = new OcrDialog(service, document);
+        InitializeComponent();
+        _services = services;
+        _document = document;
+        FillEngineChoices();
+    }
+
+    public static void Run(Window? owner, Services.AppServices services, DocumentViewModel document)
+    {
+        var dialog = new OcrDialog(services, document);
         if (owner is { IsLoaded: true })
             dialog.Owner = owner;
         dialog.ShowDialog();
+    }
+
+    /// <summary>
+    /// В списке только то, что реально установлено: движок без моделей в
+    /// выборе не показывается, чтобы не предлагать заведомо неработающее.
+    /// </summary>
+    private void FillEngineChoices()
+    {
+        var packs = NexusPdf.Ocr.Paddle.PaddleOcrEngine.InstalledPacks(AppContext.BaseDirectory);
+        var engines = new List<EngineChoice>();
+        if (packs.Count > 0)
+            engines.Add(new EngineChoice("paddle", Loc.Get("OcrEnginePaddle")));
+        using (var tesseract = new NexusPdf.Ocr.TesseractOcrEngine())
+        {
+            if (tesseract.IsAvailable)
+                engines.Add(new EngineChoice("tesseract", Loc.Get("OcrEngineTesseract")));
+        }
+
+        EngineBox.ItemsSource = engines;
+        PackBox.ItemsSource = packs;
+        EngineBox.SelectedItem =
+            engines.FirstOrDefault(e => e.Id == _services.Settings.OcrEngine) ?? engines.FirstOrDefault();
+        PackBox.SelectedItem =
+            packs.FirstOrDefault(p => p.Id == _services.Settings.OcrLanguagePack) ?? packs.FirstOrDefault();
+    }
+
+    private void OnPackChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        => OnEngineChanged(sender, e);
+
+    private void OnEngineChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (PackBox == null || PackLabel == null || PackHint == null)
+            return; // событие приходит и во время InitializeComponent
+        // Языковые пакеты есть только у PaddleOCR: у Tesseract язык вшит в
+        // установленные модели rus+eng.
+        var isPaddle = (EngineBox.SelectedItem as EngineChoice)?.Id == "paddle";
+        var visibility = isPaddle ? Visibility.Visible : Visibility.Collapsed;
+        PackBox.Visibility = visibility;
+        PackLabel.Visibility = visibility;
+        PackHint.Text = isPaddle
+            ? (PackBox.SelectedItem as NexusPdf.Ocr.Paddle.PaddleOcrEngine.LanguagePack)?.Languages ?? ""
+            : Loc.Get("OcrTesseractLanguages");
+    }
+
+    /// <summary>
+    /// Применяет выбор к общему движку приложения. Выбор запоминается: он же
+    /// действует для распознавания из окна правки растра.
+    /// </summary>
+    private OcrService ApplyChoice()
+    {
+        var engineId = (EngineBox.SelectedItem as EngineChoice)?.Id ?? _services.Settings.OcrEngine;
+        var packId = (PackBox.SelectedItem as NexusPdf.Ocr.Paddle.PaddleOcrEngine.LanguagePack)?.Id
+                     ?? _services.Settings.OcrLanguagePack;
+        _services.ApplyOcrSettings(engineId, packId);
+        return _services.Ocr;
     }
 
     private async void OnStart(object sender, RoutedEventArgs e)
@@ -63,7 +125,11 @@ public partial class OcrDialog : Window
                 ProgressLabel.Text = Loc.F("OcrProgressLabel", p.PagesDone, p.TotalPages, p.WordsSoFar);
             });
             var editable = ModeEditable.IsChecked == true;
-            var result = await _service.RecognizeAsync(
+            // Движок пересобирается под выбор в списке, а не фиксируется на
+            // старте: иначе смена языка требовала бы перезапуска программы.
+            var service = ApplyChoice();
+            Log.Information("Распознавание движком {Engine}", service.EngineName);
+            var result = await service.RecognizeAsync(
                 _document.Document, targets, progress, _cts.Token, editable);
             ShowResult(result, editable);
         }

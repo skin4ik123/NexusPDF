@@ -1,4 +1,4 @@
-using NexusPdf.Domain;
+﻿using NexusPdf.Domain;
 using NexusPdf.Ocr;
 using NexusPdf.Pdf.Abstractions;
 
@@ -35,9 +35,12 @@ public sealed class OcrService
     // Слова с уверенностью ниже порога — почти всегда шум сканирования.
     private const float MinWordConfidence = 35f;
 
-    private readonly TesseractOcrEngine _ocr;
+    private readonly ITextRecognizer _ocr;
 
-    public OcrService(TesseractOcrEngine ocr) => _ocr = ocr;
+    public OcrService(ITextRecognizer ocr) => _ocr = ocr;
+
+    /// <summary>Название работающего движка — для журнала и интерфейса.</summary>
+    public string EngineName => _ocr.DisplayName;
 
     public bool IsAvailable => _ocr.IsAvailable;
     public string? UnavailableReason => _ocr.UnavailableReason;

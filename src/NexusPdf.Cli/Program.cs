@@ -189,9 +189,11 @@ public static class Program
                 if (positional.Count != 2)
                     throw new UsageException("ocr: нужны <вход.pdf> и <выход.pdf>.");
                 RequireNotExists(positional[1], options);
-                using var ocrEngine = new TesseractOcrEngine();
+                using var ocrEngine = CreateRecognizer(
+                    Get(options, "engine", "paddle"), Get(options, "lang", "cyrillic"));
                 if (!ocrEngine.IsAvailable)
                     throw new InvalidOperationException(ocrEngine.UnavailableReason);
+                Console.WriteLine("Движок: " + ocrEngine.DisplayName);
                 var document = await OpenAsync(engine, positional[0], options, ct);
                 await using (document)
                 {
@@ -353,6 +355,25 @@ public static class Program
         return qpdf;
     }
 
+    /// <summary>
+    /// Движок распознавания по --engine/--lang. По умолчанию PaddleOCR — тот же,
+    /// что и в приложении; молчаливой подмены на Tesseract нет: если пакет не
+    /// установлен, команда честно падает с причиной, а не читает другим языком.
+    /// </summary>
+    private static NexusPdf.Ocr.ITextRecognizer CreateRecognizer(string engineId, string languagePack)
+    {
+        if (string.Equals(engineId, "tesseract", StringComparison.OrdinalIgnoreCase))
+            return new TesseractOcrEngine();
+        if (!string.Equals(engineId, "paddle", StringComparison.OrdinalIgnoreCase))
+            throw new UsageException("ocr: --engine принимает paddle или tesseract.");
+
+        var known = NexusPdf.Ocr.Paddle.PaddleOcrEngine.Catalog;
+        if (known.Count > 0 && !known.Any(p => string.Equals(p.Id, languagePack, StringComparison.OrdinalIgnoreCase)))
+            throw new UsageException(
+                "ocr: неизвестный --lang. Доступны: " + string.Join(", ", known.Select(p => p.Id)));
+        return new NexusPdf.Ocr.Paddle.PaddleOcrEngine(AppContext.BaseDirectory, languagePack);
+    }
+
     private static void RequireNotExists(string path, Dictionary<string, string> options)
     {
         if (File.Exists(path) && !options.ContainsKey("force"))
@@ -502,8 +523,10 @@ NexusPdfCli — консольные операции NexusPDF (локально
       Защищённая копия (AES-256). Пароль в командной строке виден другим
       процессам и попадает в историю — надёжнее задать его переменной
       окружения NEXUSPDF_PASSWORD и не указывать --password.
-  ocr           <вход.pdf> <выход.pdf> [--password X]
-      Распознавание сканов (rus+eng): невидимый текстовый слой.
+  ocr           <вход.pdf> <выход.pdf> [--engine paddle|tesseract] [--lang ID] [--password X]
+      Распознавание сканов: невидимый текстовый слой.
+      По умолчанию PaddleOCR, пакет cyrillic (кириллица+латиница+греческий);
+      список пакетов покажет неверный --lang. --engine tesseract — rus+eng.
       Формы AcroForm в копии становятся статикой (выводится предупреждение).
   compare       <первый.pdf> <второй.pdf> [--text] [--password-a X] [--password-b Y]
       Визуальное постраничное сравнение. Код возврата 0 — идентичны,

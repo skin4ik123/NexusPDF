@@ -25,6 +25,31 @@
       <RadioButton x:Name="ScopeCurrent" Content="{l:Loc OcrScopeCurrent}" Margin="0,6,0,0"
                    Foreground="{DynamicResource TextBrush}"/>
 
+      <!-- Движок и язык: подставляются из установленных пакетов -->
+      <Grid Margin="0,16,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock Text="{l:Loc OcrEngineLabel}" VerticalAlignment="Center" Margin="0,0,10,6"
+                   Foreground="{DynamicResource TextBrush}"/>
+        <ComboBox x:Name="EngineBox" Grid.Column="1" Margin="0,0,0,6"
+                  AutomationProperties.Name="{l:Loc OcrEngineLabel}"
+                  SelectionChanged="OnEngineChanged"/>
+        <TextBlock x:Name="PackLabel" Grid.Row="1" Text="{l:Loc OcrPackLabel}"
+                   VerticalAlignment="Center" Margin="0,0,10,0"
+                   Foreground="{DynamicResource TextBrush}"/>
+        <ComboBox x:Name="PackBox" Grid.Row="1" Grid.Column="1"
+                  AutomationProperties.Name="{l:Loc OcrPackLabel}"
+                  DisplayMemberPath="Title" SelectionChanged="OnPackChanged"/>
+      </Grid>
+      <TextBlock x:Name="PackHint" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                 Foreground="{DynamicResource TextSecondary}"/>
+
       <TextBlock Text="{l:Loc OcrModeTitle}" Margin="0,16,0,6" FontWeight="SemiBold"
                  Foreground="{DynamicResource TextBrush}"/>
       <RadioButton x:Name="ModeSearchable" GroupName="OcrMode" IsChecked="True"

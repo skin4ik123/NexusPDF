@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using NexusPdf.Application;
 using NexusPdf.Ocr;
 using NexusPdf.Ocr.Paddle;
@@ -63,7 +63,7 @@ public sealed class OcrEngineComparisonTests : IAsyncLifetime
         var tesseractMs = sw.ElapsedMilliseconds;
 
         sw.Restart();
-        var p = await paddle.RecognizeAsync(image, CancellationToken.None);
+        var p = await paddle.RecognizeAsync(image, (int)TargetDpi, CancellationToken.None);
         var paddleMs = sw.ElapsedMilliseconds;
 
         var tesseractText = string.Join(" ", t.Words.Select(w => w.Text));
