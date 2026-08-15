@@ -30,6 +30,33 @@ public sealed class PrintLayoutEngine
     }
 
     /// <summary>
+    /// Размечает листы на лицевые и оборотные для двусторонней печати.
+    ///
+    /// Буклет расставляет стороны сам — там порядок задаёт сложение. Для
+    /// остальных раскладок листы плана до этого шага все «лицевые», и без
+    /// разметки ручной дуплекс не смог бы отделить первый проход от второго,
+    /// а счётчик листов бумаги считал бы каждую сторону отдельным листом.
+    /// </summary>
+    public IReadOnlyList<SheetPlan> ApplyDuplexPairing(
+        IReadOnlyList<SheetPlan> sheets, DuplexMode duplex, ImpositionMode imposition)
+    {
+        if (duplex == DuplexMode.Simplex || imposition == ImpositionMode.Booklet)
+            return sheets;
+
+        var result = new List<SheetPlan>(sheets.Count);
+        for (var i = 0; i < sheets.Count; i++)
+        {
+            var isFront = i % 2 == 0;
+            // У последнего листа нечётного задания оборот пустой — пары нет.
+            var pairIndex = isFront
+                ? (i + 1 < sheets.Count ? i + 1 : (int?)null)
+                : i - 1;
+            result.Add(sheets[i] with { IsFront = isFront, PairedSheetIndex = pairIndex });
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Добавляет к готовым листам типографские метки и печатные наложения.
     /// Отдельным шагом, потому что и то и другое зависит от ОБЩЕГО числа
     /// листов («лист 3 из 7»), которое до конца раскладки неизвестно.
