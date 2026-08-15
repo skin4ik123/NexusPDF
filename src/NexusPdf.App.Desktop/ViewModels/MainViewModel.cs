@@ -22,6 +22,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         _services = services;
         RecentFiles = new ObservableCollection<string>(services.Settings.RecentFiles);
+        Panels = NexusPdf.Ux.PanelLayout.FromSetting(services.Settings.Panels);
     }
 
     /// <summary>Окно, обслуживающее эту модель (для владения диалогами).</summary>
@@ -34,6 +35,70 @@ public sealed partial class MainViewModel : ObservableObject
     /// клавиши ходят сюда, а не дублируют вызовы у себя.
     /// </summary>
     public Services.Ux.UxCommandHub Ux => _ux ??= new Services.Ux.UxCommandHub(this, _services);
+
+    // ----- Видимость панелей -----
+
+    private NexusPdf.Ux.PanelLayout? _savedPanels;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowQuickPanel))]
+    [NotifyPropertyChangedFor(nameof(ShowToolRail))]
+    [NotifyPropertyChangedFor(nameof(ShowSidePanel))]
+    [NotifyPropertyChangedFor(nameof(ShowPropertyPanel))]
+    [NotifyPropertyChangedFor(nameof(ShowStatusBar))]
+    private NexusPdf.Ux.PanelLayout _panels = NexusPdf.Ux.PanelLayout.Default;
+
+    public bool ShowQuickPanel => Panels.QuickPanel;
+    public bool ShowToolRail => Panels.ToolRail;
+    public bool ShowSidePanel => Panels.SidePanel;
+    public bool ShowPropertyPanel => Panels.Properties;
+    public bool ShowStatusBar => Panels.StatusBar;
+
+    /// <summary>Скрыть или показать одну панель.</summary>
+    public void TogglePanel(NexusPdf.Ux.UiPanel panel)
+    {
+        // Панель комментариев принадлежит документу — у неё своё состояние.
+        if (panel == NexusPdf.Ux.UiPanel.Comments)
+        {
+            if (ActiveDocument is { } commentsDoc)
+                commentsDoc.IsCommentsVisible = !commentsDoc.IsCommentsVisible;
+            Panels = Panels.With(panel, ActiveDocument?.IsCommentsVisible ?? false);
+            SavePanels();
+            return;
+        }
+
+        Panels = Panels.Toggle(panel);
+        SavePanels();
+    }
+
+    /// <summary>
+    /// «Только страница» и обратно. Возврат восстанавливает ТУ раскладку,
+    /// которая была до скрытия, а не набор по умолчанию: иначе пользователь
+    /// теряет свои настройки каждый раз, когда захотел увидеть страницу целиком.
+    /// </summary>
+    [RelayCommand]
+    private void TogglePageOnly()
+    {
+        var (layout, saved) = Panels.TogglePageOnly(_savedPanels);
+        _savedPanels = saved;
+        Panels = layout;
+        if (ActiveDocument is { } doc)
+        {
+            doc.IsCommentsVisible = layout.Comments;
+            doc.StatusText = Loc.Get(layout.IsPageOnly ? "PanelOnlyPageOn" : "PanelOnlyPageOff");
+        }
+        SavePanels();
+    }
+
+    private void SavePanels()
+    {
+        _services.Settings.Panels = Panels.ToSetting();
+        _services.SaveSettings();
+    }
+
+    public string CurrentWorkspace => _services.Settings.Workspace;
+    public string CurrentDensity => _services.Settings.UiDensity;
+    public string CurrentTheme => _services.Settings.Theme;
 
     private Services.Ux.QuickPanel? _quickPanel;
 

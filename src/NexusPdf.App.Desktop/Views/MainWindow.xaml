@@ -15,6 +15,7 @@
   <Window.Resources>
     <BooleanToVisibilityConverter x:Key="BoolToVis"/>
     <app:InverseBoolToVisibilityConverter x:Key="InvBoolToVis"/>
+    <app:AllTrueToVisibilityConverter x:Key="AllTrue"/>
   </Window.Resources>
 
   <Window.InputBindings>
@@ -34,6 +35,7 @@
     <KeyBinding Modifiers="Ctrl" Key="D0" Command="{Binding FitPageActiveCommand}"/>
     <KeyBinding Modifiers="Ctrl" Key="Tab" Command="{Binding NextTabCommand}"/>
     <KeyBinding Modifiers="Ctrl+Shift" Key="Tab" Command="{Binding PreviousTabCommand}"/>
+    <KeyBinding Modifiers="Ctrl" Key="F11" Command="{Binding TogglePageOnlyCommand}"/>
     <KeyBinding Key="F11" Command="{x:Static views:MainWindow.ToggleFullScreenCommand}"
                 CommandParameter="{Binding RelativeSource={RelativeSource AncestorType=Window}}"/>
   </Window.InputBindings>
@@ -54,7 +56,8 @@
 
     <!-- Панель инструментов -->
     <Border Grid.Row="0" Grid.ColumnSpan="2" Background="{DynamicResource ToolbarBg}"
-            BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,0,1">
+            BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,0,1"
+            Visibility="{Binding ShowQuickPanel, Converter={StaticResource BoolToVis}}">
       <Grid Margin="8,4">
         <!-- Быстрая панель собирается из реестра команд по списку из настроек:
              названия, значки, подсказки и доступность у неё те же, что у
@@ -281,170 +284,12 @@
                   ToolTip="{l:Loc NewWindow}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE78B;"/>
           </Button>
-          <ToggleButton x:Name="MenuToggle" Style="{StaticResource ToolButton}" ToolTip="{l:Loc Menu}">
+          <!-- Меню собирается из реестра команд разделами: плоский список из
+               двух десятков пунктов подряд — это не меню, а простыня -->
+          <Button x:Name="MenuToggle" Style="{StaticResource ToolButton}" ToolTip="{l:Loc Menu}"
+                  Click="OnMenuButtonClick">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE712;"/>
-          </ToggleButton>
-          <Popup IsOpen="{Binding IsChecked, ElementName=MenuToggle}" StaysOpen="False"
-                 PlacementTarget="{Binding ElementName=MenuToggle}" Placement="Bottom"
-                 AllowsTransparency="True" Opened="OnMenuOpened" Closed="OnMenuClosed">
-            <Border Background="{DynamicResource PanelBg}" BorderBrush="{DynamicResource PanelBorder}"
-                    BorderThickness="1" CornerRadius="6" Padding="6" Margin="0,4,8,8" MinWidth="230">
-              <!-- Список прокручивается, а тема/язык/«О программе» закреплены
-                   подвалом: они были последними в прокрутке и на длинном
-                   списке уезжали за нижний край экрана. Высота списка
-                   ограничивается в OnMenuOpened по фактической высоте окна. -->
-              <DockPanel>
-              <StackPanel x:Name="MenuFooter" DockPanel.Dock="Bottom">
-                <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
-                <TextBlock Text="{l:Loc Theme}" Foreground="{DynamicResource TextSecondary}"
-                           FontSize="11" Margin="6,4"/>
-                <StackPanel Orientation="Horizontal" Margin="4,0">
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeLight}" Margin="0,0,10,0"
-                          Command="{Binding SetThemeCommand}" CommandParameter="light" Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeDark}" Margin="0,0,10,0"
-                          Command="{Binding SetThemeCommand}" CommandParameter="dark" Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc ThemeSystem}"
-                          Command="{Binding SetThemeCommand}" CommandParameter="system" Click="OnMenuItem"/>
-                </StackPanel>
-                <TextBlock Text="{l:Loc UxWorkspace}" Foreground="{DynamicResource TextSecondary}"
-                           FontSize="11" Margin="6,4" ToolTip="{l:Loc UxWorkspaceHint}"/>
-                <StackPanel Orientation="Horizontal" Margin="4,0">
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxWorkspaceReading}"
-                          Margin="0,0,10,0" Command="{Binding ApplyWorkspaceCommand}"
-                          CommandParameter="reading" Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxWorkspaceEditing}"
-                          Margin="0,0,10,0" Command="{Binding ApplyWorkspaceCommand}"
-                          CommandParameter="editing" Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxWorkspaceReviewing}"
-                          Margin="0,0,10,0" Command="{Binding ApplyWorkspaceCommand}"
-                          CommandParameter="reviewing" Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxWorkspacePages}"
-                          Command="{Binding ApplyWorkspaceCommand}"
-                          CommandParameter="pages" Click="OnMenuItem"/>
-                </StackPanel>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxQuickPanelMenu}"
-                        HorizontalAlignment="Left" Margin="6,4,0,0"
-                        Command="{Binding ConfigureQuickPanelCommand}" Click="OnMenuItem"/>
-                <TextBlock Text="{l:Loc UxDensity}" Foreground="{DynamicResource TextSecondary}"
-                           FontSize="11" Margin="6,4"/>
-                <StackPanel Orientation="Horizontal" Margin="4,0">
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxDensityAuto}" Margin="0,0,10,0"
-                          ToolTip="{l:Loc UxDensityAutoHint}"
-                          Command="{Binding SetDensityCommand}" CommandParameter="auto" Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxDensityCompact}" Margin="0,0,10,0"
-                          Command="{Binding SetDensityCommand}" CommandParameter="compact" Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxDensityComfortable}" Margin="0,0,10,0"
-                          Command="{Binding SetDensityCommand}" CommandParameter="comfortable" Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc UxDensityTouch}"
-                          ToolTip="{l:Loc UxDensityTouchHint}"
-                          Command="{Binding SetDensityCommand}" CommandParameter="touch" Click="OnMenuItem"/>
-                </StackPanel>
-                <TextBlock Text="{l:Loc Language}" Foreground="{DynamicResource TextSecondary}"
-                           FontSize="11" Margin="6,4"/>
-                <StackPanel Orientation="Horizontal" Margin="4,0">
-                  <Button Style="{StaticResource LinkButton}" Content="Русский" Margin="0,0,10,0"
-                          Command="{Binding SetLanguageCommand}" CommandParameter="ru" Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="English" Margin="0,0,10,0"
-                          Command="{Binding SetLanguageCommand}" CommandParameter="en" Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc About}"
-                          Command="{Binding AboutCommand}" Click="OnMenuItem"/>
-                </StackPanel>
-              </StackPanel>
-              <ScrollViewer x:Name="MenuScroll" VerticalScrollBarVisibility="Auto"
-                            HorizontalScrollBarVisibility="Disabled">
-              <StackPanel>
-                <TextBlock Text="{l:Loc DecorSection}" Foreground="{DynamicResource TextSecondary}"
-                           FontSize="11" Margin="6,4"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc HeaderFooterMenu}"
-                        Command="{Binding ShowHeaderFooterCommand}" IsEnabled="{Binding HasDocuments}"
-                        Click="OnMenuItem"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc WatermarkMenu}"
-                        Command="{Binding ShowWatermarkCommand}" IsEnabled="{Binding HasDocuments}"
-                        Click="OnMenuItem"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc AddTextMenu}"
-                        Command="{Binding AddTextOverlayCommand}" IsEnabled="{Binding HasDocuments}"
-                        Click="OnMenuItem"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc InsertImageMenu}"
-                        Command="{Binding InsertImageOverlayCommand}" IsEnabled="{Binding HasDocuments}"
-                        Click="OnMenuItem"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc InsertSignatureMenu}"
-                        Command="{Binding InsertSignatureCommand}" IsEnabled="{Binding HasDocuments}"
-                        Click="OnMenuItem"/>
-                <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
-                <StackPanel Visibility="{Binding HasPdfTools, Converter={StaticResource BoolToVis}}">
-                  <TextBlock Text="{l:Loc ToolsSection}" Foreground="{DynamicResource TextSecondary}"
-                             FontSize="11" Margin="6,4"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc ProtectPdf}"
-                          Command="{Binding ProtectWithPasswordCommand}" IsEnabled="{Binding HasDocuments}"
-                          Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc OptimizeCopy}"
-                          Command="{Binding OptimizeCopyCommand}" IsEnabled="{Binding HasDocuments}"
-                          Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc CompressMenu}"
-                          Command="{Binding CompressImagesCommand}" IsEnabled="{Binding HasDocuments}"
-                          Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc SignMenu}"
-                          Command="{Binding SignWithCertificateCommand}" IsEnabled="{Binding HasDocuments}"
-                          Click="OnMenuItem"/>
-                  <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
-                </StackPanel>
-                <StackPanel Visibility="{Binding HasOcr, Converter={StaticResource BoolToVis}}">
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc OcrMenu}"
-                          Command="{Binding RecognizeTextCommand}" IsEnabled="{Binding HasDocuments}"
-                          Click="OnMenuItem"/>
-                  <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
-                </StackPanel>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc LayersMenu}"
-                        Command="{Binding ShowLayersCommand}" IsEnabled="{Binding HasDocuments}"
-                        Click="OnMenuItem"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc AttachmentsMenu}"
-                        Command="{Binding ShowAttachmentsCommand}" IsEnabled="{Binding HasDocuments}"
-                        Click="OnMenuItem"/>
-                <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
-                <StackPanel Visibility="{Binding HasImageEditor, Converter={StaticResource BoolToVis}}">
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc PaintEditMenu}"
-                          Command="{Binding EditPageInPaintCommand}" IsEnabled="{Binding HasDocuments}"
-                          Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc PaintEditRegionMenu}"
-                          Command="{Binding EditRegionInPaintCommand}" IsEnabled="{Binding HasDocuments}"
-                          Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc PaintEditImageMenu}"
-                          Command="{Binding EditImageInPaintCommand}" IsEnabled="{Binding HasDocuments}"
-                          Click="OnMenuItem"/>
-                  <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
-                </StackPanel>
-                <TextBlock Text="{l:Loc ConvertSection}" Foreground="{DynamicResource TextSecondary}"
-                           FontSize="11" Margin="6,4"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc ExportImagesMenu}"
-                        Command="{Binding ExportImagesCommand}" IsEnabled="{Binding HasDocuments}"
-                        Click="OnMenuItem"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc ExtractTextMenu}"
-                        Command="{Binding ExtractTextCommand}" IsEnabled="{Binding HasDocuments}"
-                        Click="OnMenuItem"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc FromImagesMenu}"
-                        Command="{Binding CreateFromImagesCommand}" Click="OnMenuItem"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc MergeMenu}"
-                        Command="{Binding MergePdfsCommand}" Click="OnMenuItem"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc CompareMenu}"
-                        Command="{Binding CompareDocumentsCommand}" Click="OnMenuItem"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc PropsMenu}"
-                        Command="{Binding ShowPropertiesCommand}" IsEnabled="{Binding HasDocuments}"
-                        Click="OnMenuItem"/>
-                <StackPanel Visibility="{Binding HasPdfTools, Converter={StaticResource BoolToVis}}">
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc BatchMenu}"
-                          Command="{Binding ShowBatchCommand}" Click="OnMenuItem"/>
-                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc BpTitle}"
-                          Command="{Binding ShowBatchPrintCommand}" Click="OnMenuItem"/>
-                </StackPanel>
-                <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
-                <Button Style="{StaticResource LinkButton}" Content="{l:Loc DetachTab}"
-                        Command="{Binding DetachTabCommand}" IsEnabled="{Binding HasDocuments}"
-                        Click="OnMenuItem"/>
-              </StackPanel>
-              </ScrollViewer>
-              </DockPanel>
-            </Border>
-          </Popup>
+          </Button>
       </StackPanel>
     </Border>
 
@@ -496,8 +341,15 @@
     <!-- Рельс инструментов: группы, а не двадцать безымянных значков в строке -->
     <Border Grid.Row="2" Grid.Column="0" Width="76"
             Background="{DynamicResource PanelBg}"
-            BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,1,0"
-            Visibility="{Binding HasDocuments, Converter={StaticResource BoolToVis}}">
+            BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,1,0">
+      <!-- Рельс виден при открытом документе и пока его не спрятали через
+           «Вид → Панели»: два условия сразу, поэтому не одиночная привязка -->
+      <Border.Visibility>
+        <MultiBinding Converter="{StaticResource AllTrue}">
+          <Binding Path="HasDocuments"/>
+          <Binding Path="ShowToolRail"/>
+        </MultiBinding>
+      </Border.Visibility>
       <StackPanel Margin="0,6">
         <ToggleButton Style="{StaticResource RailButton}" Tag="&#xE8A9;" Content="{l:Loc RailPages}"
                       IsChecked="{Binding IsGroupPages, Mode=OneWay}"
@@ -553,7 +405,8 @@
 
     <!-- Строка состояния -->
     <Border Grid.Row="3" Grid.ColumnSpan="2" Background="{DynamicResource ToolbarBg}"
-            BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,1,0,0">
+            BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,1,0,0"
+            Visibility="{Binding ShowStatusBar, Converter={StaticResource BoolToVis}}">
       <!-- Три колонки, а не наложение двух панелей: при крупных размерах
            элементов длинный текст состояния наезжал на управление масштабом
            и прятал его. Теперь текст обрезается, а кнопки остаются на месте. -->

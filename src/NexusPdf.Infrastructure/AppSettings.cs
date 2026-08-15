@@ -36,6 +36,12 @@ public sealed class AppSettings
     /// <summary>Рабочее пространство: reading | editing | reviewing | pages.</summary>
     public string Workspace { get; set; } = "reading";
 
+    /// <summary>
+    /// Видимые панели списком имён: QuickPanel, ToolRail, SidePanel, Comments,
+    /// Properties, StatusBar. Пустая строка означает «спрятано всё».
+    /// </summary>
+    public string? Panels { get; set; }
+
     public bool KeepBackupOnSave { get; set; }
     public double LastZoom { get; set; } = 1.0;
 
