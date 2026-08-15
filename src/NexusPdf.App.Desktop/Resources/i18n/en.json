@@ -729,5 +729,7 @@
   "PanelOnlyPage": "Page only",
   "PanelOnlyPageOn": "Panels hidden. Ctrl+F11 brings them back.",
   "PanelOnlyPageOff": "Panels restored.",
-  "PanelHide": "Hide the panel"
+  "PanelHide": "Hide the panel",
+  "PanelTools": "Tools",
+  "MenuPrint": "Print"
 }

@@ -729,5 +729,7 @@
   "PanelOnlyPage": "Только страница",
   "PanelOnlyPageOn": "Панели скрыты. Ctrl+F11 — вернуть их обратно.",
   "PanelOnlyPageOff": "Панели возвращены.",
-  "PanelHide": "Скрыть панель"
+  "PanelHide": "Скрыть панель",
+  "PanelTools": "Инструменты",
+  "MenuPrint": "Печать"
 }

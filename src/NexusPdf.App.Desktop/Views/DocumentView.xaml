@@ -47,13 +47,15 @@
     <!-- Режим чтения: миниатюры + страницы + комментарии -->
     <Grid Grid.Row="1" Visibility="{Binding IsOrganizeMode, Converter={StaticResource InvBoolToVisLocal}}">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="176"/>
+        <ColumnDefinition Width="Auto"/>
         <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="Auto"/>
         <ColumnDefinition Width="Auto"/>
         <ColumnDefinition Width="Auto"/>
       </Grid.ColumnDefinitions>
 
-      <Border Grid.Column="0" Background="{DynamicResource PanelBg}"
+      <Border Grid.Column="0" Width="176" Background="{DynamicResource PanelBg}"
               BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,1,0"
               Visibility="{Binding DataContext.ShowSidePanel,
                            RelativeSource={RelativeSource AncestorType=Window},
@@ -61,11 +63,21 @@
         <Grid>
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
           <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
+        <!-- Кнопка «заехать»: панель уходит в полоску значков у края окна -->
+        <Button Grid.Row="0" Style="{StaticResource ToolButton}" HorizontalAlignment="Right"
+                Margin="0,2,2,0" ToolTip="{l:Loc PanelHide}"
+                Command="{Binding DataContext.HidePanelCommand,
+                          RelativeSource={RelativeSource AncestorType=Window}}"
+                CommandParameter="SidePanel">
+          <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE76B;" FontSize="11"/>
+        </Button>
+
         <!-- Переключатель появляется только у документов с оглавлением -->
-        <UniformGrid Grid.Row="0" Columns="2" Margin="4,4,4,2"
+        <UniformGrid Grid.Row="1" Columns="2" Margin="4,4,4,2"
                      Visibility="{Binding HasBookmarks, Converter={StaticResource BoolToVis}}">
           <RadioButton Style="{StaticResource PanelTab}" Content="{l:Loc PanelTabPages}"
                        GroupName="SideTabs"
@@ -75,7 +87,7 @@
         </UniformGrid>
 
         <!-- Оглавление: дерево с переходом по щелчку -->
-        <TreeView Grid.Row="1" ItemsSource="{Binding Bookmarks}"
+        <TreeView Grid.Row="2" ItemsSource="{Binding Bookmarks}"
                   AutomationProperties.Name="{l:Loc PanelTabOutline}"
                   Background="Transparent" BorderThickness="0" Padding="2,0,2,6"
                   Foreground="{DynamicResource TextBrush}"
@@ -115,7 +127,7 @@
           </TreeView.ItemTemplate>
         </TreeView>
 
-        <ListBox Grid.Row="1" x:Name="ThumbList" ItemsSource="{Binding Pages}"
+        <ListBox Grid.Row="2" x:Name="ThumbList" ItemsSource="{Binding Pages}"
                  Visibility="{Binding IsOutlineVisible, Converter={StaticResource InvBoolToVisLocal}}"
                AutomationProperties.Name="{l:Loc A11yThumbList}"
                  Background="Transparent" BorderThickness="0"
@@ -360,7 +372,10 @@
             <TextBlock Text="{l:Loc CommentsPanel}" FontWeight="SemiBold"
                        Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"/>
             <Button Style="{StaticResource ToolButton}" HorizontalAlignment="Right"
-                    Command="{Binding ToggleCommentsCommand}">
+                    ToolTip="{l:Loc PanelHide}"
+                    Command="{Binding DataContext.HidePanelCommand,
+                              RelativeSource={RelativeSource AncestorType=Window}}"
+                    CommandParameter="Comments">
               <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE711;" FontSize="11"/>
             </Button>
           </Grid>
@@ -414,7 +429,7 @@
       <!-- Свойства выбранного объекта: появляются вместе с выделением и
            исчезают вместе с ним — постоянная пустая панель занимала бы место
            и ничего не сообщала -->
-      <Border Grid.Column="3" Width="250" Background="{DynamicResource PanelBg}"
+      <Border Grid.Column="4" Width="250" Background="{DynamicResource PanelBg}"
               BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1,0,0,0">
         <Border.Visibility>
           <MultiBinding Converter="{StaticResource AllTrue}">
@@ -425,8 +440,18 @@
           </MultiBinding>
         </Border.Visibility>
         <StackPanel Margin="12,10">
-          <TextBlock Text="{Binding SelectedObjectTitle}" FontWeight="SemiBold" FontSize="13"
-                     Foreground="{DynamicResource TextBrush}" TextWrapping="Wrap"/>
+          <Grid>
+            <TextBlock Text="{Binding SelectedObjectTitle}" FontWeight="SemiBold" FontSize="13"
+                       Foreground="{DynamicResource TextBrush}" TextWrapping="Wrap"
+                       VerticalAlignment="Center"/>
+            <Button Style="{StaticResource ToolButton}" HorizontalAlignment="Right"
+                    ToolTip="{l:Loc PanelHide}"
+                    Command="{Binding DataContext.HidePanelCommand,
+                              RelativeSource={RelativeSource AncestorType=Window}}"
+                    CommandParameter="Properties">
+              <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE76C;" FontSize="11"/>
+            </Button>
+          </Grid>
           <TextBlock Text="{Binding SelectedObjectOrderText}" FontSize="11" Margin="0,2,0,10"
                      Foreground="{DynamicResource TextSecondary}"/>
 
@@ -497,6 +522,108 @@
           <Button Style="{StaticResource ToolButton}" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Left" Command="{Binding DeleteObjectCommand}"
                   Content="{l:Loc UxDeleteObject}" Foreground="#DC2626"/>
+        </StackPanel>
+      </Border>
+
+      <!-- Панель инструментов: всё, что умеет программа, видно списком, а не
+           спрятано в меню. Собирается из того же реестра команд. -->
+      <Border Grid.Column="3" Width="270" Background="{DynamicResource PanelBg}"
+              BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1,0,0,0"
+              Visibility="{Binding DataContext.ShowToolsPanel,
+                           RelativeSource={RelativeSource AncestorType=Window},
+                           Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <Grid Grid.Row="0" Margin="12,8,4,6">
+            <TextBlock Text="{l:Loc PanelTools}" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"/>
+            <Button Style="{StaticResource ToolButton}" HorizontalAlignment="Right"
+                    ToolTip="{l:Loc PanelHide}"
+                    Command="{Binding DataContext.HidePanelCommand,
+                              RelativeSource={RelativeSource AncestorType=Window}}"
+                    CommandParameter="Tools">
+              <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE76C;" FontSize="11"/>
+            </Button>
+          </Grid>
+          <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,4,8">
+            <ItemsControl ItemsSource="{Binding DataContext.Tools.Groups,
+                                        RelativeSource={RelativeSource AncestorType=Window}}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Expander IsExpanded="True" Margin="6,2" Foreground="{DynamicResource TextBrush}">
+                    <Expander.Header>
+                      <TextBlock Text="{Binding Title}" FontSize="11" FontWeight="SemiBold"
+                                 Foreground="{DynamicResource TextSecondary}"/>
+                    </Expander.Header>
+                    <ItemsControl ItemsSource="{Binding Items}" Margin="0,2,0,6">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Button Style="{StaticResource ToolButton}" Command="{Binding Invoke}"
+                                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                  ToolTip="{Binding Tooltip}"
+                                  AutomationProperties.Name="{Binding Title}">
+                            <StackPanel Orientation="Horizontal">
+                              <TextBlock Style="{StaticResource ToolGlyph}" Text="{Binding Glyph}"
+                                         Width="22"/>
+                              <TextBlock Text="{Binding Title}" Margin="6,0,0,0"
+                                         VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                          </Button>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </Expander>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </Grid>
+      </Border>
+
+      <!-- Полоска значков у правого края: сюда «заезжают» панели и отсюда же
+           возвращаются одним щелчком -->
+      <Border Grid.Column="5" Width="44" Background="{DynamicResource PanelBg}"
+              BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1,0,0,0">
+        <StackPanel Margin="0,6">
+          <ToggleButton Style="{StaticResource ToolButton}" Margin="0,2"
+                        ToolTip="{l:Loc PanelTools}"
+                        IsChecked="{Binding DataContext.ShowToolsPanel, Mode=OneWay,
+                                    RelativeSource={RelativeSource AncestorType=Window}}"
+                        Command="{Binding DataContext.ShowPanelCommand,
+                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                        CommandParameter="Tools">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE912;"/>
+          </ToggleButton>
+          <ToggleButton Style="{StaticResource ToolButton}" Margin="0,2"
+                        ToolTip="{l:Loc PanelComments}"
+                        IsChecked="{Binding IsCommentsVisible, Mode=OneWay}"
+                        Command="{Binding DataContext.ShowPanelCommand,
+                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                        CommandParameter="Comments">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE90A;"/>
+          </ToggleButton>
+          <ToggleButton Style="{StaticResource ToolButton}" Margin="0,2"
+                        ToolTip="{l:Loc PanelProperties}"
+                        IsChecked="{Binding DataContext.ShowPropertyPanel, Mode=OneWay,
+                                    RelativeSource={RelativeSource AncestorType=Window}}"
+                        Command="{Binding DataContext.ShowPanelCommand,
+                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                        CommandParameter="Properties">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE946;"/>
+          </ToggleButton>
+          <Border Height="1" Background="{DynamicResource PanelBorder}" Margin="8,6"/>
+          <ToggleButton Style="{StaticResource ToolButton}" Margin="0,2"
+                        ToolTip="{l:Loc PanelSide}"
+                        IsChecked="{Binding DataContext.ShowSidePanel, Mode=OneWay,
+                                    RelativeSource={RelativeSource AncestorType=Window}}"
+                        Command="{Binding DataContext.ShowPanelCommand,
+                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                        CommandParameter="SidePanel">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8A9;"/>
+          </ToggleButton>
         </StackPanel>
       </Border>
     </Grid>

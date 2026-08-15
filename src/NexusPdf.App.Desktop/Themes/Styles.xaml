@@ -19,6 +19,7 @@
     <Setter Property="Margin" Value="{DynamicResource UxToolMargin}"/>
     <Setter Property="MinHeight" Value="{DynamicResource UxTouchTarget}"/>
     <Setter Property="MinWidth" Value="{DynamicResource UxTouchTarget}"/>
+    <Setter Property="HorizontalContentAlignment" Value="Center"/>
     <Setter Property="BorderThickness" Value="0"/>
     <Setter Property="VerticalAlignment" Value="Center"/>
     <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
@@ -36,7 +37,10 @@
           <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="5"
                   BorderThickness="2" BorderBrush="Transparent"
                   Padding="{TemplateBinding Padding}">
-            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <!-- Выравнивание берётся у кнопки: в списке инструментов значки и
+                 подписи обязаны стоять колонкой, а не «лесенкой» по центру -->
+            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalAlignment="Center"/>
           </Border>
           <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True">

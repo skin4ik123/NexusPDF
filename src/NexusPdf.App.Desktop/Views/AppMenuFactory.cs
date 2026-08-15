@@ -87,6 +87,7 @@ public static class AppMenuFactory
                      (UiPanel.QuickPanel, "PanelQuick"),
                      (UiPanel.ToolRail, "PanelRail"),
                      (UiPanel.SidePanel, "PanelSide"),
+                     (UiPanel.Tools, "PanelTools"),
                      (UiPanel.Comments, "PanelComments"),
                      (UiPanel.Properties, "PanelProperties"),
                      (UiPanel.StatusBar, "PanelStatus"),

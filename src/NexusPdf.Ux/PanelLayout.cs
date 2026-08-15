@@ -12,6 +12,9 @@ public enum UiPanel
     /// <summary>Боковая панель: миниатюры или оглавление.</summary>
     SidePanel,
 
+    /// <summary>Панель инструментов справа: всё, что умеет программа, списком.</summary>
+    Tools,
+
     /// <summary>Список комментариев справа.</summary>
     Comments,
 
@@ -35,6 +38,7 @@ public sealed record PanelLayout
     public bool QuickPanel { get; init; } = true;
     public bool ToolRail { get; init; } = true;
     public bool SidePanel { get; init; } = true;
+    public bool Tools { get; init; }
     public bool Comments { get; init; }
     public bool Properties { get; init; } = true;
     public bool StatusBar { get; init; } = true;
@@ -45,7 +49,7 @@ public sealed record PanelLayout
     public static readonly PanelLayout PageOnly = new()
     {
         QuickPanel = false, ToolRail = false, SidePanel = false,
-        Comments = false, Properties = false, StatusBar = false,
+        Tools = false, Comments = false, Properties = false, StatusBar = false,
     };
 
     public bool IsVisible(UiPanel panel) => panel switch
@@ -53,6 +57,7 @@ public sealed record PanelLayout
         UiPanel.QuickPanel => QuickPanel,
         UiPanel.ToolRail => ToolRail,
         UiPanel.SidePanel => SidePanel,
+        UiPanel.Tools => Tools,
         UiPanel.Comments => Comments,
         UiPanel.Properties => Properties,
         UiPanel.StatusBar => StatusBar,
@@ -64,6 +69,7 @@ public sealed record PanelLayout
         UiPanel.QuickPanel => this with { QuickPanel = visible },
         UiPanel.ToolRail => this with { ToolRail = visible },
         UiPanel.SidePanel => this with { SidePanel = visible },
+        UiPanel.Tools => this with { Tools = visible },
         UiPanel.Comments => this with { Comments = visible },
         UiPanel.Properties => this with { Properties = visible },
         UiPanel.StatusBar => this with { StatusBar = visible },
@@ -74,7 +80,7 @@ public sealed record PanelLayout
 
     /// <summary>Спрятано ли всё, что можно спрятать.</summary>
     public bool IsPageOnly => !QuickPanel && !ToolRail && !SidePanel &&
-                              !Comments && !Properties && !StatusBar;
+                              !Tools && !Comments && !Properties && !StatusBar;
 
     /// <summary>
     /// Переключатель «только страница». Возврат отдаёт НЕ набор по умолчанию, а
@@ -94,6 +100,7 @@ public sealed record PanelLayout
         QuickPanel ? nameof(QuickPanel) : null,
         ToolRail ? nameof(ToolRail) : null,
         SidePanel ? nameof(SidePanel) : null,
+        Tools ? nameof(Tools) : null,
         Comments ? nameof(Comments) : null,
         Properties ? nameof(Properties) : null,
         StatusBar ? nameof(StatusBar) : null,
@@ -110,6 +117,7 @@ public sealed record PanelLayout
             QuickPanel = parts.Contains(nameof(QuickPanel)),
             ToolRail = parts.Contains(nameof(ToolRail)),
             SidePanel = parts.Contains(nameof(SidePanel)),
+            Tools = parts.Contains(nameof(Tools)),
             Comments = parts.Contains(nameof(Comments)),
             Properties = parts.Contains(nameof(Properties)),
             StatusBar = parts.Contains(nameof(StatusBar)),

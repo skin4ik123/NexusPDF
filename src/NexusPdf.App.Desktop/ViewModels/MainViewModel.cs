@@ -44,6 +44,7 @@ public sealed partial class MainViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ShowQuickPanel))]
     [NotifyPropertyChangedFor(nameof(ShowToolRail))]
     [NotifyPropertyChangedFor(nameof(ShowSidePanel))]
+    [NotifyPropertyChangedFor(nameof(ShowToolsPanel))]
     [NotifyPropertyChangedFor(nameof(ShowPropertyPanel))]
     [NotifyPropertyChangedFor(nameof(ShowStatusBar))]
     private NexusPdf.Ux.PanelLayout _panels = NexusPdf.Ux.PanelLayout.Default;
@@ -51,8 +52,30 @@ public sealed partial class MainViewModel : ObservableObject
     public bool ShowQuickPanel => Panels.QuickPanel;
     public bool ShowToolRail => Panels.ToolRail;
     public bool ShowSidePanel => Panels.SidePanel;
+    public bool ShowToolsPanel => Panels.Tools;
     public bool ShowPropertyPanel => Panels.Properties;
     public bool ShowStatusBar => Panels.StatusBar;
+
+    private Services.Ux.ToolsPanel? _tools;
+
+    /// <summary>Панель инструментов: всё, что умеет программа, видно списком.</summary>
+    public Services.Ux.ToolsPanel Tools => _tools ??= new Services.Ux.ToolsPanel(Ux);
+
+    /// <summary>Скрыть панель её собственной кнопкой «заехать».</summary>
+    [RelayCommand]
+    private void HidePanel(string? name)
+    {
+        if (Enum.TryParse<NexusPdf.Ux.UiPanel>(name, out var panel))
+            TogglePanel(panel);
+    }
+
+    /// <summary>Показать панель значком с правого края.</summary>
+    [RelayCommand]
+    private void ShowPanel(string? name)
+    {
+        if (Enum.TryParse<NexusPdf.Ux.UiPanel>(name, out var panel))
+            TogglePanel(panel);
+    }
 
     /// <summary>Скрыть или показать одну панель.</summary>
     public void TogglePanel(NexusPdf.Ux.UiPanel panel)
