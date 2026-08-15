@@ -509,10 +509,16 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    private static string FormatSize(long bytes) =>
+        bytes >= 1024 * 1024
+            ? (bytes / 1024.0 / 1024.0).ToString("0.#") + " MB"
+            : (bytes / 1024.0).ToString("0") + " KB";
+
     [RelayCommand]
     private async Task CompressImages()
     {
-        if (ActiveDocument is not { } doc || doc.IsBusy || !_services.Tools.IsAvailable) return;
+        // qpdf этой операции не нужен — гейта доступности инструментов нет.
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
         var request = CompressImagesDialog.Show(OwnerWindow);
         if (request == null) return;
         var dialog = new SaveFileDialog
@@ -534,10 +540,9 @@ public sealed partial class MainViewModel : ObservableObject
                 CancellationToken.None);
             doc.StatusText = result.BytesAfter < result.BytesBefore
                 ? Loc.F("CompressDone",
-                    (result.BytesBefore / 1024.0 / 1024.0).ToString("0.#"),
-                    (result.BytesAfter / 1024.0 / 1024.0).ToString("0.#"),
-                    result.Recompressed)
-                : Loc.F("CompressNoGain", result.Recompressed);
+                    FormatSize(result.BytesBefore), FormatSize(result.BytesAfter), result.Recompressed)
+                : Loc.F("CompressNoGain",
+                    FormatSize(result.BytesBefore), FormatSize(result.BytesAfter), result.Recompressed);
             Log.Information("Пересжатие: {Before} → {After} байт, изображений {N}",
                 result.BytesBefore, result.BytesAfter, result.Recompressed);
         }

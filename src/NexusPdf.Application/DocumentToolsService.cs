@@ -144,9 +144,12 @@ public sealed class DocumentToolsService
         Func<byte[], int, int, byte[]> encodeJpeg, CancellationToken ct)
     {
         SaveService.ThrowIfTargetIsOpenSource(document, targetPath);
-        if (document.Password != null)
+        // Не только user-пароль: файл с одним owner-паролем (запрет изменений)
+        // открывается без пароля, но пересохранение молча сняло бы защиту.
+        var metadata = await document.PrimaryHandle.GetMetadataAsync(ct).ConfigureAwait(false);
+        if (document.Password != null || metadata.IsEncrypted)
             throw new PdfEngineException(
-                "Пересжатие защищённых паролем документов не поддерживается: сохранение сняло бы шифрование молча. Сначала сохраните копию без пароля.");
+                "Пересжатие защищённых документов не поддерживается: сохранение сняло бы шифрование молча. Сначала сохраните копию без защиты.");
         await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
 
         var composition = document.BuildComposition();
