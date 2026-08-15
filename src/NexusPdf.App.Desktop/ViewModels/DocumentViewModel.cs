@@ -425,6 +425,174 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         _ = DetectFormsAsync();
     }
 
+    // ----- Выделение текста мышью и ссылки -----
+
+    private PageViewModel? _selectionPage;
+    private int _selectionAnchorChar = -1;
+    private int _selectionEndChar = -1;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSelection))]
+    private string _selectedText = "";
+
+    public bool HasSelection => SelectedText.Length > 0;
+
+    /// <summary>Начало выделения: символ под курсором становится якорем.</summary>
+    public async Task<bool> BeginTextSelectionAsync(PageViewModel page, double xPt, double yPt)
+    {
+        ClearTextSelection();
+        var index = await Document.Handles[page.PageRef.SourceId].GetCharIndexAtAsync(
+            page.PageRef.SourcePageIndex, page.PageRef.RotationOffset, xPt, yPt, CancellationToken.None);
+        if (index < 0)
+            return false;
+        _selectionPage = page;
+        _selectionAnchorChar = index;
+        _selectionEndChar = index;
+        return true;
+    }
+
+    /// <summary>Протяжка выделения до символа под курсором.</summary>
+    public async Task UpdateTextSelectionAsync(PageViewModel page, double xPt, double yPt)
+    {
+        // Выделение живёт в пределах одной страницы: у каждой страницы своя
+        // система координат символов, сквозное выделение — отдельная работа.
+        if (_selectionPage == null || !ReferenceEquals(page, _selectionPage) || _selectionAnchorChar < 0)
+            return;
+        var index = await Document.Handles[page.PageRef.SourceId].GetCharIndexAtAsync(
+            page.PageRef.SourcePageIndex, page.PageRef.RotationOffset, xPt, yPt, CancellationToken.None);
+        if (index < 0 || index == _selectionEndChar)
+            return;
+        _selectionEndChar = index;
+        await RefreshSelectionAsync();
+    }
+
+    private async Task RefreshSelectionAsync()
+    {
+        if (_selectionPage is not { } page || _selectionAnchorChar < 0 || _selectionEndChar < 0)
+            return;
+        var start = Math.Min(_selectionAnchorChar, _selectionEndChar);
+        var count = Math.Abs(_selectionEndChar - _selectionAnchorChar) + 1;
+        var handle = Document.Handles[page.PageRef.SourceId];
+        try
+        {
+            var rects = await handle.GetTextRectsAsync(
+                page.PageRef.SourcePageIndex, start, count, CancellationToken.None);
+            page.SelectionRects = rects.Select(r => TransformRectToDiu(r, page)).ToList();
+
+            var text = await handle.GetPageTextAsync(page.PageRef.SourcePageIndex, CancellationToken.None);
+            SelectedText = start < text.Length
+                ? text.Substring(start, Math.Min(count, text.Length - start))
+                : "";
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Не удалось обновить выделение текста");
+        }
+    }
+
+    public void ClearTextSelection()
+    {
+        if (_selectionPage != null)
+            _selectionPage.SelectionRects = Array.Empty<Rect>();
+        _selectionPage = null;
+        _selectionAnchorChar = -1;
+        _selectionEndChar = -1;
+        SelectedText = "";
+    }
+
+    [RelayCommand]
+    private void CopySelection()
+    {
+        if (!HasSelection) return;
+        try
+        {
+            System.Windows.Clipboard.SetText(SelectedText);
+            StatusText = Loc.F("CopiedChars", SelectedText.Length);
+        }
+        catch (Exception ex)
+        {
+            // Буфер обмена может быть занят другим процессом.
+            Serilog.Log.Warning(ex, "Не удалось скопировать текст в буфер обмена");
+            StatusText = Loc.Get("CopyFailed");
+        }
+    }
+
+    /// <summary>Выделить весь текст текущей страницы (Ctrl+A).</summary>
+    [RelayCommand]
+    private async Task SelectAllOnPage()
+    {
+        var index = Math.Clamp(CurrentPageNumber - 1, 0, Math.Max(0, Pages.Count - 1));
+        if (index >= Pages.Count) return;
+        var page = Pages[index];
+        var handle = Document.Handles[page.PageRef.SourceId];
+        var text = await handle.GetPageTextAsync(page.PageRef.SourcePageIndex, CancellationToken.None);
+        if (text.Length == 0) return;
+        ClearTextSelection();
+        _selectionPage = page;
+        _selectionAnchorChar = 0;
+        _selectionEndChar = text.Length - 1;
+        await RefreshSelectionAsync();
+    }
+
+    /// <summary>Ссылки страницы (лениво, один раз на страницу).</summary>
+    public async Task EnsureLinksAsync(PageViewModel page)
+    {
+        if (page.LinksLoaded) return;
+        page.LinksLoaded = true; // повторных попыток при ошибке не делаем
+        try
+        {
+            var links = await Document.Handles[page.PageRef.SourceId]
+                .GetPageLinksAsync(page.PageRef.SourcePageIndex, CancellationToken.None);
+            page.LinkAreas = links
+                .Select(l => (Area: TransformRectToDiu(l.RectPt, page), Link: l))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Не удалось прочитать ссылки страницы {Page}", page.PageNumber);
+        }
+    }
+
+    /// <summary>Ссылка под курсором (координаты — DIU внутри страницы) или null.</summary>
+    public NexusPdf.Pdf.Abstractions.PdfPageLink? LinkAt(PageViewModel page, double xDiu, double yDiu)
+    {
+        foreach (var (area, link) in page.LinkAreas)
+        {
+            if (xDiu >= area.X && xDiu <= area.X + area.Width &&
+                yDiu >= area.Y && yDiu <= area.Y + area.Height)
+                return link;
+        }
+        return null;
+    }
+
+    /// <summary>Событие: пользователь активировал внешнюю ссылку (подтверждение показывает окно).</summary>
+    public event EventHandler<string>? ExternalLinkRequested;
+
+    public void ActivateLink(NexusPdf.Pdf.Abstractions.PdfPageLink link)
+    {
+        if (link.Uri is { Length: > 0 } uri)
+        {
+            // Внешний адрес НИКОГДА не открывается молча.
+            ExternalLinkRequested?.Invoke(this, uri);
+            return;
+        }
+        if (link.TargetPageIndex >= 0)
+        {
+            // Ссылка адресует страницу ИСХОДНОГО файла; после перестановки
+            // страниц ищем её текущее положение в сессии.
+            var pages = Document.Session.Model.Pages;
+            for (var i = 0; i < pages.Count; i++)
+            {
+                if (pages[i].SourcePageIndex == link.TargetPageIndex)
+                {
+                    GoToPage(i + 1);
+                    return;
+                }
+            }
+            StatusText = Loc.Get("LinkTargetMissing");
+        }
+    }
+
     // ----- Панель комментариев -----
 
     /// <summary>Строка панели: для черновика хранится ссылка на сам оверлей —

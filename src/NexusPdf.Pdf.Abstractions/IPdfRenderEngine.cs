@@ -52,6 +52,21 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     /// <summary>Прямоугольники, покрывающие диапазон символов страницы (для подсветки найденного).</summary>
     Task<IReadOnlyList<PdfTextRect>> GetTextRectsAsync(int pageIndex, int startCharIndex, int charCount, CancellationToken ct);
 
+    /// <summary>
+    /// Индекс символа в точке (отображаемые пункты от левого верхнего угла)
+    /// или -1, если в точке текста нет. Нужен для выделения текста мышью.
+    /// </summary>
+    Task<int> GetCharIndexAtAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct);
+
+    /// <summary>Ссылка PDF в точке (отображаемые пункты) или null.</summary>
+    Task<PdfLinkInfo?> GetLinkAtAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct);
+
+    /// <summary>
+    /// Все ссылки страницы с рамками в координатах страницы PDF. Читаются один
+    /// раз на страницу: попадание курсора проверяется без обращения к движку.
+    /// </summary>
+    Task<IReadOnlyList<PdfPageLink>> GetPageLinksAsync(int pageIndex, CancellationToken ct);
+
     /// <summary>Существующие аннотации страницы (без Link/Popup) — для панели комментариев.</summary>
     Task<IReadOnlyList<PdfAnnotationInfo>> GetAnnotationsAsync(int pageIndex, CancellationToken ct);
 

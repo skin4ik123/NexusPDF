@@ -106,6 +106,26 @@
                 <TextBlock Text="{l:Loc Rendering}" HorizontalAlignment="Center" VerticalAlignment="Center"
                            Foreground="{DynamicResource TextSecondary}"/>
                 <Image Source="{Binding Image}" Stretch="Fill"/>
+                <!-- Выделенный мышью текст -->
+                <ItemsControl ItemsSource="{Binding SelectionRects}" IsHitTestVisible="False">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <Canvas/>
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemContainerStyle>
+                    <Style TargetType="ContentPresenter">
+                      <Setter Property="Canvas.Left" Value="{Binding X}"/>
+                      <Setter Property="Canvas.Top" Value="{Binding Y}"/>
+                    </Style>
+                  </ItemsControl.ItemContainerStyle>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Rectangle Width="{Binding Width}" Height="{Binding Height}"
+                                 Fill="{DynamicResource Accent}" Opacity="0.34"/>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
                 <ItemsControl ItemsSource="{Binding Highlights}">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
