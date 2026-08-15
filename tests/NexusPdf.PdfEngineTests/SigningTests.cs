@@ -119,6 +119,36 @@ public sealed class SigningTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Visible_Stamp_Is_Baked_And_Covered_By_Signature()
+    {
+        if (!_qpdf.IsAvailable) return;
+        var path = PdfFixture.WriteToTemp("stamped.pdf",
+            new PdfFixture.PageSpec(612, 792, Text: "Contract body"));
+        var document = await OpenedDocument.OpenAsync(_pdfium, path, null, CancellationToken.None);
+        await using (document)
+        {
+            using var certificate = MakeSelfSigned();
+            var target = Path.Combine(Path.GetDirectoryName(path)!, "stamped-signed.pdf");
+            await new DocumentToolsService(_pdfium, _qpdf, _qpdf).SignCopyAsync(
+                document, target, certificate, "Согласовано", "",
+                visibleStamp: true, CancellationToken.None);
+
+            var signature = Assert.Single(
+                await PdfSignatureInspector.InspectAsync(target, CancellationToken.None));
+            Assert.True(signature.IsCryptoValid, signature.Error);
+            Assert.True(signature.CoversWholeDocument);
+
+            // Отметка запечена В СТРАНИЦУ (текст ищется) и покрыта подписью.
+            await using var reopened = await _pdfium.OpenAsync(target, null, CancellationToken.None);
+            var text = await reopened.GetPageTextAsync(0, CancellationToken.None);
+            Assert.Contains("Подписано:", text);
+            Assert.Contains("Тест Подписант", text);
+            Assert.Contains("Согласовано", text);
+            Assert.Contains("Contract body", text);
+        }
+    }
+
+    [Fact]
     public async Task Widened_ByteRange_Hole_Attack_Is_Rejected()
     {
         if (!_qpdf.IsAvailable) return;

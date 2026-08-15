@@ -464,7 +464,8 @@ public sealed partial class MainViewModel : ObservableObject
         try
         {
             await _services.Tools.SignCopyAsync(doc.Document, dialog.FileName,
-                request.Certificate, request.Reason, request.Location, CancellationToken.None);
+                request.Certificate, request.Reason, request.Location,
+                request.VisibleStamp, CancellationToken.None);
             doc.StatusText = Loc.F("SignDone", Path.GetFileName(dialog.FileName));
             Log.Information("Создана подписанная копия: {Path}", dialog.FileName);
         }

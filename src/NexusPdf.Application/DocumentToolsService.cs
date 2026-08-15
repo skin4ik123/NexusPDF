@@ -71,9 +71,14 @@ public sealed class DocumentToolsService
     /// компоновка → нормализация qpdf (QDF) → инкрементальная подпись →
     /// проверка собственным инспектором и повторным открытием.
     /// </summary>
+    public Task SignCopyAsync(
+        OpenedDocument document, string targetPath, X509Certificate2 certificate,
+        string reason, string location, CancellationToken ct) =>
+        SignCopyAsync(document, targetPath, certificate, reason, location, visibleStamp: false, ct);
+
     public async Task SignCopyAsync(
         OpenedDocument document, string targetPath, X509Certificate2 certificate,
-        string reason, string location, CancellationToken ct)
+        string reason, string location, bool visibleStamp, CancellationToken ct)
     {
         SaveService.ThrowIfTargetIsOpenSource(document, targetPath);
         if (document.Password != null)
@@ -93,6 +98,27 @@ public sealed class DocumentToolsService
         await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
 
         var composition = document.BuildComposition();
+        if (visibleStamp && composition.Count > 0)
+        {
+            // Видимая отметка запекается В СТРАНИЦУ до подписания (кириллица
+            // через CID-шрифт компоновки) и потому криптографически покрыта
+            // подписью. Позиция — левый низ первой страницы.
+            var pageSize = document.GetLogicalPageSize(0);
+            var signerName = certificate.GetNameInfo(X509NameType.SimpleName, forIssuer: false);
+            var stampTitle = new TextOverlay(
+                $"Подписано: {signerName}", 20, pageSize.HeightPoints - 44, 11, 0xFF1D4ED8, 0);
+            var stampDate = new TextOverlay(
+                $"{DateTimeOffset.Now:dd.MM.yyyy HH:mm} · NexusPDF" +
+                (reason.Length > 0 ? $" · {reason}" : ""),
+                20, pageSize.HeightPoints - 30, 8.5, 0xFF64748B, 0);
+            var first = composition[0];
+            var overlays = new List<PageOverlay>(first.Overlays ?? Array.Empty<PageOverlay>())
+                { stampTitle, stampDate };
+            var patched = new List<ComposedPage>(composition);
+            patched[0] = first with { Overlays = overlays };
+            composition = patched;
+        }
+
         await SafeFileReplace.WriteAndReplaceAsync(
             targetPath,
             async tempPath =>
@@ -101,7 +127,9 @@ public sealed class DocumentToolsService
                 var normalized = tempPath + ".qdf";
                 try
                 {
-                    if (SaveService.CanSaveDirect(document))
+                    // С видимой отметкой прямой путь невозможен: оверлеи
+                    // запекаются только компоновкой.
+                    if (!visibleStamp && SaveService.CanSaveDirect(document))
                         await document.PrimaryHandle.SaveCurrentAsync(plain, ct).ConfigureAwait(false);
                     else
                         await _renderEngine.ComposeAsync(composition, plain, ct).ConfigureAwait(false);
