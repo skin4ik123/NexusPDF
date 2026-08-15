@@ -529,6 +529,127 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
         }
     }
 
+    private const int PageObjectImage = 3; // FPDF_PAGEOBJ_IMAGE
+
+    public Task<PdfImageObject?> GetImageObjectAtAsync(
+        int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync<PdfImageObject?>(() =>
+            {
+                var page = fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
+                if (page == null || page.__Instance == IntPtr.Zero)
+                    return null;
+                try
+                {
+                    var (px, py) = DisplayedToPage(page, pageIndex, extraQuarterTurns, xPt, yPt);
+                    var count = fpdf_edit.FPDFPageCountObjects(page);
+
+                    // Идём с конца: верхний по порядку отрисовки объект под
+                    // курсором и есть тот, который видит пользователь.
+                    for (var i = count - 1; i >= 0; i--)
+                    {
+                        var obj = fpdf_edit.FPDFPageGetObject(page, i);
+                        if (obj == null || obj.__Instance == IntPtr.Zero ||
+                            fpdf_edit.FPDFPageObjGetType(obj) != PageObjectImage)
+                            continue;
+
+                        float left = 0, bottom = 0, right = 0, top = 0;
+                        if (fpdf_edit.FPDFPageObjGetBounds(obj, ref left, ref bottom, ref right, ref top) == 0)
+                            continue;
+                        if (px < Math.Min(left, right) || px > Math.Max(left, right) ||
+                            py < Math.Min(bottom, top) || py > Math.Max(bottom, top))
+                            continue;
+
+                        var bitmap = fpdf_edit.FPDFImageObjGetBitmap(obj);
+                        if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
+                            continue;
+                        try
+                        {
+                            var bgra = BitmapToBgra(bitmap, out var bw, out var bh);
+                            if (bgra == null)
+                                continue;
+
+                            // Рамка объекта в отображаемых координатах страницы.
+                            var size = Info.Pages[pageIndex];
+                            var rotate = ((extraQuarterTurns % 4) + 4) % 4;
+                            var displayedW = rotate % 2 == 0 ? size.WidthPoints : size.HeightPoints;
+                            var displayedH = rotate % 2 == 0 ? size.HeightPoints : size.WidthPoints;
+                            int dx1 = 0, dy1 = 0, dx2 = 0, dy2 = 0;
+                            fpdfview.FPDF_PageToDevice(page, 0, 0,
+                                (int)Math.Round(displayedW), (int)Math.Round(displayedH), rotate,
+                                Math.Min(left, right), Math.Max(top, bottom), ref dx1, ref dy1);
+                            fpdfview.FPDF_PageToDevice(page, 0, 0,
+                                (int)Math.Round(displayedW), (int)Math.Round(displayedH), rotate,
+                                Math.Max(left, right), Math.Min(top, bottom), ref dx2, ref dy2);
+
+                            return new PdfImageObject(i, bgra, bw, bh,
+                                Math.Min(dx1, dx2), Math.Min(dy1, dy2),
+                                Math.Abs(dx2 - dx1), Math.Abs(dy2 - dy1));
+                        }
+                        finally
+                        {
+                            fpdfview.FPDFBitmapDestroy(bitmap);
+                        }
+                    }
+                    return null;
+                }
+                finally
+                {
+                    fpdfview.FPDF_ClosePage(page);
+                }
+            }, ct);
+        }
+    }
+
+    /// <summary>Растр PDFium → BGRA. null — неизвестный формат.</summary>
+    internal static unsafe byte[]? BitmapToBgra(FpdfBitmapT bitmap, out int width, out int height)
+    {
+        width = fpdfview.FPDFBitmapGetWidth(bitmap);
+        height = fpdfview.FPDFBitmapGetHeight(bitmap);
+        var stride = fpdfview.FPDFBitmapGetStride(bitmap);
+        var format = fpdfview.FPDFBitmapGetFormat(bitmap);
+        var buffer = fpdfview.FPDFBitmapGetBuffer(bitmap);
+        if (width < 1 || height < 1 || buffer == IntPtr.Zero)
+            return null;
+
+        var result = new byte[(long)width * height * 4];
+        var src = (byte*)buffer;
+        for (var y = 0; y < height; y++)
+        {
+            var row = src + (long)y * stride;
+            for (var x = 0; x < width; x++)
+            {
+                var o = ((long)y * width + x) * 4;
+                switch (format)
+                {
+                    case 1: // Gray
+                        result[o] = result[o + 1] = result[o + 2] = row[x];
+                        result[o + 3] = 0xFF;
+                        break;
+                    case 2: // BGR
+                        result[o] = row[x * 3];
+                        result[o + 1] = row[x * 3 + 1];
+                        result[o + 2] = row[x * 3 + 2];
+                        result[o + 3] = 0xFF;
+                        break;
+                    case 3: // BGRx
+                    case 4: // BGRA
+                        result[o] = row[x * 4];
+                        result[o + 1] = row[x * 4 + 1];
+                        result[o + 2] = row[x * 4 + 2];
+                        result[o + 3] = format == 4 ? row[x * 4 + 3] : (byte)0xFF;
+                        break;
+                    default:
+                        return null;
+                }
+            }
+        }
+        return result;
+    }
+
     public Task<IReadOnlyList<PdfPageLink>> GetPageLinksAsync(int pageIndex, CancellationToken ct)
     {
         lock (_admissionGate)

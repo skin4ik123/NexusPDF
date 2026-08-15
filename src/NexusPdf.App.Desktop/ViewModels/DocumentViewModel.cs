@@ -195,18 +195,19 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     /// прямоугольнику (drag). Координаты — в пунктах от левого верхнего угла.
     /// </summary>
     /// <summary>
-    /// Фабрика рамки может вернуть null: тогда операция не применяется, а
-    /// обработку берёт на себя вызвавший код (например, правка области во
-    /// внешнем редакторе — там результат появляется много позже жеста).
+    /// Любая фабрика может вернуть null: тогда операция не применяется, а
+    /// обработку берёт на себя вызвавший код (например, правка области или
+    /// картинки во внешнем редакторе — там результат появляется много позже
+    /// жеста).
     /// </summary>
     public sealed record PendingPlacement(
-        Func<PageViewModel, double, double, Pdf.Abstractions.PageOverlay>? PointFactory,
+        Func<PageViewModel, double, double, Pdf.Abstractions.PageOverlay?>? PointFactory,
         Func<PageViewModel, Rect, Pdf.Abstractions.PageOverlay?>? RectFactory);
 
     [ObservableProperty]
     private PendingPlacement? _pendingOverlay;
 
-    public void BeginPlacement(Func<PageViewModel, double, double, Pdf.Abstractions.PageOverlay> factory)
+    public void BeginPlacement(Func<PageViewModel, double, double, Pdf.Abstractions.PageOverlay?> factory)
     {
         PendingOverlay = new PendingPlacement(factory, null);
         StatusText = Loc.Get("PlaceHint");
@@ -244,7 +245,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         var overlay = factory(page, xPt, yPt);
         PendingOverlay = null;
         StatusText = Loc.Get("Ready");
-        Document.Session.Apply(new AddOverlayOperation(page.LogicalIndex, overlay));
+        if (overlay != null)
+            Document.Session.Apply(new AddOverlayOperation(page.LogicalIndex, overlay));
     }
 
     // ----- Цифровые подписи (статус при открытии) -----

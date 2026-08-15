@@ -128,6 +128,10 @@ internal static class PdfiumOverlayWriter
                     break;
                 case PageRasterReplacement:
                     break; // уже применена выше
+                case ImageObjectReplacement imageReplacement:
+                    ApplyImageObjectReplacement(document, page, imageReplacement);
+                    contentAdded = true;
+                    break;
                 case OcrTextLayerOverlay ocrLayer:
                     ApplyOcrLayer(document, page, font, ocrLayer, extraAngle,
                         rotation, left, bottom, contentWidth, contentHeight);
@@ -352,6 +356,51 @@ internal static class PdfiumOverlayWriter
             fpdf_edit.FPDFPageObjTransform(obj, cos, sin, -sin, cos, offsetX + cx, offsetY + cy);
 
             fpdf_edit.FPDFPageInsertObject(page, obj); // объект переходит во владение страницы
+        }
+    }
+
+    /// <summary>
+    /// Подмена растра у СУЩЕСТВУЮЩЕГО объекта-изображения. Матрица объекта не
+    /// трогается, поэтому положение, масштаб, поворот, обрезка, прозрачность и
+    /// порядок отрисовки сохраняются сами собой — вся страница не растрируется.
+    /// </summary>
+    private static void ApplyImageObjectReplacement(
+        FpdfDocumentT document, FpdfPageT page, ImageObjectReplacement replacement)
+    {
+        const int pageObjectImage = 3; // FPDF_PAGEOBJ_IMAGE
+        var count = fpdf_edit.FPDFPageCountObjects(page);
+        if (replacement.ObjectIndex < 0 || replacement.ObjectIndex >= count)
+            throw new PdfEngineException(
+                "Изображение для замены не найдено: содержимое страницы изменилось.");
+
+        var obj = fpdf_edit.FPDFPageGetObject(page, replacement.ObjectIndex);
+        if (obj == null || obj.__Instance == IntPtr.Zero ||
+            fpdf_edit.FPDFPageObjGetType(obj) != pageObjectImage)
+            throw new PdfEngineException(
+                "Объект по указанному номеру больше не является изображением.");
+
+        var stride = replacement.PixelWidth * 4;
+        var pin = GCHandle.Alloc(replacement.Bgra, GCHandleType.Pinned);
+        try
+        {
+            var bitmap = fpdfview.FPDFBitmapCreateEx(
+                replacement.PixelWidth, replacement.PixelHeight, FpdfBitmapBgra,
+                pin.AddrOfPinnedObject(), stride);
+            if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
+                throw new PdfEngineException("Не удалось подготовить растр замены изображения.");
+            try
+            {
+                if (fpdf_edit.FPDFImageObjSetBitmap(null, 0, obj, bitmap) == 0)
+                    throw new PdfEngineException("Не удалось заменить изображение страницы.");
+            }
+            finally
+            {
+                fpdfview.FPDFBitmapDestroy(bitmap);
+            }
+        }
+        finally
+        {
+            pin.Free();
         }
     }
 

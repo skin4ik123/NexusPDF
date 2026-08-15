@@ -63,6 +63,29 @@ public sealed record ShapeAnnotationDraft(
     string Contents,
     string Author) : PageOverlay;
 
+/// <summary>Найденное на странице растровое изображение: индекс объекта, его растр и рамка в отображаемых пунктах.</summary>
+public sealed record PdfImageObject(
+    int ObjectIndex,
+    byte[] Bgra,
+    int PixelWidth,
+    int PixelHeight,
+    double XPt,
+    double YPt,
+    double WidthPt,
+    double HeightPt);
+
+/// <summary>
+/// Замена ОДНОГО изображения страницы (правка выбранной картинки во внешнем
+/// редакторе). Растр подменяется у существующего объекта, поэтому его матрица
+/// сохраняется целиком: положение, масштаб, поворот, обрезка, прозрачность,
+/// порядок отрисовки и связь с остальным содержимым страницы не меняются.
+/// </summary>
+public sealed record ImageObjectReplacement(
+    int ObjectIndex,
+    byte[] Bgra,
+    int PixelWidth,
+    int PixelHeight) : PageOverlay;
+
 /// <summary>
 /// Замена ВИЗУАЛЬНОГО СОДЕРЖИМОГО страницы растром (результат правки во
 /// внешнем редакторе). Удаляются только объекты содержимого страницы;

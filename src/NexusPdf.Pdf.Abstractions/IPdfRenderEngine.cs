@@ -68,6 +68,13 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     Task<PdfLinkInfo?> GetLinkAtAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct);
 
     /// <summary>
+    /// Растровое изображение страницы под точкой (отображаемые пункты) вместе
+    /// с его пикселями — для правки во внешнем редакторе. null, если в точке
+    /// изображения нет.
+    /// </summary>
+    Task<PdfImageObject?> GetImageObjectAtAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct);
+
+    /// <summary>
     /// Все ссылки страницы с рамками в координатах страницы PDF. Читаются один
     /// раз на страницу: попадание курсора проверяется без обращения к движку.
     /// </summary>
