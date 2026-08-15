@@ -60,6 +60,9 @@ public sealed class UxCommandHub
 
     private Window? Owner => _main.OwnerWindow;
 
+    /// <summary>Документ, к которому относятся команды без явной цели.</summary>
+    public DocumentViewModel? ActiveDocument => _main.ActiveDocument;
+
     // ----- Состояние -----
 
     /// <summary>

@@ -24,6 +24,15 @@ public sealed class AppSettings
     /// </summary>
     public string UiDensity { get; set; } = "auto";
 
+    /// <summary>
+    /// Состав быстрой панели — идентификаторы команд, «|» означает разделитель.
+    /// Пустой список означает «набор по умолчанию».
+    /// </summary>
+    public List<string> QuickCommands { get; set; } = new();
+
+    /// <summary>Показывать подписи рядом со значками быстрой панели.</summary>
+    public bool QuickPanelLabels { get; set; } = true;
+
     public bool KeepBackupOnSave { get; set; }
     public double LastZoom { get; set; } = 1.0;
 

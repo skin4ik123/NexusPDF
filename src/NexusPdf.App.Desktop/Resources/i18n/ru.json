@@ -657,5 +657,19 @@
   "UxDensityComfortable": "Обычно",
   "UxDensityTouch": "Для пальца",
   "UxDensityTouchHint": "Кнопки и пункты меню не меньше 44 точек — попадать пальцем без промахов.",
-  "UxDensityApplied": "Размер элементов интерфейса изменён."
+  "UxDensityApplied": "Размер элементов интерфейса изменён.",
+  "UxQuickPanelTitle": "Настроить быструю панель",
+  "UxQuickPanelIntro": "Слева — всё, что умеет программа; справа — то, что вынесено на панель. Порядок задаётся стрелками, «—» добавляет разделитель между группами.",
+  "UxQuickPanelAvailable": "Все команды",
+  "UxQuickPanelChosen": "На панели",
+  "UxQuickPanelAdd": "Добавить на панель",
+  "UxQuickPanelRemove": "Убрать с панели",
+  "UxQuickPanelSeparator": "Добавить разделитель",
+  "UxQuickPanelSeparatorItem": "— разделитель —",
+  "UxQuickPanelUp": "Выше",
+  "UxQuickPanelDown": "Ниже",
+  "UxQuickPanelLabels": "Показывать подписи рядом со значками",
+  "UxQuickPanelReset": "Вернуть как было",
+  "UxQuickPanelEmpty": "На панели не осталось ни одной команды. Добавьте хотя бы одну — иначе панель будет пустой полосой.",
+  "UxQuickPanelMenu": "Настроить быструю панель…"
 }

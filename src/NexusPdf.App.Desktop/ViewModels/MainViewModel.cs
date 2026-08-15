@@ -35,6 +35,48 @@ public sealed partial class MainViewModel : ObservableObject
     /// </summary>
     public Services.Ux.UxCommandHub Ux => _ux ??= new Services.Ux.UxCommandHub(this, _services);
 
+    private Services.Ux.QuickPanel? _quickPanel;
+
+    /// <summary>Быстрая панель: состав задаёт пользователь, содержимое — реестр команд.</summary>
+    public Services.Ux.QuickPanel QuickPanel
+    {
+        get
+        {
+            if (_quickPanel == null)
+            {
+                _quickPanel = new Services.Ux.QuickPanel(Ux);
+                _quickPanel.Load(_services.Settings.QuickCommands);
+            }
+            return _quickPanel;
+        }
+    }
+
+    /// <summary>Показывать ли подписи рядом со значками быстрой панели.</summary>
+    public bool ShowQuickPanelLabels
+    {
+        get => _services.Settings.QuickPanelLabels;
+        set
+        {
+            if (_services.Settings.QuickPanelLabels == value) return;
+            _services.Settings.QuickPanelLabels = value;
+            _services.SaveSettings();
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Настройка состава быстрой панели.</summary>
+    [RelayCommand]
+    private void ConfigureQuickPanel()
+    {
+        var result = QuickPanelDialog.Configure(OwnerWindow, QuickPanel, ShowQuickPanelLabels);
+        if (result == null) return;
+
+        QuickPanel.Load(result.Commands);
+        ShowQuickPanelLabels = result.ShowLabels;
+        _services.Settings.QuickCommands = QuickPanel.Save();
+        _services.SaveSettings();
+    }
+
     public ObservableCollection<DocumentViewModel> Documents { get; } = new();
     public ObservableCollection<string> RecentFiles { get; }
 
