@@ -57,6 +57,29 @@ public static class ImageEncoder
         return stream.ToArray();
     }
 
+    /// <summary>
+    /// BGRA-растр → JPEG по выбранному способу. Серый вариант выбрасывает две
+    /// цветовые плоскости: для скана это примерно втрое меньший файл при том же
+    /// виде, и ради него весь выбор кодека и затевался.
+    /// </summary>
+    public static byte[] EncodeChosen(byte[] bgra, int width, int height, ImageEncodingChoice choice)
+    {
+        var source = BitmapSource.Create(
+            width, height, 96, 96, PixelFormats.Bgra32, null, bgra, width * 4);
+        BitmapSource frame = source;
+        if (choice.IsGray)
+        {
+            var gray = new FormatConvertedBitmap(source, PixelFormats.Gray8, null, 0);
+            gray.Freeze();
+            frame = gray;
+        }
+        var encoder = new JpegBitmapEncoder { QualityLevel = choice.Quality };
+        encoder.Frames.Add(BitmapFrame.Create(frame));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return stream.ToArray();
+    }
+
     public static byte[] Encode(RenderedPageImage image, bool jpeg, double dpi)
     {
         var source = BitmapSource.Create(

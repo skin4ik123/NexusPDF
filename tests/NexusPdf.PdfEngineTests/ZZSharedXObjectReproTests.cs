@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using NexusPdf.Pdf.Abstractions;
 using NexusPdf.Pdf.Pdfium;
 
 namespace NexusPdf.PdfEngineTests;
@@ -24,8 +25,20 @@ public sealed class ZZSharedXObjectReproTests : IAsyncLifetime
 
     public async Task DisposeAsync() => await _pdfium.DisposeAsync();
 
-    private static byte[] EncodeJpeg(byte[] bgra, int width, int height, int quality)
+    private static byte[] EncodeJpeg(byte[] bgra, int width, int height, ImageEncodingChoice choice)
     {
+        var quality = choice.Quality;
+        if (choice.IsGray)
+        {
+            // System.Drawing не пишет одноканальный JPEG; для теста достаточно
+            // обесцветить пиксели — приложение на WPF кодирует настоящий Gray8.
+            bgra = (byte[])bgra.Clone();
+            for (var i = 0; i + 2 < bgra.Length; i += 4)
+            {
+                var luma = (byte)((bgra[i + 2] * 299 + bgra[i + 1] * 587 + bgra[i] * 114) / 1000);
+                bgra[i] = bgra[i + 1] = bgra[i + 2] = luma;
+            }
+        }
         using var bitmap = new System.Drawing.Bitmap(
             width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         var data = bitmap.LockBits(
@@ -167,7 +180,7 @@ public sealed class ZZSharedXObjectReproTests : IAsyncLifetime
         File.WriteAllBytes(srcA, BuildSharedXObjectPdf(rgb, 600, 144, 36));
         var outA = Path.Combine(dir, "sharedA.out.pdf");
         var statsA = await _pdfium.RecompressImagesAsync(
-            srcA, null, outA, 150, (b, w, h) => EncodeJpeg(b, w, h, 75), CancellationToken.None);
+            srcA, null, outA, 150, 75, EncodeJpeg, CancellationToken.None);
         var bytesA = File.ReadAllBytes(outA);
         log.AppendLine($"A: src={new FileInfo(srcA).Length} out={bytesA.Length}");
         log.AppendLine($"A: Recompressed={statsA.Recompressed} Skipped={statsA.Skipped}");
@@ -179,7 +192,7 @@ public sealed class ZZSharedXObjectReproTests : IAsyncLifetime
         File.WriteAllBytes(srcB, BuildSharedXObjectPdf(rgb, 600, 144, 144));
         var outB = Path.Combine(dir, "sharedB.out.pdf");
         var statsB = await _pdfium.RecompressImagesAsync(
-            srcB, null, outB, 150, (b, w, h) => EncodeJpeg(b, w, h, 75), CancellationToken.None);
+            srcB, null, outB, 150, 75, EncodeJpeg, CancellationToken.None);
         var bytesB = File.ReadAllBytes(outB);
         log.AppendLine($"B: src={new FileInfo(srcB).Length} out={bytesB.Length}");
         log.AppendLine($"B: Recompressed={statsB.Recompressed} Skipped={statsB.Skipped}");

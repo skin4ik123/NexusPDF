@@ -18,8 +18,20 @@ public sealed class RecompressTests : IAsyncLifetime
     public async Task DisposeAsync() => await _pdfium.DisposeAsync();
 
     /// <summary>JPEG через System.Drawing (тест-проект не имеет WPF-кодеков).</summary>
-    private static byte[] EncodeJpeg(byte[] bgra, int width, int height, int quality)
+    private static byte[] EncodeJpeg(byte[] bgra, int width, int height, ImageEncodingChoice choice)
     {
+        var quality = choice.Quality;
+        if (choice.IsGray)
+        {
+            // System.Drawing не пишет одноканальный JPEG; для теста достаточно
+            // обесцветить пиксели — приложение на WPF кодирует настоящий Gray8.
+            bgra = (byte[])bgra.Clone();
+            for (var i = 0; i + 2 < bgra.Length; i += 4)
+            {
+                var luma = (byte)((bgra[i + 2] * 299 + bgra[i + 1] * 587 + bgra[i] * 114) / 1000);
+                bgra[i] = bgra[i + 1] = bgra[i + 2] = luma;
+            }
+        }
         using var bitmap = new System.Drawing.Bitmap(
             width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         var data = bitmap.LockBits(
@@ -69,7 +81,7 @@ public sealed class RecompressTests : IAsyncLifetime
         var target = Path.Combine(dir, "compressed.pdf");
         var stats = await _pdfium.RecompressImagesAsync(
             source, null, target, 100,
-            (bgra, w, h) => EncodeJpeg(bgra, w, h, 75), CancellationToken.None);
+            75, EncodeJpeg, CancellationToken.None);
 
         Assert.Equal(1, stats.Recompressed);
         var after = new FileInfo(target).Length;
@@ -119,6 +131,11 @@ public sealed class RecompressTests : IAsyncLifetime
         return output.ToArray();
     }
 
+    /// <summary>
+    /// Действительно несжимаемый шум. Берётся СТАРШИЙ байт: у младших битов
+    /// LCG период 256, и такой «шум» Flate ужимает в сотню раз — пересжатие
+    /// на нём проверять нечего.
+    /// </summary>
     private static byte[] NoisyRgb(int width, int height)
     {
         var rgb = new byte[width * height * 3];
@@ -126,7 +143,7 @@ public sealed class RecompressTests : IAsyncLifetime
         for (var i = 0; i < rgb.Length; i++)
         {
             seed = seed * 1664525 + 1013904223;
-            rgb[i] = (byte)seed;
+            rgb[i] = (byte)(seed >> 16);
         }
         return rgb;
     }
@@ -150,7 +167,7 @@ public sealed class RecompressTests : IAsyncLifetime
 
         var target = Path.Combine(dir, "smask-out.pdf");
         var stats = await _pdfium.RecompressImagesAsync(path, null, target, 100,
-            (bgra, w, h) => EncodeJpeg(bgra, w, h, 75), CancellationToken.None);
+            75, EncodeJpeg, CancellationToken.None);
 
         // Прозрачное изображение обязано быть пропущено, а не «сплющено».
         Assert.Equal(0, stats.Recompressed);
@@ -177,7 +194,7 @@ public sealed class RecompressTests : IAsyncLifetime
 
         var target = Path.Combine(dir, "stencil-out.pdf");
         var stats = await _pdfium.RecompressImagesAsync(path, null, target, 100,
-            (bgra, w, h) => EncodeJpeg(bgra, w, h, 75), CancellationToken.None);
+            75, EncodeJpeg, CancellationToken.None);
 
         Assert.Equal(0, stats.Recompressed); // трафарет не трогаем
         await using var reopened = await _pdfium.OpenAsync(target, null, CancellationToken.None);
@@ -200,7 +217,7 @@ public sealed class RecompressTests : IAsyncLifetime
 
         var target = Path.Combine(dir, "rotated-out.pdf");
         var stats = await _pdfium.RecompressImagesAsync(path, null, target, 150,
-            (bgra, w, h) => EncodeJpeg(bgra, w, h, 75), CancellationToken.None);
+            75, EncodeJpeg, CancellationToken.None);
 
         Assert.Equal(1, stats.Recompressed);
         // DPI из матрицы: 600px на 144pt = 300 DPI → цель 150 → уменьшение
@@ -226,7 +243,7 @@ public sealed class RecompressTests : IAsyncLifetime
 
         var target = Path.Combine(dir, "shared-out.pdf");
         var stats = await _pdfium.RecompressImagesAsync(source, null, target, 150,
-            (bgra, w, h) => EncodeJpeg(bgra, w, h, 75), CancellationToken.None);
+            75, EncodeJpeg, CancellationToken.None);
 
         // Группа одна: счётчик — изображения, не размещения.
         Assert.Equal(1, stats.Recompressed);
@@ -235,22 +252,87 @@ public sealed class RecompressTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task LowDpi_Image_Is_Left_Untouched()
+    public async Task Small_LowDpi_Image_Is_Left_Untouched()
     {
         var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         var source = Path.Combine(dir, "noisy96.pdf");
         await _pdfium.CreateImageDocumentAsync(
-            new[] { NoisyPage(400, 500, 96) }, source, CancellationToken.None);
+            new[] { NoisyPage(120, 100, 96) }, source, CancellationToken.None);
 
         var target = Path.Combine(dir, "untouched.pdf");
         var stats = await _pdfium.RecompressImagesAsync(
             source, null, target, 150,
-            (bgra, w, h) => EncodeJpeg(bgra, w, h, 75), CancellationToken.None);
+            75, EncodeJpeg, CancellationToken.None);
 
-        // 96 DPI ниже целевых 150 — пересжимать нечего.
+        // Разрешение ниже целевого, поток лёгкий — трогать нечего.
         Assert.Equal(0, stats.Recompressed);
         await using var reopened = await _pdfium.OpenAsync(target, null, CancellationToken.None);
         Assert.Equal(1, reopened.Info.PageCount);
     }
+
+    /// <summary>
+    /// Разрешение может быть и в норме, а вес — нет: страница, вставленная как
+    /// несжатый растр, весит сотни килобайт при 96 DPI. Такое перекодируется с
+    /// запрошенным качеством, хотя уменьшать в размерах нечего.
+    /// </summary>
+    [Fact]
+    public async Task Heavy_LowDpi_Image_Is_Recoded_At_The_Chosen_Quality()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var source = Path.Combine(dir, "heavy96.pdf");
+        await _pdfium.CreateImageDocumentAsync(
+            new[] { NoisyPage(400, 500, 96) }, source, CancellationToken.None);
+        var before = new FileInfo(source).Length;
+
+        var target = Path.Combine(dir, "recoded.pdf");
+        var stats = await _pdfium.RecompressImagesAsync(
+            source, null, target, 150,
+            75, EncodeJpeg, CancellationToken.None);
+
+        Assert.Equal(1, stats.Recompressed);
+        var after = new FileInfo(target).Length;
+        Assert.True(after < before / 2, $"Тяжёлый растр обязан ужаться: {before} → {after}.");
+
+        // Размер в пикселях не тронут — уменьшать было нечего.
+        await using var reopened = await _pdfium.OpenAsync(target, null, CancellationToken.None);
+        Assert.Equal(1, reopened.Info.PageCount);
+    }
+
+    /// <summary>
+    /// И обратный случай: если перекодирование НЕ делает картинку легче,
+    /// исходный поток остаётся на месте. Пересжатие ради потери качества —
+    /// не оптимизация.
+    /// </summary>
+    [Fact]
+    public async Task Already_Compact_Image_Is_Not_Replaced_With_A_Bigger_One()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+
+        // Картинка выглядит шумом, но байты в ней повторяются каждые 256
+        // значений: Flate ужимает 1 МБ до считаных килобайт, а вот JPEG
+        // уменьшенной копии столько не стоит — заменять нечем.
+        var tricky = new byte[600 * 600 * 3];
+        uint seed = 777;
+        for (var i = 0; i < tricky.Length; i++)
+        {
+            seed = seed * 1664525 + 1013904223;
+            tricky[i] = (byte)seed; // младший байт LCG: период 256
+        }
+        var images = FlateImageObject(5, 600, 600, tricky, "");
+        var path = WriteRawImagePdf(dir, "tricky.pdf", images,
+            "q 144 0 0 144 50 50 cm /Im1 Do Q", "/Im1 5 0 R");
+        var before = new FileInfo(path).Length;
+
+        var target = Path.Combine(dir, "tricky-out.pdf");
+        var stats = await _pdfium.RecompressImagesAsync(
+            path, null, target, 150, 75, EncodeJpeg, CancellationToken.None);
+
+        Assert.Equal(0, stats.Recompressed);
+        Assert.True(new FileInfo(target).Length <= before * 1.1,
+            $"Файл не должен вырасти от «оптимизации»: {before} → {new FileInfo(target).Length}.");
+    }
+
 }

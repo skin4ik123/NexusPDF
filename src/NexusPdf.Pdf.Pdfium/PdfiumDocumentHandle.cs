@@ -420,6 +420,84 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
         }
     }
 
+    public Task<PdfImageSummary> GetImageSummaryAsync(int maxPages, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() => ImageSummaryCore(maxPages, ct), ct);
+        }
+    }
+
+    /// <summary>
+    /// Разбор без декодирования: размеры берутся из метаданных, реальное
+    /// разрешение — из матрицы размещения (метаданные pdfium для повёрнутых
+    /// картинок врут в разы).
+    /// </summary>
+    private PdfImageSummary ImageSummaryCore(int maxPages, CancellationToken ct)
+    {
+        var pageCount = fpdfview.FPDF_GetPageCount(NativeDoc);
+        var sampled = Math.Clamp(maxPages, 1, Math.Max(1, pageCount));
+        var images = 0;
+        var textLength = 0;
+        double dpiSum = 0;
+        var dpiSamples = 0;
+
+        for (var p = 0; p < sampled; p++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var page = fpdfview.FPDF_LoadPage(NativeDoc, p);
+            if (page == null || page.__Instance == IntPtr.Zero)
+                continue;
+            try
+            {
+                var textPage = fpdf_text.FPDFTextLoadPage(page);
+                if (textPage != null && textPage.__Instance != IntPtr.Zero)
+                {
+                    try
+                    {
+                        textLength += Math.Max(0, fpdf_text.FPDFTextCountChars(textPage));
+                    }
+                    finally
+                    {
+                        fpdf_text.FPDFTextClosePage(textPage);
+                    }
+                }
+
+                var objects = fpdf_edit.FPDFPageCountObjects(page);
+                for (var i = 0; i < objects; i++)
+                {
+                    var obj = fpdf_edit.FPDFPageGetObject(page, i);
+                    if (obj == null || obj.__Instance == IntPtr.Zero ||
+                        fpdf_edit.FPDFPageObjGetType(obj) != 3) // FPDF_PAGEOBJ_IMAGE
+                        continue;
+                    images++;
+                    if (dpiSamples >= 20)
+                        continue;
+
+                    var meta = new FPDF_IMAGEOBJ_METADATA();
+                    if (fpdf_edit.FPDFImageObjGetImageMetadata(obj, page, meta) == 0)
+                        continue;
+                    var matrix = new FS_MATRIX_();
+                    if (fpdf_edit.FPDFPageObjGetMatrix(obj, matrix) == 0)
+                        continue;
+                    var widthPt = Math.Sqrt((double)matrix.A * matrix.A + (double)matrix.B * matrix.B);
+                    if (widthPt < 1 || meta.Width < 1)
+                        continue;
+                    dpiSum += meta.Width / (widthPt / 72.0);
+                    dpiSamples++;
+                }
+            }
+            finally
+            {
+                fpdfview.FPDF_ClosePage(page);
+            }
+        }
+
+        return new PdfImageSummary(
+            sampled, images, textLength, dpiSamples > 0 ? dpiSum / dpiSamples : 0);
+    }
+
     public Task<string> GetPageTextAsync(int pageIndex, CancellationToken ct)
     {
         lock (_admissionGate)

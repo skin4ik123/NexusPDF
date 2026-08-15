@@ -1,6 +1,13 @@
 namespace NexusPdf.Pdf.Abstractions;
 
 /// <summary>
+/// Кодирование изображения выбранным способом. Реализует слой интерфейса
+/// (у него есть кодеки системы), а РЕШЕНИЕ, чем кодировать, принимает движок
+/// по самой картинке.
+/// </summary>
+public delegate byte[] EncodeImage(byte[] bgra, int width, int height, ImageEncodingChoice choice);
+
+/// <summary>
 /// Базовый движок: открытие документов, растеризация, текстовый слой и
 /// компоновка нового PDF из страниц открытых документов.
 /// Все операции асинхронные; реализация обязана быть потокобезопасной для вызывающего.
@@ -50,12 +57,20 @@ public interface IPdfRenderEngine : IAsyncDisposable
 
     /// <summary>
     /// Копия файла с пересжатыми изображениями: картинки с эффективным DPI выше
-    /// целевого уменьшаются и кодируются в JPEG (кодек даёт вызывающий).
+    /// целевого уменьшаются и кодируются заново (кодек даёт вызывающий).
     /// Прозрачные и факсовые (CCITT/JBIG2/JPX) изображения пропускаются.
     /// </summary>
     Task<ImageRecompressStats> RecompressImagesAsync(
         string sourcePath, string? password, string targetPath, double targetDpi,
-        Func<byte[], int, int, byte[]> encodeJpeg, CancellationToken ct);
+        EncodeImage encode, CancellationToken ct);
+
+    /// <summary>
+    /// То же с явным качеством JPEG: способ кодирования выбирается для каждого
+    /// изображения отдельно, и качество нужно знать до вызова кодека.
+    /// </summary>
+    Task<ImageRecompressStats> RecompressImagesAsync(
+        string sourcePath, string? password, string targetPath, double targetDpi,
+        int quality, EncodeImage encode, CancellationToken ct);
 }
 
 public interface IPdfDocumentHandle : IAsyncDisposable
@@ -71,6 +86,12 @@ public interface IPdfDocumentHandle : IAsyncDisposable
 
     /// <summary>Извлекает весь текст страницы (UTF-16, в порядке текстовых объектов).</summary>
     Task<string> GetPageTextAsync(int pageIndex, CancellationToken ct);
+
+    /// <summary>
+    /// Что за документ: скан или вёрстка. Смотрит первые <paramref name="maxPages"/>
+    /// страниц — дальше выводы уже не меняются.
+    /// </summary>
+    Task<PdfImageSummary> GetImageSummaryAsync(int maxPages, CancellationToken ct);
 
     /// <summary>Метаданные документа: версия PDF и словарь /Info.</summary>
     Task<PdfDocumentMetadata> GetMetadataAsync(CancellationToken ct);

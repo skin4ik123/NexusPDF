@@ -7,7 +7,11 @@ namespace NexusPdf.Pdf.Pdfium;
 
 /// <summary>
 /// Пересжатие изображений документа: картинки с эффективным DPI выше целевого
-/// уменьшаются (box-усреднение) и кодируются в JPEG на место исходного потока.
+/// уменьшаются (box-усреднение) и кодируются на место исходного потока — каждая
+/// СВОИМ способом (см. <see cref="ImageCodecChooser"/>). Крупные изображения,
+/// уже уложившиеся в целевое разрешение, всё равно перекодируются с
+/// запрошенным качеством: в документе, собранном из чужих файлов, качество
+/// JPEG обычно завышено, и это единственный оставшийся там резерв.
 ///
 /// Два прохода. Первый собирает пригодные размещения и группирует их по
 /// СОДЕРЖИМОМУ исходного потока: один XObject, использованный на многих
@@ -32,21 +36,32 @@ internal static class PdfiumImageRecompressor
     private const long MaxSourcePixels = 40_000_000; // защита от OOM
     private const int HashPrefixBytes = 64 * 1024;
 
+    /// <summary>
+    /// С какого веса поток стоит перекодировать БЕЗ уменьшения размера. На
+    /// мелочи выигрыш теряется в накладных расходах, а декодирование каждой
+    /// картинки многостраничного документа стоит секунд.
+    /// </summary>
+    private const long MinRecodeStreamBytes = 48 * 1024;
+
     private sealed record Placement(
         int PageIndex, int ObjectIndex, int PixelWidth, int PixelHeight,
-        int TargetWidth, int TargetHeight, string DataKey);
+        int TargetWidth, int TargetHeight, string DataKey, long OriginalBytes);
 
     private sealed class Group
     {
         public List<Placement> Placements { get; } = new();
         public int TargetWidth;
         public int TargetHeight;
-        public byte[]? Jpeg;
+        public byte[]? Encoded;
+        public byte[]? Resampled;
+        public ImageEncodingChoice Choice;
+        public long OriginalBytes;
+        public bool Rejected;
     }
 
     public static ImageRecompressStats RecompressCore(
         string sourcePath, string? password, string targetPath, double targetDpi,
-        Func<byte[], int, int, byte[]> encodeJpeg, CancellationToken ct)
+        int quality, EncodeImage encode, CancellationToken ct)
     {
         var bytes = File.ReadAllBytes(sourcePath);
         var pin = GCHandle.Alloc(bytes, GCHandleType.Pinned);
@@ -59,7 +74,7 @@ internal static class PdfiumImageRecompressor
             {
                 var skipped = 0;
                 var groups = CollectGroups(doc, targetDpi, ref skipped, ct);
-                var recompressed = ReplaceGroups(doc, groups, encodeJpeg, ct);
+                var recompressed = ReplaceGroups(doc, groups, quality, encode, ct);
                 PdfiumRenderEngine.SaveDocument(doc, targetPath);
                 return new ImageRecompressStats(recompressed, skipped);
             }
@@ -106,6 +121,7 @@ internal static class PdfiumImageRecompressor
                     if (!groups.TryGetValue(placement.DataKey, out var group))
                         groups[placement.DataKey] = group = new Group();
                     group.Placements.Add(placement);
+                    group.OriginalBytes = Math.Max(group.OriginalBytes, placement.OriginalBytes);
                     // Цель группы — по самому КРУПНОМУ размещению: замена под
                     // мелкое замылила бы крупные копии того же изображения.
                     if (placement.TargetWidth > group.TargetWidth)
@@ -148,8 +164,6 @@ internal static class PdfiumImageRecompressor
             return null;
         var dpiX = width / (placedWidthPt / 72.0);
         var dpiY = height / (placedHeightPt / 72.0);
-        if (Math.Max(dpiX, dpiY) <= targetDpi * 1.2)
-            return null; // уже достаточно компактно
 
         if (HasUnsupportedFilter(obj))
             return null;
@@ -160,13 +174,25 @@ internal static class PdfiumImageRecompressor
         // не должно проседать по «медленной» оси ниже цели.
         var targetWidth = Math.Max(1, (int)Math.Round(width * Math.Min(1.0, targetDpi / dpiX)));
         var targetHeight = Math.Max(1, (int)Math.Round(height * Math.Min(1.0, targetDpi / dpiY)));
-        if (targetWidth >= width && targetHeight >= height)
-            return null;
+
+        var originalBytes = RawStreamBytes(obj);
+        // Уменьшение на считаные пиксели (1556x1017 → 1556x1016 из-за
+        // округления) — это чистая потеря качества без выигрыша в весе.
+        if (targetWidth > width * 0.97 && targetHeight > height * 0.97)
+        {
+            // Уменьшать нечего. Перекодировать имеет смысл только увесистый
+            // поток — и только если результат окажется заметно меньше, что
+            // проверяется уже по факту кодирования.
+            if (originalBytes < MinRecodeStreamBytes)
+                return null;
+            (targetWidth, targetHeight) = (width, height);
+        }
 
         var dataKey = ComputeDataKey(obj);
         if (dataKey == null)
             return null;
-        return new Placement(pageIndex, objectIndex, width, height, targetWidth, targetHeight, dataKey);
+        return new Placement(
+            pageIndex, objectIndex, width, height, targetWidth, targetHeight, dataKey, originalBytes);
     }
 
     /// <summary>Прозрачность по альфе ОТРЕНДЕРЕННОГО битмапа: /SMask вкомпонована именно в него.</summary>
@@ -239,6 +265,23 @@ internal static class PdfiumImageRecompressor
         }
     }
 
+    /// <summary>
+    /// Вес исходного потока изображения (0 — неизвестен). Читается ТОЛЬКО на
+    /// первом проходе, пока все объекты пришли из файла: у созданных SetBitmap
+    /// сырого потока нет, и обращение к нему роняет процесс.
+    /// </summary>
+    private static long RawStreamBytes(FpdfPageobjectT obj)
+    {
+        try
+        {
+            return (long)fpdf_edit.FPDFImageObjGetImageDataRaw(obj, IntPtr.Zero, 0);
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
+    }
+
     private static bool HasUnsupportedFilter(FpdfPageobjectT obj)
     {
         var count = fpdf_edit.FPDFImageObjGetImageFilterCount(obj);
@@ -267,7 +310,7 @@ internal static class PdfiumImageRecompressor
 
     private static int ReplaceGroups(
         FpdfDocumentT doc, Dictionary<string, Group> groups,
-        Func<byte[], int, int, byte[]> encodeJpeg, CancellationToken ct)
+        int quality, EncodeImage encode, CancellationToken ct)
     {
         var replacedGroups = new HashSet<string>();
         var byPage = groups.Values
@@ -299,7 +342,7 @@ internal static class PdfiumImageRecompressor
                         (int)meta.Height != placement.PixelHeight)
                         continue;
 
-                    if (group.Jpeg == null)
+                    if (group.Resampled == null)
                     {
                         var bitmap = fpdf_edit.FPDFImageObjGetBitmap(obj);
                         if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
@@ -315,13 +358,49 @@ internal static class PdfiumImageRecompressor
                         }
                         if (bgra == null)
                             continue;
-                        var resampled = BoxDownsample(
+                        group.Resampled = BoxDownsample(
                             bgra, placement.PixelWidth, placement.PixelHeight,
                             group.TargetWidth, group.TargetHeight);
-                        group.Jpeg = encodeJpeg(resampled, group.TargetWidth, group.TargetHeight);
+
+                        // Кодек выбирается ПО СОДЕРЖИМОМУ: фотографии — JPEG,
+                        // схемам и снимкам экрана он только вредит.
+                        var analysis = ImageCodecChooser.Analyze(
+                            group.Resampled, group.TargetWidth, group.TargetHeight, quality);
+                        group.Encoded = encode(
+                            group.Resampled, group.TargetWidth, group.TargetHeight, analysis.Jpeg);
+                        long jpegBytes = group.Encoded?.Length ?? 0;
+
+                        // Для графики оба варианта СЧИТАЮТСЯ, а не угадываются.
+                        long losslessBytes = analysis.TryLossless
+                            ? ImageCodecChooser.EstimateLosslessBytes(
+                                group.Resampled, group.TargetWidth, group.TargetHeight)
+                            : 0;
+
+                        // Годится только то, что делает картинку заметно легче
+                        // ИСХОДНОЙ: пересжатие ради потери качества — не
+                        // оптимизация. Из уцелевших вариантов берётся без
+                        // потерь, пока он не стоит кратно дороже: на линиях и
+                        // тексте лишние байты окупаются отсутствием ореолов.
+                        var jpegFits = jpegBytes > 0 &&
+                                       ImageCodecChooser.IsWorthReplacing(group.OriginalBytes, jpegBytes);
+                        var losslessFits = losslessBytes > 0 &&
+                                           ImageCodecChooser.IsWorthReplacing(group.OriginalBytes, losslessBytes);
+
+                        if (losslessFits && (!jpegFits || ImageCodecChooser.LosslessWins(losslessBytes, jpegBytes)))
+                            group.Choice = new ImageEncodingChoice(ImageCodec.Lossless, quality);
+                        else
+                            group.Choice = analysis.Jpeg;
+                        group.Rejected = !jpegFits && !losslessFits;
                     }
 
-                    if (ReplaceWithJpeg(page, obj, group.Jpeg))
+                    if (group.Rejected)
+                        continue;
+
+                    var replaced = group.Choice.IsLossless
+                        ? ReplaceWithBitmap(doc, page, obj, group.Resampled,
+                            group.TargetWidth, group.TargetHeight)
+                        : group.Encoded != null && ReplaceWithJpeg(page, obj, group.Encoded);
+                    if (replaced)
                     {
                         pageChanged = true;
                         replacedGroups.Add(placement.DataKey);
@@ -441,6 +520,39 @@ internal static class PdfiumImageRecompressor
             }
         }
         return result;
+    }
+
+    /// <summary>
+    /// Замена без потерь: pdfium сам сожмёт растр Flate. Для схем и снимков
+    /// экрана это и меньше JPEG, и без ореолов вокруг букв.
+    /// </summary>
+    private static bool ReplaceWithBitmap(
+        FpdfDocumentT doc, FpdfPageT page, FpdfPageobjectT obj, byte[] bgra, int width, int height)
+    {
+        var handle = GCHandle.Alloc(bgra, GCHandleType.Pinned);
+        try
+        {
+            // Формат 3 (BGRx): альфа отсеяна на этапе отбора, и лишний канал
+            // только раздувал бы поток.
+            var bitmap = fpdfview.FPDFBitmapCreateEx(
+                width, height, 3, handle.AddrOfPinnedObject(), width * 4);
+            if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
+                return false;
+            try
+            {
+                // Список страниц pdfium не использует (он остался от старого
+                // кэша) — передаём ту страницу, на которой сейчас работаем.
+                return fpdf_edit.FPDFImageObjSetBitmap(page, 1, obj, bitmap) != 0;
+            }
+            finally
+            {
+                fpdfview.FPDFBitmapDestroy(bitmap);
+            }
+        }
+        finally
+        {
+            handle.Free();
+        }
     }
 
     private static unsafe bool ReplaceWithJpeg(FpdfPageT page, FpdfPageobjectT obj, byte[] jpeg)

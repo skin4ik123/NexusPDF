@@ -7,7 +7,10 @@ namespace NexusPdf.Application;
 
 public sealed record OptimizeResult(long BytesBefore, long BytesAfter);
 
-public sealed record CompressImagesResult(long BytesBefore, long BytesAfter, int Recompressed, int Skipped);
+/// <param name="Recompressed">Сколько изображений пересжато (0 — движок не считает поштучно).</param>
+/// <param name="KeptOriginal">Выигрыша не вышло, поэтому копия равна исходнику.</param>
+public sealed record CompressImagesResult(
+    long BytesBefore, long BytesAfter, int Recompressed, int Skipped, bool KeptOriginal = false);
 
 /// <summary>
 /// Операции над документом, требующие структурного движка (qpdf):
@@ -19,13 +22,20 @@ public sealed class DocumentToolsService
     private readonly IPdfRenderEngine _renderEngine;
     private readonly IPdfStructureEngine _structure;
     private readonly IPdfSecurityEngine _security;
+    private readonly IPdfCompressionEngine? _compression;
 
-    public DocumentToolsService(IPdfRenderEngine renderEngine, IPdfStructureEngine structure, IPdfSecurityEngine security)
+    public DocumentToolsService(
+        IPdfRenderEngine renderEngine, IPdfStructureEngine structure, IPdfSecurityEngine security,
+        IPdfCompressionEngine? compression = null)
     {
         _renderEngine = renderEngine;
         _structure = structure;
         _security = security;
+        _compression = compression;
     }
+
+    /// <summary>Доступно ли сжатие через отдельный движок (MuPDF).</summary>
+    public bool HasCompressionEngine => _compression?.IsAvailable == true;
 
     public bool IsAvailable => _structure.IsAvailable && _security.IsAvailable;
 
@@ -165,13 +175,14 @@ public sealed class DocumentToolsService
     }
 
     /// <summary>
-    /// Копия текущего состояния документа с ПЕРЕСЖАТЫМИ изображениями
-    /// (уменьшение до целевого DPI + JPEG): сжатие с потерями для сканов.
-    /// JPEG-кодек передаёт вызывающий слой (WPF-энкодер).
+    /// Копия текущего состояния документа со сжатыми изображениями, урезанными
+    /// шрифтами и пересобранной структурой. Основной движок — MuPDF; без него
+    /// работает запасной путь на PDFium, где кодек JPEG даёт вызывающий слой.
     /// </summary>
     public async Task<CompressImagesResult> CompressImagesCopyAsync(
         OpenedDocument document, string targetPath, double targetDpi,
-        Func<byte[], int, int, byte[]> encodeJpeg, CancellationToken ct)
+        int quality, EncodeImage encode, CancellationToken ct,
+        bool structureOnly = false, bool subsetFonts = false)
     {
         SaveService.ThrowIfTargetIsOpenSource(document, targetPath);
         // Не только user-пароль: файл с одним owner-паролем (запрет изменений)
@@ -185,6 +196,7 @@ public sealed class DocumentToolsService
         await using var baked = await document.BuildCompositionBakedAsync(_renderEngine, ct).ConfigureAwait(false);
         var composition = baked.Composition;
         long bytesBefore = 0;
+        var keptOriginal = false;
         ImageRecompressStats stats = new(0, 0);
 
         await SafeFileReplace.WriteAndReplaceAsync(
@@ -199,8 +211,31 @@ public sealed class DocumentToolsService
                     else
                         await _renderEngine.ComposeAsync(composition, plain, ct).ConfigureAwait(false);
                     bytesBefore = new FileInfo(plain).Length;
-                    stats = await _renderEngine.RecompressImagesAsync(
-                        plain, null, tempPath, targetDpi, encodeJpeg, ct).ConfigureAwait(false);
+
+                    if (_compression?.IsAvailable == true)
+                    {
+                        // Основной путь: MuPDF делает изображения, шрифты и
+                        // структуру за один проход и сам не отдаёт результат,
+                        // который больше исходника.
+                        var result = await _compression.CompressAsync(
+                            plain, tempPath,
+                            new PdfCompressionRequest(targetDpi, quality, structureOnly, subsetFonts),
+                            ct).ConfigureAwait(false);
+                        stats = new ImageRecompressStats(result.Recompressed, result.Skipped);
+                        keptOriginal = result.KeptOriginal;
+                    }
+                    else
+                    {
+                        // Запасной путь на своём движке: работает всегда, но
+                        // не умеет 1-битные сканы и шрифты.
+                        stats = await _renderEngine.RecompressImagesAsync(
+                            plain, null, tempPath, targetDpi, quality, encode, ct).ConfigureAwait(false);
+
+                        // Структурная оптимизация тем же заходом: потоки объектов
+                        // и сжатая таблица ссылок дают ещё несколько процентов и
+                        // не трогают качество.
+                        await TryOptimizeInPlaceAsync(tempPath, ct).ConfigureAwait(false);
+                    }
                 }
                 finally
                 {
@@ -220,7 +255,34 @@ public sealed class DocumentToolsService
             ct).ConfigureAwait(false);
 
         return new CompressImagesResult(
-            bytesBefore, new FileInfo(targetPath).Length, stats.Recompressed, stats.Skipped);
+            bytesBefore, new FileInfo(targetPath).Length, stats.Recompressed, stats.Skipped, keptOriginal);
+    }
+
+    /// <summary>
+    /// Структурная оптимизация уже готового файла на месте. Ошибка здесь не
+    /// повод терять пересжатие: без qpdf копия просто останется без этой
+    /// последней пары процентов.
+    /// </summary>
+    private async Task TryOptimizeInPlaceAsync(string path, CancellationToken ct)
+    {
+        if (!_structure.IsAvailable) return;
+        var optimized = path + ".opt";
+        try
+        {
+            await _structure.OptimizeAsync(path, optimized, linearize: true, ct).ConfigureAwait(false);
+            if (new FileInfo(optimized).Length < new FileInfo(path).Length)
+            {
+                File.Copy(optimized, path, overwrite: true);
+            }
+        }
+        catch (Exception)
+        {
+            // Оптимизация не обязана удаваться на любом файле.
+        }
+        finally
+        {
+            try { File.Delete(optimized); } catch { /* лучшая попытка */ }
+        }
     }
 
     /// <summary>Структурная оптимизация без потери качества. Возвращает размеры до/после.</summary>

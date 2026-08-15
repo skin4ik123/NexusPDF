@@ -425,9 +425,15 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
 
     public Task<ImageRecompressStats> RecompressImagesAsync(
         string sourcePath, string? password, string targetPath, double targetDpi,
-        Func<byte[], int, int, byte[]> encodeJpeg, CancellationToken ct) =>
+        EncodeImage encode, CancellationToken ct) =>
+        RecompressImagesAsync(sourcePath, password, targetPath, targetDpi, 75, encode, ct);
+
+    public Task<ImageRecompressStats> RecompressImagesAsync(
+        string sourcePath, string? password, string targetPath, double targetDpi,
+        int quality, EncodeImage encode, CancellationToken ct) =>
         _thread.InvokeAsync(
-            () => PdfiumImageRecompressor.RecompressCore(sourcePath, password, targetPath, targetDpi, encodeJpeg, ct), ct);
+            () => PdfiumImageRecompressor.RecompressCore(
+                sourcePath, password, targetPath, targetDpi, quality, encode, ct), ct);
 
     private static void CreateImageDocumentCore(IReadOnlyList<ImagePageSpec> pages, string targetPath)
     {

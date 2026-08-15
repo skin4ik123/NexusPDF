@@ -12,6 +12,11 @@ SPDX; при сборке установщика этот файл включа�
 - **gong-wpf-dragdrop** — © Jan Karger, Steven Kirk и участники, BSD-3-Clause.
 - **Serilog**, **Serilog.Sinks.File** — © Serilog Contributors, Apache-2.0.
 - **qpdf** — © Jay Berkenbilt и участники, Apache-2.0.
+- **MuPDF** и **MuPDF.NET** — © Artifex Software, Inc., **AGPL-3.0**. Применяется
+  при сжатии документов. AGPL требует предоставлять получателю копии программы
+  и её полный исходный код на тех же условиях; альтернатива — коммерческая
+  лицензия Artifex. Подробности — в
+  [DEPENDENCY_AND_LICENSE_MATRIX.md](DEPENDENCY_AND_LICENSE_MATRIX.md).
 - **Tesseract OCR** (нативные библиотеки) — © Google и участники, Apache-2.0.
 - **Tesseract .NET wrapper** — © Charles Weld и участники, Apache-2.0.
 - **Leptonica** — © Dan Bloomberg и участники, BSD-2-Clause.

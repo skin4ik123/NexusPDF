@@ -755,6 +755,27 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Разбор открытого документа для «умного» режима. Ошибка здесь не должна
+    /// мешать сжатию: просто вернём «неизвестно» и возьмём настройки вёрстки.
+    /// </summary>
+    private async Task<NexusPdf.Ux.DocumentImageProfile> ReadImageProfileAsync(DocumentViewModel doc)
+    {
+        try
+        {
+            var summary = await doc.Document.PrimaryHandle.GetImageSummaryAsync(
+                NexusPdf.Ux.DocumentImageProfile.SampleLimit, CancellationToken.None);
+            return new NexusPdf.Ux.DocumentImageProfile(
+                doc.Document.PrimaryHandle.Info.PageCount, summary.Images, summary.TextLength,
+                summary.SampledPages, summary.AverageImageDpi);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Не удалось разобрать документ перед сжатием");
+            return NexusPdf.Ux.DocumentImageProfile.Unknown;
+        }
+    }
+
     private static string FormatSize(long bytes) =>
         bytes >= 1024 * 1024
             ? (bytes / 1024.0 / 1024.0).ToString("0.#") + " MB"
@@ -765,7 +786,11 @@ public sealed partial class MainViewModel : ObservableObject
     {
         // qpdf этой операции не нужен — гейта доступности инструментов нет.
         if (ActiveDocument is not { } doc || doc.IsBusy) return;
-        var request = CompressImagesDialog.Show(OwnerWindow);
+
+        // Смотрим документ ДО диалога: «умный» режим и подсказка в окне должны
+        // говорить об этом файле, а не вообще.
+        var profile = await ReadImageProfileAsync(doc);
+        var request = CompressImagesDialog.Show(OwnerWindow, profile);
         if (request == null) return;
         var dialog = new SaveFileDialog
         {
@@ -781,14 +806,16 @@ public sealed partial class MainViewModel : ObservableObject
         try
         {
             var result = await _services.Tools.CompressImagesCopyAsync(
-                doc.Document, dialog.FileName, request.Dpi,
-                (bgra, w, h) => ImageEncoder.EncodeJpeg(bgra, w, h, request.Quality),
-                CancellationToken.None);
-            doc.StatusText = result.BytesAfter < result.BytesBefore
+                doc.Document, dialog.FileName, request.Dpi, request.Quality,
+                ImageEncoder.EncodeChosen, CancellationToken.None,
+                request.StructureOnly, request.SubsetFonts);
+            var saved = result.BytesBefore - result.BytesAfter;
+            doc.StatusText = saved > 0 && !result.KeptOriginal
                 ? Loc.F("CompressDone",
-                    FormatSize(result.BytesBefore), FormatSize(result.BytesAfter), result.Recompressed)
+                    FormatSize(result.BytesBefore), FormatSize(result.BytesAfter),
+                    FormatSize(saved) + $" / {saved * 100.0 / Math.Max(1, result.BytesBefore):0}%")
                 : Loc.F("CompressNoGain",
-                    FormatSize(result.BytesBefore), FormatSize(result.BytesAfter), result.Recompressed);
+                    FormatSize(result.BytesBefore), FormatSize(result.BytesAfter));
             Log.Information("Пересжатие: {Before} → {After} байт, изображений {N}",
                 result.BytesBefore, result.BytesAfter, result.Recompressed);
         }
