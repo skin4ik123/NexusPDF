@@ -194,9 +194,14 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     /// Ожидающее размещение: либо фабрика по точке клика, либо фабрика по
     /// прямоугольнику (drag). Координаты — в пунктах от левого верхнего угла.
     /// </summary>
+    /// <summary>
+    /// Фабрика рамки может вернуть null: тогда операция не применяется, а
+    /// обработку берёт на себя вызвавший код (например, правка области во
+    /// внешнем редакторе — там результат появляется много позже жеста).
+    /// </summary>
     public sealed record PendingPlacement(
         Func<PageViewModel, double, double, Pdf.Abstractions.PageOverlay>? PointFactory,
-        Func<PageViewModel, Rect, Pdf.Abstractions.PageOverlay>? RectFactory);
+        Func<PageViewModel, Rect, Pdf.Abstractions.PageOverlay?>? RectFactory);
 
     [ObservableProperty]
     private PendingPlacement? _pendingOverlay;
@@ -207,7 +212,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         StatusText = Loc.Get("PlaceHint");
     }
 
-    public void BeginRectPlacement(Func<PageViewModel, Rect, Pdf.Abstractions.PageOverlay> factory)
+    public void BeginRectPlacement(Func<PageViewModel, Rect, Pdf.Abstractions.PageOverlay?> factory)
     {
         PendingOverlay = new PendingPlacement(null, factory);
         StatusText = Loc.Get("PlaceRectHint");
@@ -221,7 +226,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         var overlay = factory(page, rectPt);
         PendingOverlay = null;
         StatusText = Loc.Get("Ready");
-        Document.Session.Apply(new AddOverlayOperation(page.LogicalIndex, overlay));
+        if (overlay != null)
+            Document.Session.Apply(new AddOverlayOperation(page.LogicalIndex, overlay));
     }
 
     public void CancelPlacement()

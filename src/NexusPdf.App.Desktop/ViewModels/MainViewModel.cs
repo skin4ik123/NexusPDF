@@ -671,6 +671,150 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    [RelayCommand]
+    private void EditRegionInPaint()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy || doc.PageCount == 0) return;
+        if (!ExternalImageEditor.IsEditorAvailable())
+        {
+            ErrorDialog.Show(OwnerWindow, Loc.Get("PaintEditTitle"), Loc.Get("PaintNoEditor"), "");
+            return;
+        }
+        var request = PaintEditDialog.Show(OwnerWindow, wholePage: false, _services.Ocr.IsAvailable);
+        if (request == null) return;
+
+        // Жест выбора рамки: обработка начнётся после отпускания мыши, поэтому
+        // фабрика ничего не создаёт (возвращает null) и запускает конвейер сама.
+        doc.BeginRectPlacement((page, rect) =>
+        {
+            if (rect.Width >= 8 && rect.Height >= 8)
+                _ = EditRegionCoreAsync(doc, page, rect, request);
+            return null;
+        });
+        doc.StatusText = Loc.Get("PaintRegionHint");
+    }
+
+    private async Task EditRegionCoreAsync(
+        DocumentViewModel doc, PageViewModel page, Rect regionPt, PaintEditRequest request)
+    {
+        doc.IsBusy = true;
+        doc.StatusText = Loc.Get("PaintExporting");
+        ExternalEditWorkspace? workspace = null;
+        ExternalImageEditor? editor = null;
+        try
+        {
+            var pageIndex = page.LogicalIndex;
+            var size = doc.Document.GetLogicalPageSize(pageIndex);
+            var scale = request.Dpi / 72.0;
+            var pageWidth = Math.Max(1, (int)Math.Round(size.WidthPoints * scale));
+            var pageHeight = Math.Max(1, (int)Math.Round(size.HeightPoints * scale));
+            var full = await doc.Document.RenderLogicalPageContentOnlyAsync(
+                pageIndex, pageWidth, pageHeight, CancellationToken.None);
+
+            // Вырезаем область в пикселях растра.
+            var x0 = Math.Clamp((int)Math.Floor(regionPt.X * scale), 0, pageWidth - 1);
+            var y0 = Math.Clamp((int)Math.Floor(regionPt.Y * scale), 0, pageHeight - 1);
+            var x1 = Math.Clamp((int)Math.Ceiling((regionPt.X + regionPt.Width) * scale), x0 + 1, pageWidth);
+            var y1 = Math.Clamp((int)Math.Ceiling((regionPt.Y + regionPt.Height) * scale), y0 + 1, pageHeight);
+            var cropWidth = x1 - x0;
+            var cropHeight = y1 - y0;
+            var crop = new byte[cropWidth * cropHeight * 4];
+            for (var y = 0; y < cropHeight; y++)
+            {
+                Buffer.BlockCopy(full.Bgra, (y0 + y) * full.Stride + x0 * 4,
+                    crop, y * cropWidth * 4, cropWidth * 4);
+            }
+            if (request.Grayscale)
+                crop = ToGrayscale(crop);
+
+            workspace = ExternalEditWorkspace.Create(
+                Path.GetFileNameWithoutExtension(doc.Title) + $"-p{pageIndex + 1}-region");
+            await File.WriteAllBytesAsync(workspace.ImagePath,
+                ImageEncoder.EncodePng(crop, cropWidth, cropHeight, request.Dpi));
+
+            editor = new ExternalImageEditor(workspace.ImagePath);
+            if (!editor.Launch())
+            {
+                ErrorDialog.Show(OwnerWindow, Loc.Get("PaintEditTitle"), Loc.Get("PaintNoEditor"), "");
+                return;
+            }
+
+            var edited = PaintWaitDialog.Run(OwnerWindow, editor, workspace.ImagePath,
+                ImageEncoder.ToBitmap(crop, cropWidth, cropHeight));
+            if (edited == null)
+            {
+                doc.StatusText = Loc.Get("PaintCancelled");
+                return;
+            }
+
+            var imported = ImageEncoder.DecodeBgra(edited);
+            if (request.RegionMode == RegionReturnMode.Overlay)
+            {
+                // Картинка ложится поверх; прежнее содержимое области остаётся
+                // в файле — об этом честно сказано в диалоге и в статусе.
+                doc.Document.Session.Apply(new NexusPdf.Domain.AddOverlayOperation(pageIndex,
+                    new NexusPdf.Pdf.Abstractions.ImageOverlay(
+                        imported.Bgra, imported.PixelWidth, imported.PixelHeight,
+                        regionPt.X, regionPt.Y, regionPt.Width, regionPt.Height)));
+                doc.StatusText = Loc.Get("PaintRegionOverlayDone");
+            }
+            else
+            {
+                // Уничтожение: правленый фрагмент вклеивается в растр всей
+                // страницы, и страница заменяется этим растром целиком —
+                // прежнее содержимое под областью физически исчезает.
+                var composed = (byte[])full.Bgra.Clone();
+                var scaleX = (double)imported.PixelWidth / cropWidth;
+                var scaleY = (double)imported.PixelHeight / cropHeight;
+                for (var y = 0; y < cropHeight; y++)
+                {
+                    var srcY = Math.Min(imported.PixelHeight - 1, (int)(y * scaleY));
+                    for (var x = 0; x < cropWidth; x++)
+                    {
+                        var srcX = Math.Min(imported.PixelWidth - 1, (int)(x * scaleX));
+                        var src = (srcY * imported.PixelWidth + srcX) * 4;
+                        var dst = (y0 + y) * full.Stride + (x0 + x) * 4;
+                        composed[dst] = imported.Bgra[src];
+                        composed[dst + 1] = imported.Bgra[src + 1];
+                        composed[dst + 2] = imported.Bgra[src + 2];
+                        composed[dst + 3] = 0xFF;
+                    }
+                }
+                doc.Document.Session.Apply(new NexusPdf.Domain.AddOverlayOperation(pageIndex,
+                    new NexusPdf.Pdf.Abstractions.PageRasterReplacement(composed, pageWidth, pageHeight)));
+                doc.StatusText = Loc.Get("PaintRegionDestroyDone");
+            }
+
+            var dpiScale = OwnerWindow != null
+                ? System.Windows.Media.VisualTreeHelper.GetDpi(OwnerWindow).DpiScaleX
+                : 1.0;
+            page.ForceRefresh(dpiScale);
+            Log.Information("Область страницы {Page} обновлена правкой из редактора (режим {Mode})",
+                pageIndex + 1, request.RegionMode);
+
+            if (request.RunOcrAfter && _services.Ocr.IsAvailable &&
+                request.RegionMode == RegionReturnMode.DestroyOriginal)
+            {
+                var result = await _services.Ocr.RecognizeAsync(
+                    doc.Document, new[] { pageIndex }, null, CancellationToken.None);
+                if (result.PagesRecognized > 0)
+                    doc.StatusText = Loc.F("PaintImportedWithOcr", result.WordCount);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка правки области во внешнем редакторе");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("PaintEditTitle"), ex.Message, ex.ToString());
+            doc.StatusText = Loc.Get("Ready");
+        }
+        finally
+        {
+            editor?.Dispose();
+            workspace?.Dispose();
+            doc.IsBusy = false;
+        }
+    }
+
     private static byte[] ToGrayscale(byte[] bgra)
     {
         var result = new byte[bgra.Length];
