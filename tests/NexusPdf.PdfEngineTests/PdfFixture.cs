@@ -142,6 +142,64 @@ public static class PdfFixture
         return buffer.ToArray();
     }
 
+    /// <summary>
+    /// Трёхстраничный PDF с оглавлением: два верхних раздела, у первого —
+    /// вложенный подраздел. Цели заданы прямым /Dest (первый и третий) и
+    /// действием /GoTo (второй) — оба способа встречаются в реальных файлах.
+    /// </summary>
+    public static byte[] BuildWithOutline()
+    {
+        var objects = new List<string>
+        {
+            // 1: каталог с оглавлением
+            "<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >>",
+            // 2: дерево страниц
+            "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>",
+            // 3..5: страницы
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+            // 6: корень оглавления
+            "<< /Type /Outlines /First 7 0 R /Last 8 0 R /Count 3 >>",
+            // 7: первый раздел -> страница 1, с вложенным узлом
+            "<< /Title (Chapter One) /Parent 6 0 R /Next 8 0 R /First 9 0 R /Last 9 0 R " +
+            "/Count 1 /Dest [3 0 R /Fit] >>",
+            // 8: второй раздел -> страница 3 через действие GoTo
+            "<< /Title (Chapter Two) /Parent 6 0 R /Prev 7 0 R " +
+            "/A << /S /GoTo /D [5 0 R /Fit] >> >>",
+            // 9: вложенный подраздел -> страница 2
+            "<< /Title (Section 1.1) /Parent 7 0 R /Dest [4 0 R /Fit] >>",
+        };
+
+        var buffer = new MemoryStream();
+        void WriteRaw(string s) => buffer.Write(Encoding.ASCII.GetBytes(s));
+
+        WriteRaw("%PDF-1.5\n");
+        buffer.Write(new byte[] { (byte)'%', 0xE2, 0xE3, 0xCF, 0xD3, (byte)'\n' });
+        var offsets = new long[objects.Count + 1];
+        for (var i = 0; i < objects.Count; i++)
+        {
+            offsets[i + 1] = buffer.Position;
+            WriteRaw($"{i + 1} 0 obj\n{objects[i]}\nendobj\n");
+        }
+        var xrefPosition = buffer.Position;
+        WriteRaw($"xref\n0 {objects.Count + 1}\n");
+        WriteRaw("0000000000 65535 f \n");
+        for (var i = 1; i <= objects.Count; i++)
+            WriteRaw($"{offsets[i]:0000000000} 00000 n \n");
+        WriteRaw($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xrefPosition}\n%%EOF\n");
+        return buffer.ToArray();
+    }
+
+    public static string WriteOutlineToTemp(string fileName)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, fileName);
+        File.WriteAllBytes(path, BuildWithOutline());
+        return path;
+    }
+
     public static string WriteComboFieldToTemp(string fileName, string fieldName, params string[] options)
     {
         var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));

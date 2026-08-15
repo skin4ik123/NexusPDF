@@ -144,6 +144,15 @@ public sealed record PdfActiveContent(
     public bool HasAny => JavaScriptCount > 0 || AttachmentCount > 0 || LaunchActionCount > 0;
 }
 
+/// <summary>
+/// Закладка оглавления PDF: заголовок, целевая страница (-1 — цель не
+/// разрешается) и вложенные закладки. Дерево читается целиком при открытии.
+/// </summary>
+public sealed record PdfBookmark(
+    string Title,
+    int TargetPageIndex,
+    IReadOnlyList<PdfBookmark> Children);
+
 /// <summary>Ссылка страницы вместе с её рамкой в координатах страницы PDF (для подсветки и наведения).</summary>
 public sealed record PdfPageLink(PdfTextRect RectPt, string? Uri, int TargetPageIndex);
 

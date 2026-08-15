@@ -120,6 +120,40 @@
     </Setter>
   </Style>
 
+  <!-- Вкладка боковой панели: «Страницы» / «Оглавление». -->
+  <Style x:Key="PanelTab" TargetType="RadioButton">
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+    <Setter Property="FontSize" Value="12"/>
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="HorizontalContentAlignment" Value="Center"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="RadioButton">
+          <Grid>
+            <Border x:Name="Bd" Background="Transparent" CornerRadius="4"
+                    BorderThickness="2" BorderBrush="Transparent" Padding="6,5"/>
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <Rectangle x:Name="Underline" Height="2" VerticalAlignment="Bottom"
+                       Fill="{DynamicResource Accent}" Visibility="Collapsed"/>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBg}"/>
+            </Trigger>
+            <Trigger Property="IsChecked" Value="True">
+              <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
+              <Setter Property="FontWeight" Value="SemiBold"/>
+              <Setter TargetName="Underline" Property="Visibility" Value="Visible"/>
+            </Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
   <Style x:Key="ThemedTextBox" TargetType="TextBox">
     <Setter Property="Background" Value="{DynamicResource InputBg}"/>
     <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>

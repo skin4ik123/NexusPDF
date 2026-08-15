@@ -37,7 +37,18 @@ public partial class DocumentView : UserControl
             _vm.FormComboRequested += OnFormComboRequested;
             _vm.ExternalLinkRequested += OnExternalLinkRequested;
             UpdatePlacementCursor();
+            // Оглавление читается сразу: без него не видно, есть ли у документа
+            // вкладка «Оглавление» вообще.
+            _ = _vm.EnsureBookmarksAsync();
         }
+    }
+
+    /// <summary>Выбор узла оглавления — переход на его страницу.</summary>
+    private void OnBookmarkSelected(object sender, RoutedPropertyChangedEventArgs<object> e)
+    {
+        if (_vm == null) return;
+        if (e.NewValue is ViewModels.BookmarkViewModel bookmark)
+            _vm.GoToBookmark(bookmark);
     }
 
     /// <summary>

@@ -10,6 +10,7 @@
     <BooleanToVisibilityConverter x:Key="BoolToVis"/>
     <app:InverseBoolToVisibilityConverter x:Key="InvBoolToVisLocal"/>
     <app:MinusOneConverter x:Key="MinusOne"/>
+    <app:InverseBoolConverter x:Key="InvBool"/>
     <app:NonZeroToVisibilityConverter x:Key="RotBadgeVis"/>
   </UserControl.Resources>
 
@@ -52,7 +53,64 @@
 
       <Border Grid.Column="0" Background="{DynamicResource PanelBg}"
               BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,1,0">
-        <ListBox x:Name="ThumbList" ItemsSource="{Binding Pages}"
+        <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Переключатель появляется только у документов с оглавлением -->
+        <UniformGrid Grid.Row="0" Columns="2" Margin="4,4,4,2"
+                     Visibility="{Binding HasBookmarks, Converter={StaticResource BoolToVis}}">
+          <RadioButton Style="{StaticResource PanelTab}" Content="{l:Loc PanelTabPages}"
+                       GroupName="SideTabs"
+                       IsChecked="{Binding IsOutlineVisible, Converter={StaticResource InvBool}}"/>
+          <RadioButton Style="{StaticResource PanelTab}" Content="{l:Loc PanelTabOutline}"
+                       GroupName="SideTabs" IsChecked="{Binding IsOutlineVisible}"/>
+        </UniformGrid>
+
+        <!-- Оглавление: дерево с переходом по щелчку -->
+        <TreeView Grid.Row="1" ItemsSource="{Binding Bookmarks}"
+                  AutomationProperties.Name="{l:Loc PanelTabOutline}"
+                  Background="Transparent" BorderThickness="0" Padding="2,0,2,6"
+                  Foreground="{DynamicResource TextBrush}"
+                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                  SelectedItemChanged="OnBookmarkSelected"
+                  Visibility="{Binding IsOutlineVisible, Converter={StaticResource BoolToVis}}">
+          <TreeView.ItemContainerStyle>
+            <Style TargetType="TreeViewItem">
+              <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+              <Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/>
+            </Style>
+          </TreeView.ItemContainerStyle>
+          <TreeView.ItemTemplate>
+            <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+              <Grid ToolTip="{Binding Title}" Margin="0,1">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"
+                           Foreground="{DynamicResource TextBrush}" FontSize="12"/>
+                <TextBlock Grid.Column="1" Text="{Binding PageLabel}" Margin="6,0,2,0"
+                           Foreground="{DynamicResource TextSecondary}" FontSize="11"/>
+                <Grid.Style>
+                  <Style TargetType="Grid">
+                    <Style.Triggers>
+                      <!-- Заголовок без страницы виден, но не притворяется ссылкой -->
+                      <DataTrigger Binding="{Binding CanNavigate}" Value="False">
+                        <Setter Property="Opacity" Value="0.55"/>
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Grid.Style>
+              </Grid>
+            </HierarchicalDataTemplate>
+          </TreeView.ItemTemplate>
+        </TreeView>
+
+        <ListBox Grid.Row="1" x:Name="ThumbList" ItemsSource="{Binding Pages}"
+                 Visibility="{Binding IsOutlineVisible, Converter={StaticResource InvBoolToVisLocal}}"
                AutomationProperties.Name="{l:Loc A11yThumbList}"
                  Background="Transparent" BorderThickness="0"
                  SelectedIndex="{Binding CurrentPageNumber, Converter={StaticResource MinusOne}, Mode=OneWay}"
@@ -74,6 +132,7 @@
             </DataTemplate>
           </ListBox.ItemTemplate>
         </ListBox>
+        </Grid>
       </Border>
 
       <ListBox x:Name="PagesList" Grid.Column="1" ItemsSource="{Binding Pages}"

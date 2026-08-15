@@ -80,6 +80,12 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     /// </summary>
     Task<IReadOnlyList<PdfPageLink>> GetPageLinksAsync(int pageIndex, CancellationToken ct);
 
+    /// <summary>
+    /// Дерево закладок (оглавление) документа. Пустой список — оглавления нет.
+    /// Номера страниц — индексы в ИСХОДНОМ документе.
+    /// </summary>
+    Task<IReadOnlyList<PdfBookmark>> GetBookmarksAsync(CancellationToken ct);
+
     /// <summary>Существующие аннотации страницы (без Link/Popup) — для панели комментариев.</summary>
     Task<IReadOnlyList<PdfAnnotationInfo>> GetAnnotationsAsync(int pageIndex, CancellationToken ct);
 
