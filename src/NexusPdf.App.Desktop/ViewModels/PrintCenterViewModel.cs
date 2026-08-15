@@ -494,6 +494,7 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
 
         var settings = BuildSettings();
         var sheets = _engine.BuildSheets(pages, settings, paper, caps);
+        sheets = _engine.ApplyDuplexPairing(sheets, Duplex, Imposition);
         sheets = _engine.ApplyMarksAndOverlays(sheets, settings, new OverlayContext(
             System.IO.Path.GetFileName(_document.Title), 1, sheets.Count,
             1, Math.Max(1, Copies), DateTime.Now.ToString("dd.MM.yyyy"),

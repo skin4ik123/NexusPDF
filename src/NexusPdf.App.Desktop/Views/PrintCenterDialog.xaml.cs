@@ -116,6 +116,13 @@ public partial class PrintCenterDialog : Window
     {
         if (_model.Plan is not { } plan || _model.SelectedPrinter == null) return;
 
+        // Ручной дуплекс идёт своим путём: два задания с остановкой между ними.
+        if (plan.Duplex == DuplexMode.Manual)
+        {
+            ManualDuplexDialog.Run(this, _document, _services, plan);
+            return;
+        }
+
         var ct = _model.BeginSubmit(Loc.Get("Printing"));
         try
         {
