@@ -141,6 +141,100 @@ internal sealed class PdfiumFormSession
             fpdf_formfill.FORM_ForceToKillFocus(_formHandle);
     }
 
+    private const int FieldTypeComboBox = 4; // FPDF_FORMFIELD_COMBOBOX
+    private const int FieldTypeListBox = 5;  // FPDF_FORMFIELD_LISTBOX
+
+    /// <summary>
+    /// Выпадающий список/список в точке клика (отображаемые пункты).
+    /// null — в точке нет такого поля. Рамка результата — в отображаемых
+    /// пунктах текущей ориентации (для позиционирования всплывающего списка).
+    /// </summary>
+    public PdfComboInfo? GetComboAt(
+        int pageIndex, int extraQuarterTurns, double displayedXPt, double displayedYPt,
+        double displayedWidthPt, double displayedHeightPt)
+    {
+        var page = ActivatePage(pageIndex);
+        var rotate = ((extraQuarterTurns % 4) + 4) % 4;
+        double pageX = 0, pageY = 0;
+        fpdfview.FPDF_DeviceToPage(page, 0, 0,
+            (int)Math.Round(displayedWidthPt), (int)Math.Round(displayedHeightPt),
+            rotate, (int)Math.Round(displayedXPt), (int)Math.Round(displayedYPt),
+            ref pageX, ref pageY);
+
+        var point = new FS_POINTF_ { X = (float)pageX, Y = (float)pageY };
+        var annot = fpdf_annot.FPDFAnnotGetFormFieldAtPoint(_formHandle!, page, point);
+        if (annot == null || annot.__Instance == IntPtr.Zero)
+            return null;
+        try
+        {
+            var fieldType = fpdf_annot.FPDFAnnotGetFormFieldType(_formHandle!, annot);
+            if (fieldType != FieldTypeComboBox && fieldType != FieldTypeListBox)
+                return null;
+            var count = fpdf_annot.FPDFAnnotGetOptionCount(_formHandle!, annot);
+            if (count <= 0)
+                return null;
+
+            var options = new List<string>(count);
+            var selected = -1;
+            for (var i = 0; i < count; i++)
+            {
+                options.Add(GetOptionLabel(annot, i));
+                if (selected < 0 && fpdf_annot.FPDFAnnotIsOptionSelected(_formHandle!, annot, i) != 0)
+                    selected = i;
+            }
+
+            // Рамка поля: координаты страницы → отображаемые.
+            var rect = new FS_RECTF_();
+            if (fpdf_annot.FPDFAnnotGetRect(annot, rect) == 0)
+                return null;
+            int dx1 = 0, dy1 = 0, dx2 = 0, dy2 = 0;
+            fpdfview.FPDF_PageToDevice(page, 0, 0,
+                (int)Math.Round(displayedWidthPt), (int)Math.Round(displayedHeightPt),
+                rotate, rect.Left, rect.Top, ref dx1, ref dy1);
+            fpdfview.FPDF_PageToDevice(page, 0, 0,
+                (int)Math.Round(displayedWidthPt), (int)Math.Round(displayedHeightPt),
+                rotate, rect.Right, rect.Bottom, ref dx2, ref dy2);
+            return new PdfComboInfo(
+                options, selected,
+                Math.Min(dx1, dx2), Math.Min(dy1, dy2),
+                Math.Abs(dx2 - dx1), Math.Abs(dy2 - dy1),
+                fieldType == FieldTypeListBox);
+        }
+        finally
+        {
+            fpdf_annot.FPDFPageCloseAnnot(annot);
+        }
+    }
+
+    /// <summary>Выбор пункта: фокус кликом по полю, затем выбор индекса у сфокусированного.</summary>
+    public void SetComboSelection(
+        int pageIndex, int extraQuarterTurns, double displayedXPt, double displayedYPt,
+        double displayedWidthPt, double displayedHeightPt, int optionIndex)
+    {
+        Click(pageIndex, extraQuarterTurns, displayedXPt, displayedYPt,
+            displayedWidthPt, displayedHeightPt);
+        if (_activePage == null || optionIndex < 0)
+            return;
+        fpdf_formfill.FORM_SetIndexSelected(_formHandle!, _activePage, optionIndex, 1);
+    }
+
+    private string GetOptionLabel(FpdfAnnotationT annot, int index)
+    {
+        var probe = new ushort[1];
+        var bytesNeeded = fpdf_annot.FPDFAnnotGetOptionLabel(_formHandle!, annot, index, ref probe[0], 0);
+        if (bytesNeeded <= 2)
+            return "";
+        var buffer = new ushort[bytesNeeded / 2];
+        fpdf_annot.FPDFAnnotGetOptionLabel(_formHandle!, annot, index, ref buffer[0], bytesNeeded);
+        var length = Array.IndexOf(buffer, (ushort)0);
+        if (length < 0)
+            length = buffer.Length;
+        var chars = new char[length];
+        for (var i = 0; i < length; i++)
+            chars[i] = (char)buffer[i];
+        return new string(chars);
+    }
+
     /// <summary>Дорисовка полей формы поверх отрисованной страницы.</summary>
     public void DrawFields(FpdfBitmapT bitmap, FpdfPageT page, int width, int height, int rotate, int flags)
     {

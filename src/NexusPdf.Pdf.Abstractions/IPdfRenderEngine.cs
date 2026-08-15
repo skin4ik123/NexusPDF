@@ -66,6 +66,12 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     /// <summary>Клик по странице в отображаемых координатах (пункты от левого верхнего угла).</summary>
     Task FormClickAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct);
 
+    /// <summary>Выпадающий список/список в точке (null — обычное поле): опции для собственного попапа.</summary>
+    Task<PdfComboInfo?> GetFormComboAtAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct);
+
+    /// <summary>Выбор пункта выпадающего списка в точке (фокус кликом + выбор индекса).</summary>
+    Task SetFormComboSelectionAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, int optionIndex, CancellationToken ct);
+
     /// <summary>Ввод символа в сфокусированное поле (Backspace — символ 8).</summary>
     Task FormCharAsync(char character, CancellationToken ct);
 

@@ -90,6 +90,16 @@ public sealed record OcrWordBox(
 /// </summary>
 public sealed record OcrTextLayerOverlay(IReadOnlyList<OcrWordBox> Words) : PageOverlay;
 
+/// <summary>Выпадающий список/список формы в точке клика: опции, выбор и рамка поля в отображаемых пунктах.</summary>
+public sealed record PdfComboInfo(
+    IReadOnlyList<string> Options,
+    int SelectedIndex,
+    double XPt,
+    double YPt,
+    double WidthPt,
+    double HeightPt,
+    bool IsListBox);
+
 /// <summary>Существующая аннотация документа (для панели комментариев; только чтение). Value — /V для виджетов форм.</summary>
 public sealed record PdfAnnotationInfo(
     int AnnotIndex,
