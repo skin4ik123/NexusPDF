@@ -284,6 +284,7 @@ public static class Program
                 }
                 await using (session)
                 {
+                    var showText = options.ContainsKey("text");
                     var summary = await session.AnalyzeAsync(null, ct);
                     foreach (var page in summary.Pages)
                     {
@@ -296,6 +297,25 @@ public static class Program
                             _ => "одинаковые",
                         };
                         Console.WriteLine($"Страница {page.PageIndex + 1}: {status}");
+                        if (showText && page.IsDifferent)
+                        {
+                            var fragments = await session.GetPageTextDiffAsync(page.PageIndex, ct);
+                            foreach (var fragment in fragments)
+                            {
+                                switch (fragment.Kind)
+                                {
+                                    case TextDiffKind.Removed:
+                                        Console.WriteLine($"  - {fragment.Text}");
+                                        break;
+                                    case TextDiffKind.Added:
+                                        Console.WriteLine($"  + {fragment.Text}");
+                                        break;
+                                    case TextDiffKind.TooLong:
+                                        Console.WriteLine("  (страница слишком длинная для пословного сравнения)");
+                                        break;
+                                }
+                            }
+                        }
                     }
                     Console.WriteLine(summary.DifferentPages == 0
                         ? "Итог: документы визуально идентичны."
@@ -367,8 +387,8 @@ public static class Program
             if (args[i].StartsWith("--", StringComparison.Ordinal))
             {
                 var name = args[i][2..];
-                // Флаги без значения (--force); значение — следующий аргумент.
-                if (name is "force")
+                // Флаги без значения; значение — следующий аргумент.
+                if (name is "force" or "text")
                     options[name] = "1";
                 else if (i + 1 < args.Length)
                     options[name] = args[++i];
@@ -485,9 +505,10 @@ NexusPdfCli — консольные операции NexusPDF (локально
   ocr           <вход.pdf> <выход.pdf> [--password X]
       Распознавание сканов (rus+eng): невидимый текстовый слой.
       Формы AcroForm в копии становятся статикой (выводится предупреждение).
-  compare       <первый.pdf> <второй.pdf> [--password-a X] [--password-b Y]
+  compare       <первый.pdf> <второй.pdf> [--text] [--password-a X] [--password-b Y]
       Визуальное постраничное сравнение. Код возврата 0 — идентичны,
-      3 — есть отличия (постраничный отчёт в stdout).
+      3 — есть отличия (постраничный отчёт в stdout). --text добавляет
+      пословные текстовые отличия изменённых страниц (- удалено, + добавлено).
 
 Общее: --force — перезаписать существующие файлы результата (в том числе
 картинки страниц у export-images). merge и from-images переносят страницы

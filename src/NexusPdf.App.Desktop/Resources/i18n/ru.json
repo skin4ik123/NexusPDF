@@ -271,6 +271,7 @@
   "CompareOnlyFirst": "только в первом",
   "CompareOnlySecond": "только во втором",
   "CompareError": "Сравнение не удалось:",
+  "CompareTextTooLong": "Страница слишком длинная для пословного текстового сравнения.",
   "PropsMenu": "Свойства документа…",
   "PropsTitle": "Свойства документа",
   "PropsPath": "Расположение",

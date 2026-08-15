@@ -157,22 +157,61 @@ public partial class CompareDialog : Window
     private async void OnPageSelected(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
         if (PageList.SelectedItem is not Row row || _session == null) return;
+        var session = _session;
         var requestId = ++_imageRequestId;
         try
         {
-            var images = await _session.GetPageImagesAsync(row.Info.PageIndex, CancellationToken.None);
+            var images = await session.GetPageImagesAsync(row.Info.PageIndex, CancellationToken.None);
             if (requestId != _imageRequestId) return; // выбрали другую страницу
             FirstImage.Source = ToBitmap(images.First);
             SecondImage.Source = ToBitmap(images.Second);
             var diff = ToDiffOverlay(images);
             FirstDiff.Source = diff;
             SecondDiff.Source = diff;
+
+            var fragments = await session.GetPageTextDiffAsync(row.Info.PageIndex, CancellationToken.None);
+            if (requestId != _imageRequestId) return;
+            ShowTextDiff(fragments);
         }
         catch (Exception ex)
         {
             Log.Warning(ex, "Не удалось показать пару страниц {Page}", row.Info.PageIndex);
             ClearImages();
         }
+    }
+
+    private void ShowTextDiff(IReadOnlyList<TextDiffFragment> fragments)
+    {
+        TextDiffBlock.Inlines.Clear();
+        var hasChanges = fragments.Any(f => f.Kind is TextDiffKind.Added or TextDiffKind.Removed);
+        if (fragments.Count == 1 && fragments[0].Kind == TextDiffKind.TooLong)
+        {
+            TextDiffBlock.Inlines.Add(new System.Windows.Documents.Run(Loc.Get("CompareTextTooLong")));
+            TextDiffPanel.Visibility = Visibility.Visible;
+            return;
+        }
+        if (!hasChanges)
+        {
+            TextDiffPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+        foreach (var fragment in fragments)
+        {
+            var run = new System.Windows.Documents.Run(fragment.Text + " ");
+            switch (fragment.Kind)
+            {
+                case TextDiffKind.Removed:
+                    run.Foreground = Brushes.IndianRed;
+                    run.TextDecorations = TextDecorations.Strikethrough;
+                    break;
+                case TextDiffKind.Added:
+                    run.Foreground = Brushes.SeaGreen;
+                    run.FontWeight = FontWeights.SemiBold;
+                    break;
+            }
+            TextDiffBlock.Inlines.Add(run);
+        }
+        TextDiffPanel.Visibility = Visibility.Visible;
     }
 
     private void ClearImages()
@@ -183,6 +222,8 @@ public partial class CompareDialog : Window
         SecondDiff.Source = null;
         FirstLabel.Text = "";
         SecondLabel.Text = "";
+        TextDiffPanel.Visibility = Visibility.Collapsed;
+        TextDiffBlock.Inlines.Clear();
     }
 
     private static BitmapSource? ToBitmap(RenderedPageImage? image)
