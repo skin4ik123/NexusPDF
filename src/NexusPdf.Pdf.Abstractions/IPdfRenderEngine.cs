@@ -19,6 +19,22 @@ public interface IPdfRenderEngine : IAsyncDisposable
     /// </summary>
     Task ComposeAsync(IReadOnlyList<ComposedPage> pages, string targetPath, CancellationToken ct);
 
+    /// <summary>
+    /// Растр страницы С ПРИМЕНЁННЫМИ правками — тем же кодом запекания, что и
+    /// при сохранении. Нужен, чтобы экран показывал именно то, что попадёт в
+    /// файл: рисовать правки приближениями поверх страницы значит показывать
+    /// не результат, а его имитацию (а для части правок — вообще ничего).
+    /// </summary>
+    /// <remarks>
+    /// Удаление существующих аннотаций здесь НЕ применяется: при сохранении оно
+    /// разворачивает связанные popup-объекты, и повторять эту логику ради
+    /// картинки значит держать две копии тонкого кода. Удалённые комментарии
+    /// пропадают из панели комментариев сразу — там пользователь их и видит.
+    /// </remarks>
+    Task<RenderedPageImage> RenderPageWithOverlaysAsync(
+        IPdfDocumentHandle source, int sourcePageIndex, int extraQuarterTurns,
+        IReadOnlyList<PageOverlay> overlays, int pixelWidth, int pixelHeight, CancellationToken ct);
+
     /// <summary>Создаёт новый PDF, где каждая страница — одно изображение, растянутое на всю страницу.</summary>
     Task CreateImageDocumentAsync(IReadOnlyList<ImagePageSpec> pages, string targetPath, CancellationToken ct);
 

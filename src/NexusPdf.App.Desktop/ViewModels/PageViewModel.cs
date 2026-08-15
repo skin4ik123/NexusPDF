@@ -21,6 +21,8 @@ public sealed partial class PageViewModel : ObservableObject
     private CancellationTokenSource? _thumbCts;
     private int _renderedPixelWidth;
     private int _renderedFormVersion = -1;
+    private int _renderedOverlays = -1;
+    private int _thumbOverlays = -1;
     private string? _lastStoredKey;
     private int _lastStoredFormVersion = -1;
 
@@ -30,7 +32,6 @@ public sealed partial class PageViewModel : ObservableObject
         LogicalIndex = logicalIndex;
         PageRef = pageRef;
         SizePt = sizePt;
-        BuildOverlayPreviews();
     }
 
     public int LogicalIndex { get; }
@@ -45,23 +46,13 @@ public sealed partial class PageViewModel : ObservableObject
     /// <summary>Масштаб пункты → DIU при текущем зуме (для слоя предпросмотра оверлеев).</summary>
     public double DisplayScale => PtToDiu * _owner.Zoom;
 
-    public IReadOnlyList<OverlayPreview> OverlayPreviews { get; private set; } = Array.Empty<OverlayPreview>();
-
-    private void BuildOverlayPreviews()
-    {
-        // Черновики пересчитываются в текущую отображаемую рамку тем же кодом,
-        // что и при запекании: экран обязан совпадать с будущим результатом.
-        OverlayPreviews = PageRef.OverlayList
-            .Select(raw =>
-            {
-                var (remapped, extraAngle) = OverlayDisplayMapper.ToFrame(
-                    raw, PageRef.RotationOffset, SizePt.WidthPoints, SizePt.HeightPoints);
-                return OverlayPreview.From(remapped, extraAngle);
-            })
-            .Where(p => p != null)
-            .Cast<OverlayPreview>()
-            .ToList();
-    }
+    /// <summary>
+    /// Слой приближений WPF больше не используется: применённые правки рисует
+    /// сам движок вместе со страницей, поэтому экран показывает ровно то, что
+    /// окажется в файле. Свойство оставлено пустым, чтобы разметка не ломалась,
+    /// а живые жесты рисуются отдельными слоями (рамка и штрих).
+    /// </summary>
+    public IReadOnlyList<OverlayPreview> OverlayPreviews { get; } = Array.Empty<OverlayPreview>();
 
     public string SizeText => Localization.Loc.F("PageSize",
         Math.Round(SizePt.WidthPoints / 72.0 * 25.4), Math.Round(SizePt.HeightPoints / 72.0 * 25.4));
@@ -143,11 +134,15 @@ public sealed partial class PageViewModel : ObservableObject
         var pixelWidth = Math.Max(16, (int)Math.Round(WidthDiu * dpiScale));
         var pixelHeight = Math.Max(16, (int)Math.Round(HeightDiu * dpiScale));
         var formVersion = _owner.FormRenderVersion;
-        if (_renderedPixelWidth == pixelWidth && _renderedFormVersion == formVersion && Image != null)
+        // Отпечаток правок входит и в условие пропуска, и в ключ кэша: без него
+        // после добавления правки вернулась бы прежняя картинка без неё.
+        var overlays = _owner.Document.GetOverlaySignature(LogicalIndex);
+        if (_renderedPixelWidth == pixelWidth && _renderedFormVersion == formVersion
+            && _renderedOverlays == overlays && Image != null)
             return;
 
         var key = RenderCache.MakeKey(PageRef.SourceId, PageRef.SourcePageIndex, PageRef.RotationOffset, pixelWidth)
-                  + ":f" + formVersion;
+                  + ":f" + formVersion + ":o" + overlays;
         if (_owner.Cache.TryGet(key) is { } cached)
         {
             Image = cached;
@@ -176,6 +171,7 @@ public sealed partial class PageViewModel : ObservableObject
                 Image = bitmap;
                 _renderedPixelWidth = pixelWidth;
                 _renderedFormVersion = formVersion;
+                _renderedOverlays = overlays;
             }
         }
         catch (OperationCanceledException)
@@ -195,6 +191,14 @@ public sealed partial class PageViewModel : ObservableObject
 
     public async void EnsureThumbnail()
     {
+        // Правки должны быть видны и на миниатюре: иначе список страниц
+        // показывает документ, которого уже нет.
+        var overlays = _owner.Document.GetOverlaySignature(LogicalIndex);
+        if (_thumbOverlays != overlays)
+        {
+            ThumbImage = null;
+            _thumbOverlays = overlays;
+        }
         if (ThumbImage != null || _thumbCts is { IsCancellationRequested: false })
             return;
 
@@ -202,7 +206,7 @@ public sealed partial class PageViewModel : ObservableObject
         var pixelHeight = Math.Max(16, (int)(SizePt.HeightPoints * scale));
 
         var key = RenderCache.MakeKey(PageRef.SourceId, PageRef.SourcePageIndex, PageRef.RotationOffset, ThumbPixelWidth)
-                  + ":f" + _owner.FormRenderVersion;
+                  + ":f" + _owner.FormRenderVersion + ":o" + overlays;
         if (_owner.Cache.TryGet(key) is { } cached)
         {
             ThumbImage = cached;
