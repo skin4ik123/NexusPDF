@@ -104,13 +104,39 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     [ObservableProperty]
     private string _findQuery = "";
 
+    private CancellationTokenSource? _findDebounceCts;
+
     partial void OnFindQueryChanged(string value)
     {
-        // Изменение запроса сбрасывает результаты: следующий Enter запустит новый поиск.
         Matches = Array.Empty<SearchMatch>();
         _currentMatch = -1;
         FindStatus = "";
         ClearHighlights();
+
+        // Поиск по мере ввода: ждать Enter, как раньше, — лишний шаг, которого
+        // нет ни в одном современном просмотрщике. Пауза гасит поиск на каждую
+        // букву при наборе.
+        _findDebounceCts?.Cancel();
+        if (string.IsNullOrWhiteSpace(value))
+            return;
+        var cts = new CancellationTokenSource();
+        _findDebounceCts = cts;
+        _ = RunSearchAfterPauseAsync(cts);
+    }
+
+    private async Task RunSearchAfterPauseAsync(CancellationTokenSource cts)
+    {
+        try
+        {
+            await Task.Delay(350, cts.Token);
+            if (!ReferenceEquals(cts, _findDebounceCts))
+                return;
+            await RunSearchAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            // Пользователь продолжил печатать — этот запуск больше не нужен.
+        }
     }
 
     [ObservableProperty]
@@ -464,8 +490,12 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     public async Task<bool> BeginTextSelectionAsync(PageViewModel page, double xPt, double yPt)
     {
         ClearTextSelection();
-        var index = await Document.Handles[page.PageRef.SourceId].GetCharIndexAtAsync(
-            page.PageRef.SourcePageIndex, page.PageRef.RotationOffset, xPt, yPt, CancellationToken.None);
+        // Текст берётся со страницы С ПРАВКАМИ: распознанный OCR слой и
+        // добавленные надписи должны выделяться сразу, а не после сохранения.
+        var (handle, pageIndex) = await Document.ResolveTextPageAsync(
+            page.LogicalIndex, CancellationToken.None);
+        var index = await handle.GetCharIndexAtAsync(
+            pageIndex, page.PageRef.RotationOffset, xPt, yPt, CancellationToken.None);
         if (index < 0)
             return false;
         _selectionPage = page;
@@ -481,8 +511,10 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         // система координат символов, сквозное выделение — отдельная работа.
         if (_selectionPage == null || !ReferenceEquals(page, _selectionPage) || _selectionAnchorChar < 0)
             return;
-        var index = await Document.Handles[page.PageRef.SourceId].GetCharIndexAtAsync(
-            page.PageRef.SourcePageIndex, page.PageRef.RotationOffset, xPt, yPt, CancellationToken.None);
+        var (handle, pageIndex) = await Document.ResolveTextPageAsync(
+            page.LogicalIndex, CancellationToken.None);
+        var index = await handle.GetCharIndexAtAsync(
+            pageIndex, page.PageRef.RotationOffset, xPt, yPt, CancellationToken.None);
         if (index < 0 || index == _selectionEndChar)
             return;
         _selectionEndChar = index;
@@ -495,14 +527,15 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             return;
         var start = Math.Min(_selectionAnchorChar, _selectionEndChar);
         var count = Math.Abs(_selectionEndChar - _selectionAnchorChar) + 1;
-        var handle = Document.Handles[page.PageRef.SourceId];
+        var (handle, pageIndex) = await Document.ResolveTextPageAsync(
+            page.LogicalIndex, CancellationToken.None);
         try
         {
             var rects = await handle.GetTextRectsAsync(
-                page.PageRef.SourcePageIndex, start, count, CancellationToken.None);
+                pageIndex, start, count, CancellationToken.None);
             page.SelectionRects = rects.Select(r => TransformRectToDiu(r, page)).ToList();
 
-            var text = await handle.GetPageTextAsync(page.PageRef.SourcePageIndex, CancellationToken.None);
+            var text = await handle.GetPageTextAsync(pageIndex, CancellationToken.None);
             SelectedText = start < text.Length
                 ? text.Substring(start, Math.Min(count, text.Length - start))
                 : "";

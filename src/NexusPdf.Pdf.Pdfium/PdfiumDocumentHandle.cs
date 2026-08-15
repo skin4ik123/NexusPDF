@@ -7,8 +7,10 @@ namespace NexusPdf.Pdf.Pdfium;
 internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
 {
     private readonly PdfiumThread _thread;
-    private readonly MemoryMappedFile _mmf;
-    private readonly MemoryMappedViewAccessor _accessor;
+    // У документа, собранного в ПАМЯТИ (страница с применёнными правками),
+    // файла за спиной нет — отображение отсутствует, и закрывать нечего.
+    private readonly MemoryMappedFile? _mmf;
+    private readonly MemoryMappedViewAccessor? _accessor;
 
     // Допуск операции и постановка FPDF_CloseDocument в очередь защищены одним
     // замком: очередь PdfiumThread — FIFO, поэтому закрытие документа всегда
@@ -28,8 +30,8 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
         string filePath,
         FpdfDocumentT nativeDoc,
         PdfDocumentInfo info,
-        MemoryMappedFile mmf,
-        MemoryMappedViewAccessor accessor)
+        MemoryMappedFile? mmf,
+        MemoryMappedViewAccessor? accessor)
     {
         _thread = thread;
         FilePath = filePath;
@@ -1268,9 +1270,12 @@ internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
                 _forms?.Dispose();
                 _forms = null;
                 fpdfview.FPDF_CloseDocument(NativeDoc);
-                _accessor.SafeMemoryMappedViewHandle.ReleasePointer();
-                _accessor.Dispose();
-                _mmf.Dispose();
+                if (_accessor != null)
+                {
+                    _accessor.SafeMemoryMappedViewHandle.ReleasePointer();
+                    _accessor.Dispose();
+                }
+                _mmf?.Dispose();
             }, CancellationToken.None);
         }
         await closeTask.ConfigureAwait(false);

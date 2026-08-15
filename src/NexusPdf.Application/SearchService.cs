@@ -10,7 +10,7 @@ public sealed record SearchMatch(int LogicalPageIndex, int CharIndex, int Length
 /// </summary>
 public sealed class SearchService
 {
-    private readonly ConcurrentDictionary<(Guid SourceId, int PageIndex), string> _textCache = new();
+    private readonly ConcurrentDictionary<(Guid SourceId, int PageIndex, int Overlays), string> _textCache = new();
 
     public async Task<IReadOnlyList<SearchMatch>> SearchAsync(
         OpenedDocument document, string query, bool caseSensitive, CancellationToken ct)
@@ -28,11 +28,16 @@ public sealed class SearchService
         {
             ct.ThrowIfCancellationRequested();
             var page = pages[logicalIndex];
-            var key = (page.SourceId, page.SourcePageIndex);
+            // Ключ кэша включает отпечаток правок: страница с распознанным или
+            // добавленным текстом должна находиться поиском СРАЗУ, а не после
+            // сохранения файла.
+            var overlays = document.GetOverlaySignature(logicalIndex);
+            var key = (page.SourceId, page.SourcePageIndex, overlays);
             if (!_textCache.TryGetValue(key, out var text))
             {
-                text = await document.Handles[page.SourceId]
-                    .GetPageTextAsync(page.SourcePageIndex, ct).ConfigureAwait(false);
+                var (handle, pageIndex) = await document
+                    .ResolveTextPageAsync(logicalIndex, ct).ConfigureAwait(false);
+                text = await handle.GetPageTextAsync(pageIndex, ct).ConfigureAwait(false);
                 _textCache[key] = text;
             }
 
