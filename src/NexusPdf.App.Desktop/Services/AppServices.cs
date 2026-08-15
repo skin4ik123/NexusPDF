@@ -22,6 +22,7 @@ public sealed class AppServices : IAsyncDisposable
         OcrEngine = new NexusPdf.Ocr.TesseractOcrEngine();
         Ocr = new OcrService(OcrEngine);
         Convert = new ConvertService(engine);
+        Layers = new LayerService(Qpdf);
     }
 
     public IPdfRenderEngine Engine { get; }
@@ -36,6 +37,7 @@ public sealed class AppServices : IAsyncDisposable
     public NexusPdf.Ocr.TesseractOcrEngine OcrEngine { get; }
     public OcrService Ocr { get; }
     public ConvertService Convert { get; }
+    public LayerService Layers { get; }
 
     public void SaveSettings()
     {

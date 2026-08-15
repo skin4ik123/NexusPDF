@@ -285,6 +285,9 @@
                           Click="OnMenuItem"/>
                   <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
                 </StackPanel>
+                <Button Style="{StaticResource LinkButton}" Content="{l:Loc LayersMenu}"
+                        Command="{Binding ShowLayersCommand}" IsEnabled="{Binding HasDocuments}"
+                        Click="OnMenuItem"/>
                 <Button Style="{StaticResource LinkButton}" Content="{l:Loc AttachmentsMenu}"
                         Command="{Binding ShowAttachmentsCommand}" IsEnabled="{Binding HasDocuments}"
                         Click="OnMenuItem"/>

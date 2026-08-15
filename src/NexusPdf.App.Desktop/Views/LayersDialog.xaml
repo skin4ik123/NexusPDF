@@ -1,0 +1,48 @@
+<Window x:Class="NexusPdf.App.Desktop.Views.LayersDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:l="clr-namespace:NexusPdf.App.Desktop.Localization"
+        Width="520" Height="400" MinWidth="420" MinHeight="300"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Title="{l:Loc LayersTitle}"
+        Background="{DynamicResource PanelBg}">
+  <Grid Margin="20">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+
+    <TextBlock Text="{l:Loc LayersTitle}" FontSize="16" FontWeight="SemiBold"
+               Foreground="{DynamicResource TextBrush}"/>
+    <TextBlock Grid.Row="1" Text="{l:Loc LayersHint}" Margin="0,8,0,0" FontSize="12"
+               TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"/>
+
+    <ItemsControl x:Name="List" Grid.Row="2" Margin="0,12,0,0">
+      <ItemsControl.Template>
+        <ControlTemplate TargetType="ItemsControl">
+          <Border BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+              <ItemsPresenter Margin="8"/>
+            </ScrollViewer>
+          </Border>
+        </ControlTemplate>
+      </ItemsControl.Template>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate>
+          <CheckBox Content="{Binding Name}" IsChecked="{Binding IsVisible, Mode=TwoWay}"
+                    Margin="0,4" Foreground="{DynamicResource TextBrush}"/>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+
+    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+      <Button x:Name="SaveButton" Content="{l:Loc LayersSaveCopy}"
+              Style="{StaticResource PrimaryButton}" MinWidth="200"
+              IsDefault="True" Click="OnSave"/>
+      <Button Content="{l:Loc BatchClose}" Style="{StaticResource LinkButton}" Margin="8,0,0,0"
+              IsCancel="True"/>
+    </StackPanel>
+  </Grid>
+</Window>
