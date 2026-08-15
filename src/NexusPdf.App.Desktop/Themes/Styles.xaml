@@ -64,6 +64,32 @@
     </Setter>
   </Style>
 
+  <!-- Край панели, за который её тянут мышью. Полоса узкая и прозрачная,
+       но при наведении подсвечивается: невидимая ручка — это ручка, о которой
+       никто не узнает. -->
+  <Style x:Key="PanelResizer" TargetType="Thumb">
+    <Setter Property="Width" Value="8"/>
+    <Setter Property="Cursor" Value="SizeWE"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Thumb">
+          <Border x:Name="Bd" Background="Transparent">
+            <Rectangle x:Name="Line" Width="2" HorizontalAlignment="Center"
+                       Fill="{DynamicResource Accent}" Opacity="0"/>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Line" Property="Opacity" Value="0.7"/>
+            </Trigger>
+            <Trigger Property="IsDragging" Value="True">
+              <Setter TargetName="Line" Property="Opacity" Value="1"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
   <Style x:Key="ToolGlyph" TargetType="TextBlock">
     <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
     <Setter Property="FontSize" Value="{DynamicResource UxGlyphSize}"/>

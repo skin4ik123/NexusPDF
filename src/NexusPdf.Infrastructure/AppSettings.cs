@@ -42,6 +42,12 @@ public sealed class AppSettings
     /// </summary>
     public string? Panels { get; set; }
 
+    /// <summary>Ширины панелей: боковая, инструменты, комментарии, свойства.</summary>
+    public string? PanelWidths { get; set; }
+
+    /// <summary>Расположение инструментов в правой панели, заданное пользователем.</summary>
+    public string? ToolsLayout { get; set; }
+
     public bool KeepBackupOnSave { get; set; }
     public double LastZoom { get; set; } = 1.0;
 

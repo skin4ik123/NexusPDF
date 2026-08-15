@@ -23,6 +23,7 @@ public sealed partial class MainViewModel : ObservableObject
         _services = services;
         RecentFiles = new ObservableCollection<string>(services.Settings.RecentFiles);
         Panels = NexusPdf.Ux.PanelLayout.FromSetting(services.Settings.Panels);
+        LoadPanelWidths();
     }
 
     /// <summary>Окно, обслуживающее эту модель (для владения диалогами).</summary>
@@ -56,10 +57,90 @@ public sealed partial class MainViewModel : ObservableObject
     public bool ShowPropertyPanel => Panels.Properties;
     public bool ShowStatusBar => Panels.StatusBar;
 
+    // ----- Ширина панелей -----
+
+    /// <summary>
+    /// Границы ширины панели. Уже 180 — в неё не помещается ни один список,
+    /// шире 640 — панель начинает съедать документ, ради которого программа и
+    /// открыта.
+    /// </summary>
+    private const double MinPanelWidth = 180;
+    private const double MaxPanelWidth = 640;
+
+    [ObservableProperty] private double _sidePanelWidth = 176;
+    [ObservableProperty] private double _toolsPanelWidth = 270;
+    [ObservableProperty] private double _commentsPanelWidth = 270;
+    [ObservableProperty] private double _propertiesPanelWidth = 250;
+
+    public double PanelWidth(string? name) => name switch
+    {
+        "SidePanel" => SidePanelWidth,
+        "Tools" => ToolsPanelWidth,
+        "Comments" => CommentsPanelWidth,
+        "Properties" => PropertiesPanelWidth,
+        _ => 0,
+    };
+
+    /// <summary>
+    /// Новая ширина панели по сдвигу мыши от начала перетаскивания. Знак
+    /// зависит от стороны: боковая панель растёт вправо, правые — влево.
+    /// </summary>
+    public void SetPanelWidth(string? name, double startWidth, double offset)
+    {
+        switch (name)
+        {
+            case "SidePanel":
+                SidePanelWidth = Clamp(startWidth + offset);
+                break;
+            case "Tools":
+                ToolsPanelWidth = Clamp(startWidth - offset);
+                break;
+            case "Comments":
+                CommentsPanelWidth = Clamp(startWidth - offset);
+                break;
+            case "Properties":
+                PropertiesPanelWidth = Clamp(startWidth - offset);
+                break;
+            default:
+                return;
+        }
+        _services.Settings.PanelWidths =
+            $"{SidePanelWidth:F0},{ToolsPanelWidth:F0},{CommentsPanelWidth:F0},{PropertiesPanelWidth:F0}";
+    }
+
+    /// <summary>Ширины сохраняются по окончании перетаскивания, а не на каждый пиксель.</summary>
+    public void SavePanelWidths() => _services.SaveSettings();
+
+    private static double Clamp(double value) => Math.Clamp(value, MinPanelWidth, MaxPanelWidth);
+
+    private void LoadPanelWidths()
+    {
+        var parts = (_services.Settings.PanelWidths ?? "").Split(',');
+        if (parts.Length != 4) return;
+        if (double.TryParse(parts[0], out var side)) SidePanelWidth = Clamp(side);
+        if (double.TryParse(parts[1], out var tools)) ToolsPanelWidth = Clamp(tools);
+        if (double.TryParse(parts[2], out var comments)) CommentsPanelWidth = Clamp(comments);
+        if (double.TryParse(parts[3], out var props)) PropertiesPanelWidth = Clamp(props);
+    }
+
     private Services.Ux.ToolsPanel? _tools;
 
     /// <summary>Панель инструментов: всё, что умеет программа, видно списком.</summary>
-    public Services.Ux.ToolsPanel Tools => _tools ??= new Services.Ux.ToolsPanel(Ux);
+    public Services.Ux.ToolsPanel Tools => _tools ??= new Services.Ux.ToolsPanel(
+        Ux, _services.Settings.ToolsLayout, layout =>
+        {
+            _services.Settings.ToolsLayout = layout;
+            _services.SaveSettings();
+        });
+
+    /// <summary>Вернуть расположение инструментов к исходному.</summary>
+    [RelayCommand]
+    private void ResetToolsLayout()
+    {
+        Tools.Reset();
+        if (ActiveDocument is { } doc)
+            doc.StatusText = Loc.Get("PanelToolsReset");
+    }
 
     /// <summary>Скрыть панель её собственной кнопкой «заехать».</summary>
     [RelayCommand]
