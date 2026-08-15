@@ -176,22 +176,16 @@ public partial class MainWindow : Window
             e.Handled = true;
     }
 
-    private void OnMenuItem(object sender, RoutedEventArgs e) => MenuToggle.IsChecked = false;
-
-    private void OnMenuClosed(object sender, EventArgs e) => MenuToggle.IsChecked = false;
-
     /// <summary>
-    /// Меню открывается под панелью инструментов, поэтому его высота
-    /// ограничивается остатком окна. Иначе список пунктов уезжает за нижний
-    /// край экрана и до дальних пунктов не добраться вообще.
+    /// Меню программы. Собирается заново на каждое открытие: доступность
+    /// команд и отметки панелей зависят от того, что происходит сейчас, а не
+    /// от того, что было при запуске.
     /// </summary>
-    private void OnMenuOpened(object sender, EventArgs e)
+    private void OnMenuButtonClick(object sender, RoutedEventArgs e)
     {
-        // Из доступной высоты вычитается закреплённый подвал (тема, язык,
-        // «О программе»): иначе прокручиваемый список занимал бы её целиком,
-        // и подвал вылезал бы за нижний край экрана вместе с ним.
-        var available = ActualHeight - MenuToggle.TranslatePoint(new Point(0, MenuToggle.ActualHeight), this).Y;
-        MenuFooter.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        MenuScroll.MaxHeight = Math.Max(200, available - MenuFooter.DesiredSize.Height - 28);
+        var menu = AppMenuFactory.Build(ViewModel);
+        menu.PlacementTarget = MenuToggle;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
     }
 }

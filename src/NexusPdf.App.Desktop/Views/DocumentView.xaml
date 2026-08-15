@@ -12,6 +12,7 @@
     <app:MinusOneConverter x:Key="MinusOne"/>
     <app:InverseBoolConverter x:Key="InvBool"/>
     <app:NonZeroToVisibilityConverter x:Key="RotBadgeVis"/>
+    <app:AllTrueToVisibilityConverter x:Key="AllTrue"/>
   </UserControl.Resources>
 
   <Grid>
@@ -53,7 +54,10 @@
       </Grid.ColumnDefinitions>
 
       <Border Grid.Column="0" Background="{DynamicResource PanelBg}"
-              BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,1,0">
+              BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,1,0"
+              Visibility="{Binding DataContext.ShowSidePanel,
+                           RelativeSource={RelativeSource AncestorType=Window},
+                           Converter={StaticResource BoolToVis}, FallbackValue=Visible}">
         <Grid>
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto"/>
@@ -411,8 +415,15 @@
            исчезают вместе с ним — постоянная пустая панель занимала бы место
            и ничего не сообщала -->
       <Border Grid.Column="3" Width="250" Background="{DynamicResource PanelBg}"
-              BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1,0,0,0"
-              Visibility="{Binding HasObjectSelection, Converter={StaticResource BoolToVis}}">
+              BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1,0,0,0">
+        <Border.Visibility>
+          <MultiBinding Converter="{StaticResource AllTrue}">
+            <Binding Path="HasObjectSelection"/>
+            <Binding Path="DataContext.ShowPropertyPanel"
+                     RelativeSource="{RelativeSource AncestorType=Window}"
+                     FallbackValue="True"/>
+          </MultiBinding>
+        </Border.Visibility>
         <StackPanel Margin="12,10">
           <TextBlock Text="{Binding SelectedObjectTitle}" FontWeight="SemiBold" FontSize="13"
                      Foreground="{DynamicResource TextBrush}" TextWrapping="Wrap"/>
