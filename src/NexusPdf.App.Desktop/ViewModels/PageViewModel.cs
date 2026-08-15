@@ -109,6 +109,27 @@ public sealed partial class PageViewModel : ObservableObject
     public double DragRectWPt => DragPreviewRect?.Width ?? 0;
     public double DragRectHPt => DragPreviewRect?.Height ?? 0;
 
+    // ----- Живой штрих во время рисования (в пунктах страницы) -----
+
+    /// <summary>
+    /// Точки штриха, который пользователь ведёт прямо сейчас. Показывается
+    /// уже СГЛАЖЕННЫМ: пользователь должен видеть ту линию, которая ляжет в
+    /// документ, а не сырую дрожащую.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDrawPreview))]
+    private System.Windows.Media.PointCollection? _drawPreview;
+
+    public bool HasDrawPreview => DrawPreview is { Count: > 1 };
+
+    /// <summary>Толщина линии предпросмотра в пунктах (масштаб накладывается канвой).</summary>
+    [ObservableProperty]
+    private double _drawPreviewWidth = 2;
+
+    [ObservableProperty]
+    private System.Windows.Media.Brush _drawPreviewBrush =
+        System.Windows.Media.Brushes.Black;
+
     public void NotifyZoomChanged()
     {
         OnPropertyChanged(nameof(WidthDiu));

@@ -671,6 +671,55 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    // ----- Рисование от руки -----
+
+    /// <summary>Палитра рисования: контрастные цвета, различимые и на белом, и на скане.</summary>
+    public sealed record DrawSwatch(string Name, string Argb)
+    {
+        public System.Windows.Media.Brush Brush =>
+            new System.Windows.Media.SolidColorBrush(
+                (System.Windows.Media.Color)System.Windows.Media.ColorConverter
+                    .ConvertFromString("#" + Argb[2..])!);
+    }
+
+    public IReadOnlyList<DrawSwatch> DrawPalette { get; } = new[]
+    {
+        new DrawSwatch("Красный", "FFE02424"),
+        new DrawSwatch("Синий", "FF2563EB"),
+        new DrawSwatch("Зелёный", "FF16A34A"),
+        new DrawSwatch("Оранжевый", "FFF59E0B"),
+        new DrawSwatch("Чёрный", "FF111827"),
+    };
+
+    [RelayCommand]
+    private void DrawPencil() => ActiveDocument?.SelectDrawTool(DocumentViewModel.DrawTool.Pencil);
+
+    [RelayCommand]
+    private void DrawLine() => ActiveDocument?.SelectDrawTool(DocumentViewModel.DrawTool.Line);
+
+    [RelayCommand]
+    private void DrawArrow() => ActiveDocument?.SelectDrawTool(DocumentViewModel.DrawTool.Arrow);
+
+    /// <summary>Цвет линии задаётся строкой #AARRGGBB из палитры в разметке.</summary>
+    [RelayCommand]
+    private void SetDrawColor(string? argb)
+    {
+        if (ActiveDocument is not { } doc || argb == null) return;
+        if (uint.TryParse(argb.TrimStart('#'),
+                System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture, out var value))
+            doc.DrawColorArgb = value;
+    }
+
+    [RelayCommand]
+    private void SetDrawWidth(string? widthPt)
+    {
+        if (ActiveDocument is not { } doc) return;
+        if (double.TryParse(widthPt, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var value) && value > 0)
+            doc.DrawWidthPt = value;
+    }
+
     [RelayCommand]
     private void EditImageInPaint()
     {

@@ -273,6 +273,19 @@
                              Stroke="{DynamicResource Accent}" StrokeThickness="1.5"
                              StrokeDashArray="4 3" Fill="#152563EB"/>
                 </Canvas>
+
+                <!-- Живой штрих при рисовании -->
+                <Canvas IsHitTestVisible="False"
+                        Visibility="{Binding HasDrawPreview, Converter={StaticResource BoolToVis}}">
+                  <Canvas.LayoutTransform>
+                    <ScaleTransform ScaleX="{Binding DisplayScale}" ScaleY="{Binding DisplayScale}"/>
+                  </Canvas.LayoutTransform>
+                  <Polyline Points="{Binding DrawPreview}"
+                            Stroke="{Binding DrawPreviewBrush}"
+                            StrokeThickness="{Binding DrawPreviewWidth}"
+                            StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                            StrokeLineJoin="Round"/>
+                </Canvas>
               </Grid>
             </Border>
           </DataTemplate>
