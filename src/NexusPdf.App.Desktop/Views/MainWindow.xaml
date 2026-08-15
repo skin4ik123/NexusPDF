@@ -415,6 +415,8 @@
                 <StackPanel Visibility="{Binding HasPdfTools, Converter={StaticResource BoolToVis}}">
                   <Button Style="{StaticResource LinkButton}" Content="{l:Loc BatchMenu}"
                           Command="{Binding ShowBatchCommand}" Click="OnMenuItem"/>
+                  <Button Style="{StaticResource LinkButton}" Content="{l:Loc BpTitle}"
+                          Command="{Binding ShowBatchPrintCommand}" Click="OnMenuItem"/>
                 </StackPanel>
                 <Separator Margin="4" Background="{DynamicResource PanelBorder}"/>
                 <Button Style="{StaticResource LinkButton}" Content="{l:Loc DetachTab}"

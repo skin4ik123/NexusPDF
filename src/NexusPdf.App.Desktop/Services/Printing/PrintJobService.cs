@@ -54,21 +54,35 @@ public sealed class PrintJobService
             ?? throw new InvalidOperationException(
                 $"Принтер «{plan.PrinterName}» сейчас недоступен.");
 
+        // Формат бумаги задаётся одним PrintTicket на задание, поэтому документ
+        // со смешанными форматами отправляется несколькими заданиями: иначе
+        // принтер возьмёт формат первого листа и напечатает на нём всё.
+        var parts = JobSplitter.SplitByPaperSize(plan);
         var sent = 0;
-        await RunOnStaThreadAsync(() =>
+
+        foreach (var part in parts)
         {
-            using var server = new PrintServer();
-            using var queue = new PrintQueue(server, plan.PrinterName);
+            ct.ThrowIfCancellationRequested();
+            var partPlan = part.Plan;
 
-            var ticket = BuildTicket(queue, plan);
-            var writer = PrintQueue.CreateXpsDocumentWriter(queue);
-            var paginator = new PlanPaginator(document, plan, dpi, progress, ct,
-                onSheet: () => Interlocked.Increment(ref sent));
+            await RunOnStaThreadAsync(() =>
+            {
+                using var server = new PrintServer();
+                using var queue = new PrintQueue(server, partPlan.PrinterName);
 
-            writer.Write(paginator, ticket);
-        }, ct).ConfigureAwait(false);
+                var ticket = BuildTicket(queue, partPlan);
+                var writer = PrintQueue.CreateXpsDocumentWriter(queue);
+                var paginator = new PlanPaginator(document, partPlan, dpi, progress, ct,
+                    onSheet: () => Interlocked.Increment(ref sent));
 
-        return new PrintJobStatus(0, plan.PrinterName, sent, "Задание передано принтеру", true);
+                writer.Write(paginator, ticket);
+            }, ct).ConfigureAwait(false);
+        }
+
+        var stage = parts.Count > 1
+            ? $"Задание передано принтеру частями: {parts.Count}"
+            : "Задание передано принтеру";
+        return new PrintJobStatus(0, plan.PrinterName, sent, stage, true);
     }
 
     /// <summary>

@@ -1383,6 +1383,9 @@ public sealed partial class MainViewModel : ObservableObject
     private void ShowBatch() => BatchDialog.Run(OwnerWindow, _services);
 
     [RelayCommand]
+    private void ShowBatchPrint() => BatchPrintDialog.Run(OwnerWindow, _services);
+
+    [RelayCommand]
     private void CompareDocuments()
     {
         if (ActiveDocument is { IsBusy: true }) return; // идёт сохранение: файл на диске в переходном состоянии

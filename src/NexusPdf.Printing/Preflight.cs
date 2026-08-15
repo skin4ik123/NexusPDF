@@ -92,12 +92,10 @@ public static class Preflight
                 $"Часть содержимого выходит за печатаемую область на листах: {outside.Count}.",
                 "Принтер физически не печатает у самого края бумаги.", outside));
 
-        var paperNames = plan.Sheets.Select(s => $"{s.PaperSizePt.WidthPt:F0}x{s.PaperSizePt.HeightPt:F0}")
-            .Distinct().ToList();
-        if (paperNames.Count > 1)
-            issues.Add(new PreflightIssue(PreflightLevel.Info, CodeMixedPaper,
-                $"В задании листы разного размера: {paperNames.Count}.",
-                "Убедитесь, что нужная бумага загружена, либо разделите задание."));
+        // Разбиение по формату — не пожелание, а необходимость: Windows задаёт
+        // бумагу одним PrintTicket на всё задание.
+        if (JobSplitter.DescribeSplit(plan) is { } split)
+            issues.Add(split);
 
         var scales = plan.Sheets.SelectMany(s => s.Pages).Select(p => p.Scale).ToList();
         if (scales.Count > 0)
