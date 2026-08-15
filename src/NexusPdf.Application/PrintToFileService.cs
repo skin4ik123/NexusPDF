@@ -33,6 +33,15 @@ public sealed class PrintToFileService
         if (plan.Sheets.Count == 0)
             throw new InvalidOperationException("В плане печати нет ни одного листа.");
 
+        // Запрет печати нельзя обойти экспортом раскладки: это тот же вывод
+        // содержимого, просто в файл, и разрешения документа тут те же.
+        var permissions = PrintPermissions.FromFlags(
+            await document.PrimaryHandle.GetPermissionsAsync(ct).ConfigureAwait(false));
+        if (!permissions.AllowPrint)
+            throw new InvalidOperationException(
+                "Документ запрещает печать, поэтому его печатную раскладку нельзя сохранить.");
+        dpi = permissions.LimitDpi(dpi);
+
         var renderer = new PrintPlanRenderer(document);
         var specs = new List<ImagePageSpec>(plan.Sheets.Count);
         var effectiveDpi = dpi;

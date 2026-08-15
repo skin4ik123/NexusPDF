@@ -40,14 +40,35 @@ public static class Preflight
     public const string CodeCollateInApp = "collate-in-app";
     public const string CodeBlankInserted = "blank-pages-inserted";
     public const string CodeRasterFallback = "raster-fallback";
+    public const string CodePrintForbidden = "print-forbidden";
+    public const string CodeLowQualityOnly = "low-quality-only";
 
     /// <summary>Масштаб мельче этого почти наверняка ошибка настроек, а не намерение.</summary>
     private const double TinyScale = 0.10;
     private const double HugeScale = 5.0;
 
-    public static IReadOnlyList<PreflightIssue> Analyze(PrintJobPlan plan)
+    /// <param name="permissions">
+    /// Разрешения документа. Запрет печати блокирует задание целиком: обойти
+    /// его растеризацией или экспортом раскладки нельзя — это было бы обходом
+    /// ограничения, а не функцией.
+    /// </param>
+    public static IReadOnlyList<PreflightIssue> Analyze(
+        PrintJobPlan plan, PrintPermissions? permissions = null)
     {
         var issues = new List<PreflightIssue>();
+
+        var rights = permissions ?? PrintPermissions.Unrestricted;
+        if (!rights.AllowPrint)
+        {
+            issues.Add(new PreflightIssue(PreflightLevel.Critical, CodePrintForbidden,
+                "Документ запрещает печать.",
+                "Ограничение установил автор документа; программа его соблюдает."));
+            return issues;
+        }
+        if (!rights.AllowHighQuality)
+            issues.Add(new PreflightIssue(PreflightLevel.Info, CodeLowQualityOnly,
+                $"Документ разрешает только печать низкого качества: разрешение ограничено {PrintPermissions.LowQualityDpi:F0} DPI.",
+                "Ограничение установил автор документа."));
 
         if (plan.Sheets.Count == 0 || plan.PlacedPageCount == 0)
         {

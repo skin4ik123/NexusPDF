@@ -39,6 +39,15 @@ public sealed class PrintJobService
         if (plan.Sheets.Count == 0)
             throw new InvalidOperationException("В плане печати нет ни одного листа.");
 
+        // Разрешения перечитываются перед самой отправкой, а не берутся из
+        // плана: между открытием окна и нажатием «Печать» документ мог
+        // смениться на другой в той же вкладке.
+        var permissions = PrintPermissions.FromFlags(
+            await document.PrimaryHandle.GetPermissionsAsync(ct).ConfigureAwait(false));
+        if (!permissions.AllowPrint)
+            throw new InvalidOperationException("Документ запрещает печать.");
+        var dpi = permissions.LimitDpi(OutputDpi);
+
         // Проверка перед отправкой: принтер мог исчезнуть, пока окно было открыто.
         using var probe = new WindowsPrinterService();
         var live = probe.Read(plan.PrinterName)
@@ -53,7 +62,7 @@ public sealed class PrintJobService
 
             var ticket = BuildTicket(queue, plan);
             var writer = PrintQueue.CreateXpsDocumentWriter(queue);
-            var paginator = new PlanPaginator(document, plan, progress, ct,
+            var paginator = new PlanPaginator(document, plan, dpi, progress, ct,
                 onSheet: () => Interlocked.Increment(ref sent));
 
             writer.Write(paginator, ticket);
@@ -149,17 +158,22 @@ public sealed class PrintJobService
     {
         private readonly OpenedDocument _document;
         private readonly PrintJobPlan _plan;
+
+        /// <summary>Разрешение растра с уже применённым ограничением документа.</summary>
+        private readonly double _dpi;
+
         private readonly IProgress<PrintProgress>? _progress;
         private readonly CancellationToken _ct;
         private readonly Action _onSheet;
         private readonly PrintPlanRenderer _renderer;
 
         public PlanPaginator(
-            OpenedDocument document, PrintJobPlan plan,
+            OpenedDocument document, PrintJobPlan plan, double dpi,
             IProgress<PrintProgress>? progress, CancellationToken ct, Action onSheet)
         {
             _document = document;
             _plan = plan;
+            _dpi = dpi;
             _progress = progress;
             _ct = ct;
             _onSheet = onSheet;
@@ -176,7 +190,7 @@ public sealed class PrintJobService
             _ct.ThrowIfCancellationRequested();
 
             var sheet = _plan.Sheets[pageNumber];
-            var composed = SheetComposer.Compose(sheet, OutputDpi);
+            var composed = SheetComposer.Compose(sheet, _dpi);
 
             // Блокирующее ожидание здесь допустимо и намеренно: метод вызывается
             // на выделенном STA-потоке печати, а не на потоке интерфейса.
