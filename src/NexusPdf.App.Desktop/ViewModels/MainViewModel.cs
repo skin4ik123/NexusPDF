@@ -140,6 +140,21 @@ public sealed partial class MainViewModel : ObservableObject
             _services.SaveSettings();
         });
 
+    /// <summary>
+    /// Выполнить команду реестра по её идентификатору. Нужна кнопкам панелей:
+    /// они не должны знать про обработчики, иначе панель и меню разъедутся.
+    /// </summary>
+    [RelayCommand]
+    private void RunUx(string? commandId)
+    {
+        if (string.IsNullOrEmpty(commandId)) return;
+        Ux.Invoke(commandId, new Services.Ux.UxTarget
+        {
+            Context = Ux.Snapshot(),
+            Document = Ux.ActiveDocument,
+        });
+    }
+
     /// <summary>Отметить выполненную команду в разделе «Недавние».</summary>
     public void NoteCommandUsed(string commandId) => Tools.NoteUsed(commandId);
 
