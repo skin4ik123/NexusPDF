@@ -853,6 +853,91 @@ public partial class DocumentView : UserControl
         ToolsSearch.Clear();
     }
 
+    // ----- Перетаскивание файлов из Проводника в организатор -----
+
+    private InsertionLineAdorner? _insertLine;
+
+    /// <summary>
+    /// Куда лягут страницы: индекс ближайшего промежутка между миниатюрами.
+    /// Считается по СЕРЕДИНЕ страницы — правее середины значит «после неё».
+    /// </summary>
+    private int InsertIndexAt(Point position)
+    {
+        var index = OrganizeList.Items.Count;
+        for (var i = 0; i < OrganizeList.Items.Count; i++)
+        {
+            if (OrganizeList.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement container)
+                continue;
+            if (!container.IsVisible) continue;
+            var origin = container.TransformToAncestor(OrganizeList).Transform(new Point(0, 0));
+            var bounds = new Rect(origin, new Size(container.ActualWidth, container.ActualHeight));
+            if (position.Y < bounds.Bottom && position.X < bounds.X + bounds.Width / 2)
+                return i;
+            if (position.Y < bounds.Bottom)
+                index = i + 1;
+        }
+        return index;
+    }
+
+    private void ShowInsertionLine(int index)
+    {
+        var layer = AdornerLayer.GetAdornerLayer(OrganizeList);
+        if (layer == null) return;
+        if (_insertLine == null)
+        {
+            _insertLine = new InsertionLineAdorner(OrganizeList);
+            layer.Add(_insertLine);
+        }
+
+        var count = OrganizeList.Items.Count;
+        var anchorIndex = Math.Clamp(index < count ? index : count - 1, 0, Math.Max(0, count - 1));
+        if (OrganizeList.ItemContainerGenerator.ContainerFromIndex(anchorIndex) is not FrameworkElement container)
+            return;
+        var origin = container.TransformToAncestor(OrganizeList).Transform(new Point(0, 0));
+        var bounds = new Rect(origin, new Size(container.ActualWidth, container.ActualHeight));
+        // Перед страницей — по её левому краю, в самый конец — по правому.
+        var x = index < count ? bounds.X : bounds.Right;
+        _insertLine.Target = new Rect(x, bounds.Y, 1, bounds.Height);
+    }
+
+    private void HideInsertionLine()
+    {
+        if (_insertLine == null) return;
+        AdornerLayer.GetAdornerLayer(OrganizeList)?.Remove(_insertLine);
+        _insertLine = null;
+    }
+
+    private static bool HasDroppableFiles(IDataObject data) =>
+        data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0;
+
+    private void OnOrganizeFileDragOver(object sender, DragEventArgs e)
+    {
+        if (!HasDroppableFiles(e.Data))
+        {
+            // Не файлы — это перетаскивание страниц внутри списка, им
+            // занимается своя библиотека: мешать нельзя.
+            HideInsertionLine();
+            return;
+        }
+        e.Effects = DragDropEffects.Copy;
+        e.Handled = true;
+        ShowInsertionLine(InsertIndexAt(e.GetPosition(OrganizeList)));
+    }
+
+    private void OnOrganizeFileDragLeave(object sender, DragEventArgs e) => HideInsertionLine();
+
+    private void OnOrganizeFileDrop(object sender, DragEventArgs e)
+    {
+        HideInsertionLine();
+        if (!HasDroppableFiles(e.Data)) return;
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] files) return;
+
+        e.Handled = true;
+        var index = InsertIndexAt(e.GetPosition(OrganizeList));
+        if (Window.GetWindow(this) is MainWindow main && _vm != null)
+            _ = main.ViewModel.InsertDroppedFilesAsync(_vm, files, index);
+    }
+
     // ----- Выделение рамкой в режиме систематизации -----
 
     private MarqueeAdorner? _marquee;

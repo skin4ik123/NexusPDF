@@ -8,6 +8,13 @@ public static class AppPaths
     public static string LogsDir => Path.Combine(Root, "Logs");
     public static string RecoveryDir => Path.Combine(Root, "Recovery");
     public static string SettingsFile => Path.Combine(Root, "settings.json");
+
+    /// <summary>
+    /// Временные PDF, собранные из перетащенных картинок. Живут, пока на них
+    /// ссылаются страницы открытого документа; после сохранения содержимое уже
+    /// в итоговом файле, и папку можно чистить при следующем запуске.
+    /// </summary>
+    public static string DroppedFilesFolder => Path.Combine(Root, "Dropped");
     public static string CrashSentinelFile => Path.Combine(Root, "session.lock");
 
     public static void EnsureCreated()
