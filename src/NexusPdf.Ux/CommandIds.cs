@@ -109,6 +109,9 @@ public static class CommandIds
     public const string Ocr = "ocr.recognize";
     public const string OcrPages = "ocr.recognizePages";
     public const string Print = "print.open";
+    /// <summary>Очередь печати: ход отправленных заданий, пауза и отмена.</summary>
+    public const string PrintQueue = "print.queue";
+
     public const string BatchPrint = "print.batch";
 
     // Преобразование и пакетная обработка

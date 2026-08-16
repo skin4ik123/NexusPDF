@@ -10,8 +10,13 @@ using NexusPdf.Printing.Windows;
 namespace NexusPdf.App.Desktop.Services.Printing;
 
 /// <summary>Состояние отправленного задания.</summary>
+/// <param name="JobIds">
+/// Номера заданий в очереди Windows. Их может быть несколько: документ со
+/// смешанными форматами бумаги уходит частями, и каждая часть — своё задание.
+/// По этим номерам программа потом показывает ход и отменяет печать.
+/// </param>
 public sealed record PrintJobStatus(
-    int JobId,
+    IReadOnlyList<int> JobIds,
     string PrinterName,
     int SheetsSent,
     string StageText,
@@ -59,6 +64,8 @@ public sealed class PrintJobService
         // принтер возьмёт формат первого листа и напечатает на нём всё.
         var parts = JobSplitter.SplitByPaperSize(plan);
         var sent = 0;
+        var jobIds = new List<int>();
+        var jobName = BuildJobName(document, parts.Count);
 
         foreach (var part in parts)
         {
@@ -70,19 +77,58 @@ public sealed class PrintJobService
                 using var server = new PrintServer();
                 using var queue = new PrintQueue(server, partPlan.PrinterName);
 
+                // Имя задания видно и в нашей очереди, и в системной: «Документ»
+                // среди десятка чужих заданий не говорит ничего.
+                queue.CurrentJobSettings.Description = jobName;
+
                 var ticket = BuildTicket(queue, partPlan);
                 var writer = PrintQueue.CreateXpsDocumentWriter(queue);
                 var paginator = new PlanPaginator(document, partPlan, dpi, progress, ct,
                     onSheet: () => Interlocked.Increment(ref sent));
 
+                // Что было в очереди ДО отправки: своё задание опознаётся как
+                // новое с нашим именем. Прямого «номер только что созданного
+                // задания» система печати не отдаёт.
+                var before = JobIdsOf(queue);
                 writer.Write(paginator, ticket);
+                foreach (var id in JobIdsOf(queue).Except(before))
+                    jobIds.Add(id);
             }, ct).ConfigureAwait(false);
         }
 
         var stage = parts.Count > 1
             ? $"Задание передано принтеру частями: {parts.Count}"
             : "Задание передано принтеру";
-        return new PrintJobStatus(0, plan.PrinterName, sent, stage, true);
+        return new PrintJobStatus(jobIds, plan.PrinterName, sent, stage, true);
+    }
+
+    /// <summary>Номера заданий, которые сейчас в очереди принтера.</summary>
+    private static HashSet<int> JobIdsOf(PrintQueue queue)
+    {
+        var ids = new HashSet<int>();
+        try
+        {
+            queue.Refresh();
+            foreach (var job in queue.GetPrintJobInfoCollection())
+                using (job)
+                    ids.Add(job.JobIdentifier);
+        }
+        catch (Exception)
+        {
+            // Не смогли заглянуть в очередь — печать от этого не страдает,
+            // просто задание не попадёт в наш список для отмены.
+        }
+        return ids;
+    }
+
+    /// <summary>
+    /// Имя задания для очереди: по нему человек находит СВОЮ печать среди
+    /// чужих в системном окне принтера.
+    /// </summary>
+    private static string BuildJobName(OpenedDocument document, int parts)
+    {
+        var title = document.DisplayName;
+        return parts > 1 ? $"NexusPDF: {title} (часть)" : $"NexusPDF: {title}";
     }
 
     /// <summary>

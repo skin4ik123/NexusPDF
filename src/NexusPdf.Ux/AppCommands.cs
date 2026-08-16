@@ -370,6 +370,13 @@ public static class AppCommands
         };
         yield return new CommandDescriptor
         {
+            Id = CommandIds.PrintQueue, TitleKey = "PrintQueueTitle", Glyph = "\uE9D5",
+            Category = CommandCategory.Print, Group = MenuGroup.Primary,
+            Danger = CommandDanger.Safe, OpensDialog = true,
+            Keywords = new[] { "очередь печати", "отменить печать", "что печатается", "print queue" },
+        };
+        yield return new CommandDescriptor
+        {
             Id = CommandIds.BatchPrint, TitleKey = "BpTitle", Glyph = "\uE8F1",
             Category = CommandCategory.Print, Group = MenuGroup.Special,
             Danger = CommandDanger.Safe, OpensDialog = true,

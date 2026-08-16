@@ -52,7 +52,7 @@ public static class ToolsLayout
         {
             CommandIds.DocumentProperties, CommandIds.ShowLayers, CommandIds.ShowAttachments,
         }),
-        new ToolsGroupLayout("MenuPrint", new[] { CommandIds.Print, CommandIds.BatchPrint }),
+        new ToolsGroupLayout("MenuPrint", new[] { CommandIds.Print, CommandIds.PrintQueue, CommandIds.BatchPrint }),
     };
 
     /// <summary>
