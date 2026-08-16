@@ -85,6 +85,7 @@ public sealed class ContextMenuComposer
         {
             CommandIds.RotateRight, CommandIds.RotateLeft, CommandIds.Rotate180,
             CommandIds.Duplicate,
+            CommandIds.SendPagesToDocument,
             CommandIds.ExtractPages, CommandIds.EditPageInPaint, CommandIds.PrintSelectedPages,
             CommandIds.PageProperties,
             CommandIds.DeletePages,

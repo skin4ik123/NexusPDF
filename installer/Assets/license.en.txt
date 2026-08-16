@@ -1,0 +1,31 @@
+NexusPDF LICENCE AGREEMENT
+
+Crafted by Artur Yurchuk.
+
+1. NexusPDF (the "Software") is provided on an "as is" basis. Known limitations
+are listed in the "Known limitations" document shipped with the Software.
+
+2. You may install and use the Software on any number of devices that belong
+to you.
+
+3. Except where the licence of an included component grants you broader rights,
+you may not distribute the Software under another name, nor present it as a
+different product.
+
+4. The Software processes documents locally and never sends them to the
+internet. Logs are kept only on your own device.
+
+5. The Software includes third-party components under their own licences; the
+full list is in THIRD_PARTY_NOTICES.md, installed together with the Software.
+Document compression uses MuPDF (Artifex Software, Inc.) under the GNU
+AGPL-3.0. For that component the AGPL-3.0 prevails over this agreement and
+grants you rights this agreement does not restrict, including the right to
+receive its source code.
+
+6. To the maximum extent permitted by law, the author is not liable for any
+damage arising from the use of the Software. Back up important documents
+before processing them.
+
+7. By installing the Software you confirm that you accept these terms.
+
+Copyright (c) 2026 Artur Yurchuk.

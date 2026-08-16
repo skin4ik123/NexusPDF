@@ -1,8 +1,34 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
+using NexusPdf.App.Desktop.Localization;
+using NexusPdf.Printing;
 
 namespace NexusPdf.App.Desktop;
+
+/// <summary>
+/// Имя профиля печати для показа. У встроенных профилей Name — неизменяемый
+/// опознаватель, поэтому надпись берётся из словаря: раньше их имена были
+/// зашиты по-русски и оставались русскими в английском интерфейсе.
+/// </summary>
+public sealed class PrintProfileNameConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (value is not PrintProfile p) return "";
+        if (!string.IsNullOrEmpty(p.NameKey)) return Loc.Get(p.NameKey);
+
+        // Профиль пользователя, переопределивший встроенный, хранится под тем же
+        // опознавателем, но ключа перевода уже не несёт. Показывать «Booklet»
+        // русскому пользователю нельзя, поэтому ключ ищется по опознавателю.
+        var builtIn = BuiltInPrintProfiles.All.FirstOrDefault(b =>
+            string.Equals(b.Name, p.Name, StringComparison.Ordinal));
+        return builtIn != null ? Loc.Get(builtIn.NameKey) : p.Name;
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
 
 public sealed class InverseBoolToVisibilityConverter : IValueConverter
 {

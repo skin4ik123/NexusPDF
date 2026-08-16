@@ -17,7 +17,11 @@ public static class Loc
 
     public static string CurrentLanguage { get; private set; } = "ru";
 
-    public static IReadOnlyList<string> AvailableLanguages { get; } = new[] { "ru", "en" };
+    /// <summary>
+    /// Языки интерфейса. Порядок — порядок в меню: сначала язык по умолчанию.
+    /// Новый язык = один новый файл словаря плюс строка здесь.
+    /// </summary>
+    public static IReadOnlyList<string> AvailableLanguages { get; } = new[] { "en", "ru", "uk" };
 
     public static void Load(string language)
     {

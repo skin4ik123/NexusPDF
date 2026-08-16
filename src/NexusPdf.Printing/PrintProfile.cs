@@ -11,7 +11,18 @@ namespace NexusPdf.Printing;
 /// </summary>
 public sealed record PrintProfile
 {
+    /// <summary>
+    /// Имя профиля. У пользовательских — то, что он ввёл; у встроенных это
+    /// неизменяемый опознаватель, а на экран идёт перевод по <see cref="NameKey"/>.
+    /// </summary>
     public required string Name { get; init; }
+
+    /// <summary>
+    /// Ключ перевода имени. Заполнен только у встроенных профилей: их имена
+    /// были зашиты по-русски и в английском интерфейсе список профилей печати
+    /// оставался русским. Пустая строка означает «показывать Name как есть».
+    /// </summary>
+    public string NameKey { get; init; } = "";
 
     /// <summary>Встроенный профиль нельзя изменить или удалить.</summary>
     public bool IsBuiltIn { get; init; }
@@ -120,63 +131,66 @@ public sealed record PrintProfile
 /// <summary>Встроенные профили: то, что нужно чаще всего, без настройки.</summary>
 public static class BuiltInPrintProfiles
 {
+    // Name у встроенных профилей — опознаватель, а не надпись: он не переводится
+    // и не меняется, иначе сохранённый выбор пользователя перестал бы находиться.
+    // На экран идёт перевод по NameKey.
     public static IReadOnlyList<PrintProfile> All { get; } = new[]
     {
-        new PrintProfile { Name = "По умолчанию", IsBuiltIn = true },
+        new PrintProfile { Name = "Default", NameKey = "PrintProfileDefault", IsBuiltIn = true },
 
         new PrintProfile
         {
-            Name = "Фактический размер", IsBuiltIn = true,
+            Name = "ActualSize", NameKey = "PrintProfileActualSize", IsBuiltIn = true,
             Size = SizeMode.ActualSize, Orientation = OrientationMode.Portrait,
         },
         new PrintProfile
         {
-            Name = "Вписать в лист", IsBuiltIn = true,
+            Name = "FitToSheet", NameKey = "PrintProfileFit", IsBuiltIn = true,
             Size = SizeMode.Fit,
         },
         new PrintProfile
         {
-            Name = "Двусторонняя", IsBuiltIn = true,
+            Name = "Duplex", NameKey = "PrintProfileDuplex", IsBuiltIn = true,
             Duplex = DuplexMode.LongEdge,
         },
         new PrintProfile
         {
-            Name = "2 страницы на лист", IsBuiltIn = true,
+            Name = "TwoUp", NameKey = "PrintProfileTwoUp", IsBuiltIn = true,
             Imposition = ImpositionMode.NUp, NUpRows = 1, NUpColumns = 2,
         },
         new PrintProfile
         {
-            Name = "4 страницы на лист", IsBuiltIn = true,
+            Name = "FourUp", NameKey = "PrintProfileFourUp", IsBuiltIn = true,
             Imposition = ImpositionMode.NUp, NUpRows = 2, NUpColumns = 2,
         },
         new PrintProfile
         {
-            Name = "Буклет", IsBuiltIn = true,
+            Name = "Booklet", NameKey = "PrintProfileBooklet", IsBuiltIn = true,
             Imposition = ImpositionMode.Booklet, Duplex = DuplexMode.LongEdge,
         },
         new PrintProfile
         {
-            Name = "Плакат", IsBuiltIn = true,
+            Name = "Poster", NameKey = "PrintProfilePoster", IsBuiltIn = true,
             Imposition = ImpositionMode.Poster,
         },
         new PrintProfile
         {
-            Name = "Черновик, оттенки серого", IsBuiltIn = true,
+            Name = "DraftGrayscale", NameKey = "PrintProfileDraftGray", IsBuiltIn = true,
             Color = ColorMode.Grayscale, Size = SizeMode.Fit,
         },
         new PrintProfile
         {
-            Name = "Только документ, без аннотаций", IsBuiltIn = true,
+            Name = "DocumentOnly", NameKey = "PrintProfileDocumentOnly", IsBuiltIn = true,
             Annotations = AnnotationPolicy.DocumentOnly,
         },
         new PrintProfile
         {
-            Name = "Печатать как изображение", IsBuiltIn = true,
+            Name = "AsImage", NameKey = "PrintProfileAsImage", IsBuiltIn = true,
             PrintAsImage = true,
         },
         new PrintProfile
         {
-            Name = "Типография: метки и вылет", IsBuiltIn = true,
+            Name = "Prepress", NameKey = "PrintProfilePrepress", IsBuiltIn = true,
             Size = SizeMode.ActualSize,
             Marks = PrinterMarks.CropMarks | PrinterMarks.RegistrationMarks
                   | PrinterMarks.BleedMarks | PrinterMarks.PageInformation,
@@ -185,7 +199,7 @@ public static class BuiltInPrintProfiles
         },
         new PrintProfile
         {
-            Name = "Чертёж 100 %", IsBuiltIn = true,
+            Name = "Drawing100", NameKey = "PrintProfileDrawing100", IsBuiltIn = true,
             Size = SizeMode.ActualSize, Orientation = OrientationMode.Automatic,
         },
     };

@@ -1,0 +1,211 @@
+<Window x:Class="NexusPdf.App.Desktop.Views.OptimizeDocumentDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:l="clr-namespace:NexusPdf.App.Desktop.Localization"
+        Title="{l:Loc OptimizeDocTitle}"
+        Width="1120" Height="800" MinWidth="940" MinHeight="660"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{DynamicResource PanelBg}">
+  <Grid Margin="20">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+
+    <StackPanel>
+      <StackPanel Orientation="Horizontal">
+        <TextBlock Text="&#xE9F5;" FontFamily="Segoe MDL2 Assets" FontSize="22"
+                   Foreground="{DynamicResource Accent}" VerticalAlignment="Center"/>
+        <TextBlock Text="{l:Loc OptimizeDocTitle}" FontSize="16" FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+      </StackPanel>
+      <TextBlock Text="{l:Loc OptimizeDocIntro}" Foreground="{DynamicResource TextSecondary}"
+                 FontSize="12" TextWrapping="Wrap" Margin="0,10,0,0"/>
+    </StackPanel>
+
+    <Grid Grid.Row="1" Margin="0,14,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="430"/>
+        <ColumnDefinition Width="18"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+
+      <!-- ======== Настройки ======== -->
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="0,0,10,0">
+
+          <!-- Качество страниц -->
+          <Border Background="{DynamicResource CardBg}" CornerRadius="8" Padding="14,12">
+            <StackPanel>
+              <CheckBox x:Name="QualityBox" Content="{l:Loc OptimizeQualityGroup}" IsChecked="True"
+                        FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}"
+                        Checked="OnOptionChanged" Unchecked="OnOptionChanged"/>
+              <TextBlock Text="{l:Loc OptimizeQualityHint}" Foreground="{DynamicResource TextSecondary}"
+                         FontSize="11" TextWrapping="Wrap" Margin="26,4,0,0"/>
+
+              <StackPanel x:Name="QualityPanel" Margin="26,10,0,0">
+                <CheckBox x:Name="DeskewBox" Content="{l:Loc EnhanceDeskew}" IsChecked="True"
+                          Foreground="{DynamicResource TextBrush}"
+                          Checked="OnOptionChanged" Unchecked="OnOptionChanged"/>
+                <CheckBox x:Name="DespeckleBox" Content="{l:Loc EnhanceDespeckle}" IsChecked="True"
+                          Foreground="{DynamicResource TextBrush}" Margin="0,8,0,0"
+                          Checked="OnOptionChanged" Unchecked="OnOptionChanged"/>
+                <CheckBox x:Name="BackgroundBox" Content="{l:Loc EnhanceBackground}" IsChecked="True"
+                          Foreground="{DynamicResource TextBrush}" Margin="0,8,0,0"
+                          Checked="OnOptionChanged" Unchecked="OnOptionChanged"/>
+
+                <StackPanel x:Name="BackgroundPanel" Margin="26,8,0,0">
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*"/>
+                      <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{l:Loc OptimizeBackgroundStrength}" FontSize="11"
+                               Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="StrengthValue" Grid.Column="1" FontSize="11"
+                               Foreground="{DynamicResource Accent}" VerticalAlignment="Center"/>
+                  </Grid>
+                  <Slider x:Name="StrengthSlider" Minimum="0" Maximum="100" Value="60"
+                          TickFrequency="10" IsSnapToTickEnabled="True" Margin="0,2,0,0"
+                          ValueChanged="OnStrengthChanged"/>
+                  <TextBlock x:Name="StrengthHint" FontSize="11" TextWrapping="Wrap"
+                             Foreground="{DynamicResource TextSecondary}" Margin="0,2,0,0"/>
+                  <CheckBox x:Name="TintBox" Content="{l:Loc OptimizeNeutralizeTint}" IsChecked="True"
+                            Foreground="{DynamicResource TextBrush}" Margin="0,8,0,0"
+                            Checked="OnOptionChanged" Unchecked="OnOptionChanged"/>
+                </StackPanel>
+
+                <CheckBox x:Name="EdgesBox" Content="{l:Loc OptimizeTrimEdges}"
+                          Foreground="{DynamicResource TextBrush}" Margin="0,10,0,0"
+                          Checked="OnOptionChanged" Unchecked="OnOptionChanged"/>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <!-- Сжатие -->
+          <Border Background="{DynamicResource CardBg}" CornerRadius="8" Padding="14,12" Margin="0,12,0,0">
+            <StackPanel>
+              <CheckBox x:Name="CompressBox" Content="{l:Loc OptimizeCompressGroup}" IsChecked="True"
+                        FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}"
+                        Checked="OnOptionChanged" Unchecked="OnOptionChanged"/>
+              <TextBlock x:Name="ProfileText" Foreground="{DynamicResource TextSecondary}"
+                         FontSize="11" TextWrapping="Wrap" Margin="26,4,0,0"/>
+
+              <StackPanel x:Name="CompressPanel" Margin="26,10,0,0">
+                <ComboBox x:Name="PresetCombo" SelectedIndex="0" SelectionChanged="OnPresetChanged">
+                  <ComboBoxItem Content="{l:Loc CompressPresetSmart}"/>
+                  <ComboBoxItem Content="{l:Loc CompressPresetQuality}"/>
+                  <ComboBoxItem Content="{l:Loc CompressPresetBalanced}"/>
+                  <ComboBoxItem Content="{l:Loc CompressPresetAggressive}"/>
+                  <ComboBoxItem Content="{l:Loc CompressPresetStructure}"/>
+                  <ComboBoxItem Content="{l:Loc CompressPresetCustom}"/>
+                </ComboBox>
+                <TextBlock x:Name="PresetHint" Foreground="{DynamicResource TextSecondary}" FontSize="11"
+                           TextWrapping="Wrap" Margin="0,6,0,0"/>
+
+                <StackPanel x:Name="CustomPanel" Visibility="Collapsed" Margin="0,10,0,0">
+                  <TextBlock Text="{l:Loc CompressDpi}" Foreground="{DynamicResource TextSecondary}" FontSize="11"/>
+                  <ComboBox x:Name="DpiCombo" SelectedIndex="0" Margin="0,4,0,0">
+                    <ComboBoxItem Content="{l:Loc CompressDpi150}"/>
+                    <ComboBoxItem Content="{l:Loc CompressDpi96}"/>
+                    <ComboBoxItem Content="{l:Loc CompressDpi72}"/>
+                  </ComboBox>
+                  <TextBlock Text="{l:Loc CompressQuality}" Foreground="{DynamicResource TextSecondary}"
+                             FontSize="11" Margin="0,8,0,4"/>
+                  <ComboBox x:Name="QualityCombo" SelectedIndex="0">
+                    <ComboBoxItem Content="{l:Loc CompressQ75}"/>
+                    <ComboBoxItem Content="{l:Loc CompressQ85}"/>
+                    <ComboBoxItem Content="{l:Loc CompressQ60}"/>
+                  </ComboBox>
+                </StackPanel>
+
+                <CheckBox x:Name="SubsetFontsBox" Content="{l:Loc CompressSubsetFonts}" IsChecked="True"
+                          Foreground="{DynamicResource TextBrush}" Margin="0,10,0,0"/>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <!-- Структура -->
+          <Border Background="{DynamicResource CardBg}" CornerRadius="8" Padding="14,12" Margin="0,12,0,0">
+            <StackPanel>
+              <CheckBox x:Name="StructureBox" Content="{l:Loc OptimizeStructureGroup}" IsChecked="True"
+                        FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}"
+                        Checked="OnOptionChanged" Unchecked="OnOptionChanged"/>
+              <TextBlock x:Name="StructureHint" Foreground="{DynamicResource TextSecondary}"
+                         FontSize="11" TextWrapping="Wrap" Margin="26,4,0,0"/>
+            </StackPanel>
+          </Border>
+
+          <!-- Порядок: пользователь должен видеть, что очередь не случайная. -->
+          <Border Background="{DynamicResource CardBg}" CornerRadius="8" Padding="14,10" Margin="0,12,0,0">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="&#xE8AB;" FontFamily="Segoe MDL2 Assets" FontSize="14"
+                         Foreground="{DynamicResource Accent}" VerticalAlignment="Top" Margin="0,1,8,0"/>
+              <TextBlock x:Name="OrderText" Foreground="{DynamicResource TextSecondary}" FontSize="11"
+                         TextWrapping="Wrap" MaxWidth="350"/>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- ======== Предпросмотр ======== -->
+      <Grid Grid.Column="2">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <Border Background="{DynamicResource CardBg}" CornerRadius="6" Padding="10,8">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="&#xE946;" FontFamily="Segoe MDL2 Assets" FontSize="14"
+                       Foreground="{DynamicResource Accent}" VerticalAlignment="Top" Margin="0,1,8,0"/>
+            <TextBlock x:Name="SkewText" Foreground="{DynamicResource TextSecondary}" FontSize="12"
+                       TextWrapping="Wrap" MaxWidth="560"/>
+          </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="1" Margin="0,12,0,6">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="14"/>
+            <ColumnDefinition Width="*"/>
+          </Grid.ColumnDefinitions>
+          <TextBlock Text="{l:Loc EnhanceBefore}" Foreground="{DynamicResource TextSecondary}" FontSize="12"/>
+          <TextBlock Grid.Column="2" Text="{l:Loc EnhanceAfter}" Foreground="{DynamicResource Accent}"
+                     FontSize="12" FontWeight="SemiBold"/>
+        </Grid>
+
+        <Grid Grid.Row="2">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="14"/>
+            <ColumnDefinition Width="*"/>
+          </Grid.ColumnDefinitions>
+          <Border Background="#20000000" CornerRadius="6" Padding="8">
+            <Image x:Name="BeforeImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+          </Border>
+          <Border Grid.Column="2" Background="#20000000" CornerRadius="6" Padding="8">
+            <Grid>
+              <Image x:Name="AfterImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+              <TextBlock x:Name="BusyText" Text="{l:Loc EnhanceRecalculating}" HorizontalAlignment="Center"
+                         VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}"
+                         Visibility="Collapsed"/>
+            </Grid>
+          </Border>
+        </Grid>
+      </Grid>
+    </Grid>
+
+    <Grid Grid.Row="2" Margin="0,16,0,0">
+      <TextBlock x:Name="ScopeText" Foreground="{DynamicResource TextSecondary}" FontSize="12"
+                 VerticalAlignment="Center" HorizontalAlignment="Left" TextWrapping="Wrap" MaxWidth="600"/>
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button Content="{l:Loc OptimizeApply}" Style="{StaticResource PrimaryButton}" MinWidth="230"
+                IsDefault="True" Click="OnApply"/>
+        <Button Content="{l:Loc Cancel}" Style="{StaticResource LinkButton}" Margin="8,0,0,0" IsCancel="True"/>
+      </StackPanel>
+    </Grid>
+  </Grid>
+</Window>

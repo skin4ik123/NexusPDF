@@ -139,6 +139,12 @@ public sealed partial class MainViewModel : ObservableObject
         {
             _services.Settings.RecentCommands = recent.ToList();
             _services.SaveSettings();
+        },
+        _services.Settings.ToolsExpandedGroups,
+        expanded =>
+        {
+            _services.Settings.ToolsExpandedGroups = expanded;
+            _services.SaveSettings();
         });
 
     /// <summary>
@@ -165,8 +171,13 @@ public sealed partial class MainViewModel : ObservableObject
     /// потеря страниц в исходнике была бы неприятным сюрпризом. Удалить их
     /// можно тем же выделением, которое осталось на месте.
     /// </summary>
+    /// <param name="insertIndex">
+    /// Куда поставить. null — в конец: так работает бросок на саму вкладку,
+    /// где места ещё не видно.
+    /// </param>
     public async Task DropPagesOnDocumentAsync(
-        DocumentViewModel target, DocumentViewModel source, IReadOnlyList<int> logicalIndices)
+        DocumentViewModel target, DocumentViewModel source, IReadOnlyList<int> logicalIndices,
+        int? insertIndex = null)
     {
         if (ReferenceEquals(target, source) || logicalIndices.Count == 0) return;
         if (target.IsBusy || source.IsBusy) return;
@@ -174,9 +185,11 @@ public sealed partial class MainViewModel : ObservableObject
         target.IsBusy = true;
         try
         {
+            var at = Math.Clamp(
+                insertIndex ?? target.Document.Session.Model.Pages.Count,
+                0, target.Document.Session.Model.Pages.Count);
             var inserted = await target.Document.InsertPagesFromAsync(
-                _services.Engine, source.Document, logicalIndices,
-                target.Document.Session.Model.Pages.Count, CancellationToken.None);
+                _services.Engine, source.Document, logicalIndices, at, CancellationToken.None);
             ActiveDocument = target;
             target.StatusText = Loc.F("DropPagesDone", inserted, source.Title);
             Log.Information("Перенос страниц: {Count} из {Source} в {Target}",
@@ -191,6 +204,31 @@ public sealed partial class MainViewModel : ObservableObject
         {
             target.IsBusy = false;
         }
+    }
+
+    /// <summary>
+    /// То же самое, но через меню: «Отправить в другой документ…».
+    ///
+    /// Перетаскивание на вкладку удобно, но требует и точного движения мышью,
+    /// и открытого организатора у обоих документов. Меню работает всегда и,
+    /// в отличие от броска на вкладку, позволяет назвать место сразу.
+    /// </summary>
+    [RelayCommand]
+    private async Task SendPagesToDocument(IReadOnlyList<int>? logicalIndices)
+    {
+        if (ActiveDocument is not { } source || logicalIndices is not { Count: > 0 }) return;
+
+        var targets = Documents.Where(d => !ReferenceEquals(d, source)).ToList();
+        if (targets.Count == 0)
+        {
+            source.StatusText = Loc.Get("UxNeedsSecondDocument");
+            return;
+        }
+
+        var request = SendPagesDialog.Show(OwnerWindow, targets, logicalIndices.Count);
+        if (request == null) return;
+
+        await DropPagesOnDocumentAsync(request.Target, source, logicalIndices, request.InsertIndex);
     }
 
     /// <summary>
@@ -352,7 +390,19 @@ public sealed partial class MainViewModel : ObservableObject
             if (_quickPanel == null)
             {
                 _quickPanel = new Services.Ux.QuickPanel(Ux);
-                _quickPanel.Load(_services.Settings.QuickCommands);
+                // Кнопки, добавленные в панель после того, как её настраивали,
+                // доливаются один раз — иначе новая команда не появилась бы
+                // никогда, а сброс к умолчанию стёр бы настройку человека.
+                var (ids, generation) = NexusPdf.Ux.QuickPanelLayout.Upgrade(
+                    _services.Settings.QuickCommands, _services.Settings.QuickCommandsGeneration);
+                _quickPanel.Load(ids);
+                if (generation != _services.Settings.QuickCommandsGeneration)
+                {
+                    _services.Settings.QuickCommandsGeneration = generation;
+                    if (_services.Settings.QuickCommands.Count > 0)
+                        _services.Settings.QuickCommands = _quickPanel.Save();
+                    _services.SaveSettings();
+                }
             }
             return _quickPanel;
         }
@@ -381,6 +431,9 @@ public sealed partial class MainViewModel : ObservableObject
         QuickPanel.Load(result.Commands);
         ShowQuickPanelLabels = result.ShowLabels;
         _services.Settings.QuickCommands = QuickPanel.Save();
+        // Настроил вручную — значит панель дотянута до нынешнего поколения, и
+        // убранное сейчас обновление обратно не вернёт.
+        _services.Settings.QuickCommandsGeneration = NexusPdf.Ux.QuickPanelLayout.Generation;
         _services.SaveSettings();
     }
 
@@ -488,6 +541,10 @@ public sealed partial class MainViewModel : ObservableObject
                     if (e.PropertyName is nameof(DocumentViewModel.Title) or nameof(DocumentViewModel.IsDirty))
                         OnPropertyChanged(nameof(WindowTitle));
                 };
+                // Страницы, принесённые из другого документа и брошенные между
+                // карточками: место указано человеком, туда и ставим.
+                vm.PagesDroppedFromOtherDocument += (_, drop) =>
+                    _ = DropPagesOnDocumentAsync(vm, drop.Source, drop.Indices, drop.InsertIndex);
                 Documents.Add(vm);
                 ActiveDocument = vm;
                 OnPropertyChanged(nameof(HasDocuments));
@@ -959,17 +1016,22 @@ public sealed partial class MainViewModel : ObservableObject
             : (bytes / 1024.0).ToString("0") + " KB";
 
     /// <summary>
-    /// Улучшение сканов: выравнивание наклона и чистка. Отдельная команда, а не
-    /// часть сжатия, — это разные задачи, и делать их «заодно» значит менять
-    /// документ там, где пользователь просил только уменьшить вес.
+    /// Единое окно подготовки документа: качество страниц, вес изображений и
+    /// структура файла.
+    ///
+    /// Раньше это были три команды, и каждая просила «сохранить как»: чтобы
+    /// почистить скан и сжать его, документ приходилось делать дважды и
+    /// оставлять на диске лишний файл. Здесь всё выбирается сразу, конвейер
+    /// сам выдерживает порядок, а результат ложится в ОТКРЫТЫЙ документ —
+    /// сохранение остаётся обычным и происходит тогда, когда решит пользователь.
     /// </summary>
     [RelayCommand]
-    private async Task EnhanceScans()
+    private async Task OptimizeDocument()
     {
         if (ActiveDocument is not { } doc || doc.IsBusy) return;
 
-        // Предпросмотр строится на ТЕКУЩЕЙ странице: наклон у разных страниц
-        // разный, и показывать чужую было бы обманом.
+        // Предпросмотр строится на ТЕКУЩЕЙ странице: наклон и фон у разных
+        // страниц разные, и показывать чужую было бы обманом.
         ScanPreviewPage? preview = null;
         try
         {
@@ -983,94 +1045,53 @@ public sealed partial class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "Не удалось отрисовать страницу для предпросмотра улучшения сканов");
+            Log.Warning(ex, "Не удалось отрисовать страницу для предпросмотра обработки");
         }
 
-        var options = ScanEnhanceDialog.Show(OwnerWindow, preview, doc.PageCount);
-        if (options == null) return;
-
-        var dialog = new SaveFileDialog
-        {
-            Filter = Loc.Get("PdfFilter"),
-            FileName = Path.GetFileNameWithoutExtension(doc.Title) + "-improved.pdf",
-            DefaultExt = ".pdf",
-        };
-        if (dialog.ShowDialog(OwnerWindow) != true) return;
-        if (RejectIfTargetOpenElsewhere(doc, dialog.FileName)) return;
-
-        doc.IsBusy = true;
-        doc.StatusText = Loc.Get("EnhanceStatus");
-        var pages = Math.Max(1, doc.PageCount);
-        var ct = doc.Busy.Start(Loc.Get("EnhanceStatus"), canCancel: true, determinate: true);
-        var progress = new Progress<int>(done =>
-            doc.Busy.Report((double)done / pages, Loc.F("BusyPageOf", done, pages)));
-        try
-        {
-            var stats = await _services.Tools.EnhanceScansCopyAsync(
-                doc.Document, dialog.FileName, options, progress, ct);
-            doc.StatusText = stats.PagesStraightened > 0 || stats.SpecklesRemoved > 0
-                ? Loc.F("EnhanceDone", stats.PagesProcessed, stats.PagesStraightened,
-                    stats.MaxAngleDegrees.ToString("0.0"), stats.ImagesCleaned, stats.SpecklesRemoved)
-                : Loc.F("EnhanceNothingFound", stats.PagesProcessed);
-            Log.Information("Улучшение сканов: страниц {Pages}, выровнено {Fixed}, пятен {Speckles}",
-                stats.PagesProcessed, stats.PagesStraightened, stats.SpecklesRemoved);
-        }
-        catch (OperationCanceledException)
-        {
-            doc.StatusText = Loc.Get("BusyCancelled");
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Ошибка улучшения сканов");
-            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"),
-                Loc.F("ErrorSaveFile", Path.GetFileName(dialog.FileName)), ex.ToString());
-            doc.StatusText = Loc.Get("Ready");
-        }
-        finally
-        {
-            doc.Busy.Finish();
-            doc.IsBusy = false;
-        }
-    }
-
-    [RelayCommand]
-    private async Task CompressImages()
-    {
-        // qpdf этой операции не нужен — гейта доступности инструментов нет.
-        if (ActiveDocument is not { } doc || doc.IsBusy) return;
-
-        // Смотрим документ ДО диалога: «умный» режим и подсказка в окне должны
+        // Разбор документа ДО окна: «умный» режим сжатия и подсказки должны
         // говорить об этом файле, а не вообще.
         var profile = await ReadImageProfileAsync(doc);
-        var request = CompressImagesDialog.Show(OwnerWindow, profile);
-        if (request == null) return;
-        var dialog = new SaveFileDialog
-        {
-            Filter = Loc.Get("PdfFilter"),
-            FileName = Path.GetFileNameWithoutExtension(doc.Title) + "-compressed.pdf",
-            DefaultExt = ".pdf",
-        };
-        if (dialog.ShowDialog(OwnerWindow) != true) return;
-        if (RejectIfTargetOpenElsewhere(doc, dialog.FileName)) return;
+        var plan = OptimizeDocumentDialog.Show(
+            OwnerWindow, preview, doc.PageCount, profile, _services.Tools.IsAvailable);
+        if (plan == null) return;
 
         doc.IsBusy = true;
-        doc.StatusText = Loc.Get("CompressingStatus");
-        var ct = doc.Busy.Start(Loc.Get("CompressingStatus"));
+        var pages = Math.Max(1, doc.PageCount);
+        var ct = doc.Busy.Start(Loc.F("OptimizeRunning", Loc.Get("OptimizeStagePreparing")),
+            canCancel: true, determinate: true);
+        var progress = new Progress<ProcessingProgress>(p =>
+        {
+            var stage = Loc.Get(p.Stage switch
+            {
+                ProcessingStage.Enhancing => "OptimizeStageEnhancing",
+                ProcessingStage.Compressing => "OptimizeStageCompressing",
+                ProcessingStage.Optimizing => "OptimizeStageOptimizing",
+                ProcessingStage.Applying => "OptimizeStageApplying",
+                _ => "OptimizeStagePreparing",
+            });
+            var share = p.Total > 0 ? (double)p.Done / p.Total : 0;
+            doc.Busy.Report(share, Loc.F("OptimizeRunning", stage));
+            doc.StatusText = Loc.F("OptimizeRunning", stage);
+        });
+
         try
         {
-            var result = await _services.Tools.CompressImagesCopyAsync(
-                doc.Document, dialog.FileName, request.Dpi, request.Quality,
-                ImageEncoder.EncodeChosen, ct,
-                request.StructureOnly, request.SubsetFonts);
-            var saved = result.BytesBefore - result.BytesAfter;
-            doc.StatusText = saved > 0 && !result.KeptOriginal
-                ? Loc.F("CompressDone",
-                    FormatSize(result.BytesBefore), FormatSize(result.BytesAfter),
-                    FormatSize(saved) + $" / {saved * 100.0 / Math.Max(1, result.BytesBefore):0}%")
-                : Loc.F("CompressNoGain",
-                    FormatSize(result.BytesBefore), FormatSize(result.BytesAfter));
-            Log.Information("Пересжатие: {Before} → {After} байт, изображений {N}",
-                result.BytesBefore, result.BytesAfter, result.Recompressed);
+            var result = await _services.Tools.ProcessInPlaceAsync(
+                doc.Document, plan, NexusPdf.Infrastructure.AppPaths.ProcessedFolder,
+                ImageEncoder.EncodeChosen, progress, ct);
+
+            // Документ переехал на обработанный источник: список страниц,
+            // миниатюры и растровый кэш смотрят на прежний файл и обязаны
+            // пересобраться.
+            doc.ReloadAfterProcessing();
+
+            doc.StatusText = result.BytesAfter < result.BytesBefore
+                ? Loc.F("OptimizeDocDone", FormatSize(result.BytesBefore), FormatSize(result.BytesAfter))
+                : Loc.F("OptimizeDoneNoGain", FormatSize(result.BytesAfter));
+            Log.Information(
+                "Обработка документа: {Before} → {After} байт, выровнено {Straight}, пятен {Speckles}, картинок пересжато {Images}, структура {Structure}",
+                result.BytesBefore, result.BytesAfter, result.Enhance.PagesStraightened,
+                result.Enhance.SpecklesRemoved, result.Recompressed, result.StructureOptimized);
         }
         catch (OperationCanceledException)
         {
@@ -1078,9 +1099,8 @@ public sealed partial class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "Ошибка пересжатия изображений");
-            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"),
-                Loc.F("ErrorSaveFile", Path.GetFileName(dialog.FileName)), ex.ToString());
+            Log.Error(ex, "Ошибка обработки документа");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"), Loc.Get("OptimizeFailed"), ex.ToString());
             doc.StatusText = Loc.Get("Ready");
         }
         finally
@@ -2204,50 +2224,6 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
-    private async Task OptimizeCopy()
-    {
-        if (ActiveDocument is not { } doc || doc.IsBusy || !_services.Tools.IsAvailable) return;
-
-        var dialog = new SaveFileDialog
-        {
-            Filter = Loc.Get("PdfFilter"),
-            FileName = Path.GetFileNameWithoutExtension(doc.Title) + "-optimized.pdf",
-            DefaultExt = ".pdf",
-        };
-        if (dialog.ShowDialog(OwnerWindow) != true) return;
-        if (RejectIfTargetOpenElsewhere(doc, dialog.FileName)) return;
-
-        doc.IsBusy = true;
-        doc.StatusText = Loc.Get("OptimizingStatus");
-        try
-        {
-            var result = await _services.Tools.OptimizeCopyAsync(doc.Document, dialog.FileName, CancellationToken.None);
-            doc.StatusText = Loc.F("OptimizeDone",
-                FormatBytes(result.BytesBefore), FormatBytes(result.BytesAfter));
-            Log.Information("Оптимизирована копия: {Path} ({Before} → {After})",
-                dialog.FileName, result.BytesBefore, result.BytesAfter);
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Ошибка оптимизации");
-            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"),
-                Loc.F("ErrorSaveFile", Path.GetFileName(dialog.FileName)), ex.ToString());
-            doc.StatusText = Loc.Get("Ready");
-        }
-        finally
-        {
-            doc.Busy.Finish();
-            doc.IsBusy = false;
-        }
-    }
-
-    private static string FormatBytes(long bytes) => bytes switch
-    {
-        >= 1024 * 1024 => $"{bytes / (1024.0 * 1024.0):0.#} МБ",
-        >= 1024 => $"{bytes / 1024.0:0.#} КБ",
-        _ => $"{bytes} Б",
-    };
 
     // ----- Вкладки и окна -----
 

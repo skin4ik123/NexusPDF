@@ -178,7 +178,7 @@ public sealed class CommandRegistryTests
         Cmd(CommandIds.ExtractPages, "Извлечь страницы", MenuGroup.Special, multi: true),
         Cmd(CommandIds.EditPageInPaint, "Редактировать страницу в Paint", MenuGroup.Special),
         Cmd(CommandIds.OcrPages, "Распознать текст", MenuGroup.Special, multi: true),
-        Cmd(CommandIds.CompressPages, "Сжать страницы", MenuGroup.Special, multi: true),
+        Cmd(CommandIds.OptimizeDocument, "Оптимизация документа", MenuGroup.Special, multi: true),
         Cmd(CommandIds.PrintSelectedPages, "Печать страниц", MenuGroup.Special, multi: true),
         Cmd(CommandIds.DeletePages, "Удалить страницы", MenuGroup.Dangerous,
             CommandDanger.Undoable, multi: true),

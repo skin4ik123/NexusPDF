@@ -15,9 +15,20 @@ public sealed class PaddleOcrEngine : ITextRecognizer
 {
     public string Id => "paddle";
 
-    /// <summary>Название с языковым пакетом: в журнале должно быть видно, чем именно читали.</summary>
-    public string DisplayName =>
-        "PaddleOCR PP-OCRv6 — " +
+    /// <summary>
+    /// Название движка. БЕЗ языкового пакета: его заголовки живут в
+    /// ocrmodels.lock.json и существуют только по-русски, поэтому в английском
+    /// интерфейсе строка получалась смешанной. Какой пакет выбран, видно в
+    /// окне распознавания — там ему и место.
+    /// </summary>
+    public string DisplayName => "PaddleOCR PP-OCRv6";
+
+    /// <summary>
+    /// То же с языковым пакетом — для ЖУРНАЛА: там нужно видеть, чем именно
+    /// читали, и язык записи значения не имеет.
+    /// </summary>
+    public string LogName =>
+        DisplayName + " — " +
         (Catalog.FirstOrDefault(p => string.Equals(p.Id, _packId, StringComparison.OrdinalIgnoreCase))?.Title
          ?? _packId);
 

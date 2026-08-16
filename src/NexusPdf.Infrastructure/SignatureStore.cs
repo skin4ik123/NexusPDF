@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 
 namespace NexusPdf.Infrastructure;
@@ -8,7 +9,14 @@ public sealed record SignatureTemplate(string Name, string FilePath);
 /// Локальная библиотека шаблонов визуальных подписей. Файлы шифруются DPAPI
 /// (ключ пользователя Windows): скопированный на другую машину или к другому
 /// пользователю файл прочитать нельзя. Содержимое подписей не журналируется.
+///
+/// Класс помечен как windows-only: DPAPI существует только там. Проект собран
+/// под платформенно-нейтральный net10.0, поэтому без пометки анализатор честно
+/// ругался на каждый вызов — а прятать предупреждение подавлением значило бы
+/// потерять его в тот день, когда сборку действительно понесут на другую
+/// платформу.
 /// </summary>
+[SupportedOSPlatform("windows")]
 public sealed class SignatureStore
 {
     private const string Extension = ".sig";

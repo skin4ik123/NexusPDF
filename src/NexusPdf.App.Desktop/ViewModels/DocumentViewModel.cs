@@ -54,6 +54,15 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     public string Title => Document.DisplayName;
     public string? FilePath => Document.Session.FilePath;
 
+    /// <summary>
+    /// Что произносит экранный диктор о вкладке. Без него читалось имя ТИПА —
+    /// «NexusPdf.App.Desktop.ViewModels.DocumentViewModel»: название документа
+    /// живёт в шаблоне заголовка, а не в тексте самой вкладки. Несохранённость
+    /// проговаривается словом: точка у названия глазами видна, на слух — нет.
+    /// </summary>
+    public string AccessibleName => Localization.Loc.F(
+        IsDirty ? "A11yTabItemDirty" : "A11yTabItem", Title, PageCount);
+
     /// <summary>Правки форм идут напрямую в pdfium-документ мимо DocumentSession —
     /// без этого флага закрытие вкладки тихо теряло бы введённые значения.</summary>
     private bool _formModified;
@@ -571,6 +580,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         if (_formModified) return;
         _formModified = true;
         OnPropertyChanged(nameof(IsDirty));
+        OnPropertyChanged(nameof(AccessibleName));
     }
 
     private Task RefreshFormPageAsync(PageViewModel page, double dpiScale)
@@ -581,6 +591,30 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// После обработки (чистка, пересжатие, оптимизация) страницы указывают на
+    /// НОВЫЙ файл. Список страниц и растровый кэш пересобираются сами — ключи
+    /// кэша содержат идентификатор источника, — но окружение, привязанное к
+    /// прежнему дескриптору, надо перечитать: поля форм и подписи в
+    /// перекомпонованном файле уже другие.
+    /// </summary>
+    public void ReloadAfterProcessing()
+    {
+        IsFormMode = false;
+        _formActivePage = null;
+        _formModified = false;
+        FormRenderVersion++;
+        OnPropertyChanged(nameof(IsDirty));
+        OnPropertyChanged(nameof(AccessibleName));
+        _ = DetectFormsAsync();
+        _ = LoadSignaturesAsync();
+        // Кнопки верхней панели пересчитывают доступность по общему сигналу
+        // WPF, а он приходит от ввода. После долгой фоновой операции мышь может
+        // не двигаться минутами, и «Сохранить» оставалось бы серым на уже
+        // изменённом документе.
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+    }
+
     /// <summary>После сохранения документ переоткрыт новым дескриптором — форм-окружение потеряно.</summary>
     public void ResetFormStateAfterSave()
     {
@@ -588,6 +622,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         _formActivePage = null;
         _formModified = false;
         OnPropertyChanged(nameof(IsDirty));
+        OnPropertyChanged(nameof(AccessibleName));
         FormRenderVersion++;
         _ = DetectFormsAsync();
     }
@@ -1724,27 +1759,59 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     // ----- Drag-and-drop перестановка (gong-wpf-dragdrop) -----
 
+    /// <summary>Страницы ЧУЖОГО документа, брошенные сюда, и место вставки.</summary>
+    public sealed record CrossDocumentDrop(
+        DocumentViewModel Source, IReadOnlyList<int> Indices, int InsertIndex);
+
+    /// <summary>
+    /// Просьба перенести страницы из другого документа. Сам вид этого сделать
+    /// не может — нужен движок, — поэтому решение принимает главная модель.
+    /// </summary>
+    public event EventHandler<CrossDocumentDrop>? PagesDroppedFromOtherDocument;
+
+    private static IReadOnlyList<PageViewModel> DraggedPages(object? data) => data switch
+    {
+        PageViewModel single => new[] { single },
+        IEnumerable<object> many => many.OfType<PageViewModel>().ToArray(),
+        _ => Array.Empty<PageViewModel>(),
+    };
+
     void IDropTarget.DragOver(IDropInfo dropInfo)
     {
-        if (dropInfo.Data is PageViewModel || dropInfo.Data is IEnumerable<object>)
-        {
-            dropInfo.Effects = DragDropEffects.Move;
-            dropInfo.DropTargetAdorner = DropTargetAdorners.Insert;
-        }
+        var pages = DraggedPages(dropInfo.Data);
+        if (pages.Count == 0) return;
+
+        // Свои страницы переставляются, чужие — добавляются: у переноса между
+        // документами это разные по смыслу действия, и курсор обязан показывать
+        // именно то, что произойдёт.
+        dropInfo.Effects = ReferenceEquals(pages[0].Owner, this)
+            ? DragDropEffects.Move
+            : DragDropEffects.Copy;
+        dropInfo.DropTargetAdorner = DropTargetAdorners.Insert;
     }
 
     void IDropTarget.Drop(IDropInfo dropInfo)
     {
-        var items = dropInfo.Data switch
+        var items = DraggedPages(dropInfo.Data);
+        if (items.Count == 0) return;
+
+        var insertIndex = Math.Clamp(dropInfo.InsertIndex, 0, Pages.Count);
+        var source = items[0].Owner;
+
+        // Чужие страницы нельзя переставлять своей операцией: её индексы
+        // относятся к ЭТОМУ документу, и она перемешала бы совсем другие
+        // страницы вместо вставки принесённых.
+        if (!ReferenceEquals(source, this))
         {
-            PageViewModel single => new[] { single },
-            IEnumerable<object> many => many.OfType<PageViewModel>().ToArray(),
-            _ => Array.Empty<PageViewModel>(),
-        };
-        if (items.Length == 0) return;
+            PagesDroppedFromOtherDocument?.Invoke(this, new CrossDocumentDrop(
+                source,
+                items.Where(p => ReferenceEquals(p.Owner, source))
+                    .Select(p => p.LogicalIndex).OrderBy(i => i).ToList(),
+                insertIndex));
+            return;
+        }
 
         var indices = items.Select(p => p.LogicalIndex).OrderBy(i => i).ToArray();
-        var insertIndex = Math.Clamp(dropInfo.InsertIndex, 0, Pages.Count);
         Document.Session.Apply(new MovePagesOperation(indices, insertIndex));
     }
 
@@ -1940,6 +2007,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         }
         OnPropertyChanged(nameof(IsDirty));
         OnPropertyChanged(nameof(Title));
+        OnPropertyChanged(nameof(AccessibleName));
         OnPropertyChanged(nameof(FilePath));
         OnPropertyChanged(nameof(CanUndo));
         OnPropertyChanged(nameof(CanRedo));
@@ -2241,6 +2309,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
                 rebuilt.Count, started.Elapsed.TotalMilliseconds);
 
         OnPropertyChanged(nameof(PageCount));
+        OnPropertyChanged(nameof(AccessibleName));
         OnPropertyChanged(nameof(PageOfText));
         OnPropertyChanged(nameof(CurrentPageSizeText));
         if (CurrentPageNumber > Pages.Count)

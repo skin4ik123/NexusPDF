@@ -26,6 +26,9 @@ public static class CommandIds
     public const string DuplicateObject = "edit.duplicateObject";
     public const string Delete = "edit.delete";
     public const string SelectAllOnPage = "edit.selectAllOnPage";
+
+    /// <summary>Отправить выбранные страницы в другой открытый документ, в указанное место.</summary>
+    public const string SendPagesToDocument = "pages.sendToDocument";
     public const string ObjectProperties = "edit.objectProperties";
 
     // Просмотр
@@ -47,7 +50,6 @@ public static class CommandIds
     public const string PageProperties = "pages.properties";
     public const string PrintSelectedPages = "pages.printSelected";
     public const string PrintCurrentPage = "pages.printCurrent";
-    public const string CompressPages = "pages.compress";
 
     // Содержимое
     public const string InsertSignatureImage = "content.insertSignature";
@@ -126,10 +128,12 @@ public static class CommandIds
     public const string CreateFromImages = "convert.fromImages";
     public const string MergePdfs = "convert.merge";
     public const string CompareDocuments = "convert.compare";
-    public const string OptimizeCopy = "convert.optimize";
-
-    /// <summary>Выравнивание наклона и чистка отсканированных страниц.</summary>
-    public const string EnhanceScans = "convert.enhance-scans";
+    /// <summary>
+    /// Единое окно подготовки документа: качество страниц, вес изображений и
+    /// структура файла. Раньше это были три команды с тремя «сохранить как»;
+    /// теперь один заход, и результат применяется к открытому документу.
+    /// </summary>
+    public const string OptimizeDocument = "convert.optimize-document";
     public const string BatchProcess = "convert.batch";
 
     // Документ целиком
@@ -148,4 +152,5 @@ public static class CommandIds
 
     // Справка
     public const string About = "help.about";
+    public const string Support = "help.support";
 }

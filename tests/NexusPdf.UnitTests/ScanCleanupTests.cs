@@ -188,6 +188,160 @@ public sealed class ScanCleanupTests
         Assert.True(textPixel < 100, $"Текст выцвел до {textPixel}.");
     }
 
+    /// <summary>
+    /// Засвет от лампы — светлое пятно посреди листа. Именно на нём ломается
+    /// «одна яркость на всю страницу»: пятно ярче бумаги, и общий уровень
+    /// вытягивает бумагу вокруг него в серое. После чистки лист обязан стать
+    /// РОВНЫМ: разброс бумаги по всей странице — единицы, а не десятки.
+    /// </summary>
+    [Fact]
+    public void Glare_And_Shadow_Level_Out_To_An_Even_Sheet()
+    {
+        var page = Page(0);
+        for (var y = 0; y < H; y++)
+        for (var x = 0; x < W; x++)
+        {
+            var o = ((long)y * W + x) * 4;
+            if (page[o] < 128) continue;                 // текст не трогаем
+            // Тень слева, засвет круглым пятном справа сверху.
+            double v = 150 + 55.0 * x / W;
+            var dx = x - 600.0;
+            var dy = y - 300.0;
+            var r = Math.Sqrt(dx * dx + dy * dy);
+            if (r < 180) v += 55 * (1 - r / 180);
+            page[o] = page[o + 1] = page[o + 2] = (byte)Math.Clamp(v, 0, 255);
+        }
+
+        ScanCleanup.LevelBackground(page, W, H);
+
+        // Замеряем бумагу в шести далёких друг от друга местах, включая центр
+        // засвета и самый тёмный угол.
+        var probes = new (int X, int Y)[] { (20, 20), (770, 20), (20, 970), (770, 970), (600, 300), (400, 640) };
+        foreach (var (x, y) in probes)
+        {
+            var v = page[((long)y * W + x) * 4];
+            Assert.True(v >= 250,
+                $"Бумага в ({x},{y}) осталась {v} — лист не стал ровно белым.");
+        }
+    }
+
+    /// <summary>
+    /// Жёлтая бумага. Общий серый уровень её только осветляет — оттенок
+    /// остаётся, и «чистого» листа не выходит. Уровень по каждому каналу
+    /// убирает и желтизну.
+    /// </summary>
+    [Fact]
+    public void Yellow_Paper_Loses_Its_Tint()
+    {
+        var page = Page(0);
+        for (long i = 0; i + 3 < page.Length; i += 4)
+        {
+            if (page[i] < 128) continue;
+            page[i] = 176;      // B — жёлтая бумага синего отражает меньше
+            page[i + 1] = 214;  // G
+            page[i + 2] = 232;  // R
+        }
+
+        ScanCleanup.LevelBackground(page, W, H);
+
+        var b = page[((long)10 * W + 10) * 4];
+        var g = page[((long)10 * W + 10) * 4 + 1];
+        var r = page[((long)10 * W + 10) * 4 + 2];
+        Assert.True(Math.Abs(b - g) <= 2 && Math.Abs(g - r) <= 2,
+            $"Оттенок остался: B={b} G={g} R={r}.");
+        Assert.True(b >= 250, $"Бумага не добелена: {b}.");
+    }
+
+    /// <summary>Со снятием оттенка выключенным цвета остаются как были.</summary>
+    [Fact]
+    public void Tint_Removal_Can_Be_Switched_Off()
+    {
+        var page = Page(0, text: false);
+        for (long i = 0; i + 3 < page.Length; i += 4)
+        {
+            page[i] = 176; page[i + 1] = 214; page[i + 2] = 232;
+        }
+        ScanCleanup.LevelBackground(page, W, H,
+            new ScanCleanup.BackgroundOptions(Strength: 0, NeutralizeTint: false));
+
+        var b = page[0];
+        var r = page[2];
+        Assert.True(r - b > 20, $"Оттенок снят, хотя не просили: B={b} R={r}.");
+    }
+
+    /// <summary>Тёмная кайма сканера стирается, а содержимое страницы — нет.</summary>
+    [Fact]
+    public void Scanner_Edge_Is_Trimmed_But_Content_Survives()
+    {
+        var page = Page(0);
+        for (var y = 0; y < 14; y++)
+        for (var x = 0; x < W; x++)
+        {
+            var o = ((long)y * W + x) * 4;
+            page[o] = page[o + 1] = page[o + 2] = 12;
+        }
+        var textBefore = DarkCount(page) - 14 * W;
+
+        var cleared = ScanCleanup.TrimDarkEdges(page, W, H);
+
+        Assert.True(cleared >= 14, $"Очищено полос: {cleared}, а кайма в 14 строк.");
+        // Кайма заливается цветом бумаги — здесь бумага белая.
+        Assert.Equal(255, page[0]);
+        Assert.Equal(textBefore, DarkCount(page));
+    }
+
+    /// <summary>
+    /// Кайма плюс выравнивание фона — вместе, как их и применяет программа.
+    ///
+    /// Раньше здесь вылезала виньетка: полоса заливалась чистым белым, оценка
+    /// бумаги в угловых плитках подскакивала, и настоящая бумага рядом уходила
+    /// в серое. Проверяется именно угол — там это и было видно.
+    /// </summary>
+    [Fact]
+    public void Trimming_The_Edge_Does_Not_Darken_The_Corner_Afterwards()
+    {
+        var page = Page(0);
+        for (var y = 0; y < H; y++)
+        for (var x = 0; x < W; x++)
+        {
+            var o = ((long)y * W + x) * 4;
+            if (page[o] < 128) continue;
+            page[o] = page[o + 1] = page[o + 2] = (byte)(155 + 45.0 * x / W);
+        }
+        // Кайма: 12 строк сверху и 10 столбцов слева.
+        for (var y = 0; y < 12; y++)
+        for (var x = 0; x < W; x++)
+        {
+            var o = ((long)y * W + x) * 4;
+            page[o] = page[o + 1] = page[o + 2] = 12;
+        }
+        for (var y = 0; y < H; y++)
+        for (var x = 0; x < 10; x++)
+        {
+            var o = ((long)y * W + x) * 4;
+            page[o] = page[o + 1] = page[o + 2] = 12;
+        }
+
+        Assert.True(ScanCleanup.TrimDarkEdges(page, W, H) >= 20);
+        ScanCleanup.LevelBackground(page, W, H);
+
+        foreach (var (x, y) in new[] { (2, 2), (20, 20), (60, 60), (5, 500), (400, 4) })
+        {
+            var v = page[((long)y * W + x) * 4];
+            Assert.True(v >= 250, $"У края в ({x},{y}) осталось {v} — вылезла виньетка.");
+        }
+    }
+
+    /// <summary>Без каймы обрезать нечего — страница обязана остаться нетронутой.</summary>
+    [Fact]
+    public void A_Clean_Page_Keeps_All_Its_Edges()
+    {
+        var page = Page(0);
+        var before = DarkCount(page);
+        Assert.Equal(0, ScanCleanup.TrimDarkEdges(page, W, H));
+        Assert.Equal(before, DarkCount(page));
+    }
+
     [Fact]
     public void Levelling_Does_Not_Bleach_A_Photograph()
     {

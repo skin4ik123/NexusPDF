@@ -14,6 +14,7 @@
     <app:NullToVisibilityConverter x:Key="NullToVis"/>
     <app:EnumToIndexConverter x:Key="EnumToIndex"/>
     <app:EnumToBoolConverter x:Key="EnumToBool"/>
+    <app:PrintProfileNameConverter x:Key="ProfileName"/>
     <Style x:Key="GroupCaption" TargetType="TextBlock">
       <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
       <Setter Property="FontSize" Value="11"/>
@@ -59,7 +60,13 @@
                      FontSize="12" Margin="14,0,0,0"/>
           <TextBlock Text="{l:Loc PrintProfile}" Style="{StaticResource FieldLabel}" Margin="24,0,8,0"/>
           <ComboBox Width="190" ItemsSource="{Binding Profiles}" SelectedItem="{Binding SelectedProfile}"
-                    DisplayMemberPath="Name" AutomationProperties.Name="{l:Loc PrintProfile}"/>
+                    AutomationProperties.Name="{l:Loc PrintProfile}">
+            <ComboBox.ItemTemplate>
+              <DataTemplate>
+                <TextBlock Text="{Binding Converter={StaticResource ProfileName}}"/>
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
           <Button Style="{StaticResource ToolButton}" Margin="6,0,0,0" Click="OnSaveProfile"
                   ToolTip="{l:Loc PrintProfileSave}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE74E;" FontSize="12"/>
@@ -262,8 +269,19 @@
               <ComboBoxItem Content="{l:Loc PrintAnnotPrintable}"/>
               <ComboBoxItem Content="{l:Loc PrintAnnotAll}"/>
             </ComboBox>
+            <!-- Поля формы отдельным списком: «пустой бланк» не должен уносить
+                 с листа комментарии, а «без комментариев» — значения полей. -->
+            <ComboBox Margin="0,6,0,0" SelectedIndex="{Binding Forms, Converter={StaticResource EnumToIndex}}"
+                      IsEnabled="{Binding CanChooseForms}"
+                      AutomationProperties.Name="{l:Loc PrintForms}">
+              <ComboBoxItem Content="{l:Loc PrintFormsWithValues}"/>
+              <ComboBoxItem Content="{l:Loc PrintFormsBlank}"/>
+            </ComboBox>
             <CheckBox Content="{l:Loc PrintAsImage}" IsChecked="{Binding PrintAsImage}" Margin="0,8,0,0"
+                      ToolTip="{l:Loc PrintAsImageHint}"
                       Foreground="{DynamicResource TextBrush}"/>
+            <TextBlock Text="{l:Loc PrintAsImageHint}" FontSize="11" TextWrapping="Wrap" Margin="26,2,0,0"
+                       Foreground="{DynamicResource TextSecondary}"/>
             <Button Content="{l:Loc PrintCommentSummary}" Style="{StaticResource LinkButton}"
                     HorizontalAlignment="Left" Margin="0,8,0,0" Click="OnCommentSummary"/>
 

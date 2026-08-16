@@ -1,39 +1,62 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  MSI-пакет NexusPDF (WiX 5, схема v4). Собирается из build.ps1 (-Msi) командой:
-    wix build installer/Msi/NexusPdf.wxs -arch x64 -culture ru-RU
+  NexusPDF MSI package (WiX 5, schema v4). Built from build.ps1 (-Msi) with:
+    wix build installer/Msi/NexusPdf.wxs -arch x64 -culture en-US
         -ext WixToolset.UI.wixext
-        -bindpath publish=<абс. путь publish>  -bindpath assets=<абс. путь installer/Assets>
+        -d Version=<version from Directory.Build.props>
+        -bindpath publish=<abs. path to publish>
+        -bindpath assets=<abs. path to installer/Assets>
         -o artifacts/NexusPdf.msi
 
-  Основной путь установки для пользователя - фирменный NexusPdfSetup.exe
-  (WPF-интерфейс поверх этого MSI). WixUI_InstallDir здесь - запасной интерфейс
-  для прямого запуска MSI двойным кликом.
+  The version is PASSED IN, never written here. It used to be hard-coded, drifted
+  four releases behind, and that single stale number caused the two bugs users saw:
+  MajorUpgrade compares product versions, so an equal version is not an upgrade —
+  every install stayed as a separate product and added its own entry to
+  "Installed apps" instead of replacing the previous one.
 
-  Правила ассоциаций: версионируемый ProgID, Capabilities/RegisteredApplications,
-  OpenWith. UserChoice не подменяется. При удалении сносятся только свои ключи.
+  The user-facing installer is the branded NexusPdfSetup.exe (a WPF front end over
+  this MSI). WixUI_InstallDir below is the fallback wizard for running the MSI
+  directly by double-click.
+
+  File association rules: versioned ProgID, Capabilities/RegisteredApplications,
+  OpenWith. UserChoice is never overwritten. Uninstall removes only our own keys.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="NexusPDF"
-           Manufacturer="NexusPDF"
-           Version="0.15.0"
+           Manufacturer="Artur Yurchuk"
+           Version="$(Version)"
            UpgradeCode="7C6E2B7A-9A1E-4F2B-B4B0-3E62D8C5A101"
-           Language="1049"
+           Language="1033"
            Scope="perUserOrMachine">
 
-    <MajorUpgrade DowngradeErrorMessage="Установлена более новая версия NexusPDF."/>
+    <!--
+      AllowSameVersionUpgrades: reinstalling the SAME version must replace the
+      installed copy, not sit beside it. Without it a repeated install of one
+      build left two identical entries in "Installed apps", and neither could
+      remove the other's files.
+
+      Schedule=afterInstallInitialize removes the old copy BEFORE the new files
+      are laid down, so a downgrade of a single component can never win.
+    -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of NexusPDF is already installed." />
     <MediaTemplate EmbedCab="yes"/>
 
-    <!-- Scope=perUserOrMachine уже даёт по умолчанию установку для текущего
-         пользователя (без прав администратора); Setup.exe для режима
-         "для всех" передаёт ALLUSERS=1. -->
+    <!-- Scope=perUserOrMachine already defaults to a per-user install (no admin
+         rights needed); Setup.exe passes ALLUSERS=1 for the "for everyone" mode. -->
     <Property Id="DESKTOP_SHORTCUT" Value="0"/>
 
     <Icon Id="AppIco" SourceFile="!(bindpath.assets)\app.ico"/>
     <Property Id="ARPPRODUCTICON" Value="AppIco"/>
+    <!-- What "Installed apps" shows next to the entry. Without these Windows
+         falls back to the manufacturer string alone. -->
+    <Property Id="ARPCOMMENTS" Value="Local PDF editor. Crafted by Artur Yurchuk."/>
+    <Property Id="ARPCONTACT" Value="Artur Yurchuk"/>
+    <Property Id="ARPNOREPAIR" Value="1"/>
 
-    <WixVariable Id="WixUILicenseRtf" Value="!(bindpath.assets)\license.ru.rtf"/>
+    <WixVariable Id="WixUILicenseRtf" Value="!(bindpath.assets)\license.en.rtf"/>
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER"/>
 
     <StandardDirectory Id="ProgramFiles64Folder">
@@ -43,7 +66,7 @@
     <StandardDirectory Id="DesktopFolder"/>
     <StandardDirectory Id="SendToFolder"/>
 
-    <!-- Все файлы publish-каталога (включая tools\qpdf и THIRD_PARTY_NOTICES) -->
+    <!-- Everything in the publish folder (including tools\qpdf and THIRD_PARTY_NOTICES) -->
     <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
       <Files Include="!(bindpath.publish)\**"/>
     </ComponentGroup>
@@ -63,9 +86,9 @@
         <RegistryValue Root="HKMU" Key="Software\NexusPDF" Name="desktopShortcut"
                        Type="integer" Value="1" KeyPath="yes"/>
       </Component>
-      <!-- «Отправить → NexusPDF» в Проводнике: выделенные PDF открываются
-           вкладками. Работает на всех версиях Windows, в отличие от
-           HKCU-пунктов контекстного меню, игнорируемых Win11 24H2+. -->
+      <!-- "Send to -> NexusPDF" in Explorer: selected PDFs open as tabs. Works on
+           every Windows version, unlike HKCU context-menu entries, which
+           Windows 11 24H2 and later ignore. -->
       <Component Id="SendToShortcut" Directory="SendToFolder">
         <Shortcut Id="AppSendToShortcut" Name="NexusPDF"
                   Target="[INSTALLFOLDER]NexusPdf.exe" WorkingDirectory="INSTALLFOLDER"
@@ -75,11 +98,11 @@
       </Component>
     </ComponentGroup>
 
-    <!-- Регистрация обработчика PDF (без подмены UserChoice) -->
+    <!-- PDF handler registration (UserChoice is left alone) -->
     <ComponentGroup Id="FileAssociation" Directory="INSTALLFOLDER">
       <Component Id="ProgIdRegistration">
         <RegistryValue Root="HKMU" Key="Software\Classes\NexusPdf.Document.1"
-                       Value="Документ PDF (NexusPDF)" Type="string" KeyPath="yes"/>
+                       Value="PDF Document (NexusPDF)" Type="string" KeyPath="yes"/>
         <RegistryValue Root="HKMU" Key="Software\Classes\NexusPdf.Document.1\DefaultIcon"
                        Value="[INSTALLFOLDER]NexusPdf.exe,0" Type="string"/>
         <RegistryValue Root="HKMU" Key="Software\Classes\NexusPdf.Document.1\shell\open\command"
@@ -90,7 +113,7 @@
                        Name="ApplicationName" Value="NexusPDF" Type="string"/>
         <RegistryValue Root="HKMU" Key="Software\NexusPDF\Capabilities"
                        Name="ApplicationDescription"
-                       Value="Просмотр и систематизация PDF" Type="string"/>
+                       Value="View, organize and edit PDF documents" Type="string"/>
         <RegistryValue Root="HKMU" Key="Software\NexusPDF\Capabilities\FileAssociations"
                        Name=".pdf" Value="NexusPdf.Document.1" Type="string"/>
         <RegistryValue Root="HKMU" Key="Software\RegisteredApplications"

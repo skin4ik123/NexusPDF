@@ -4,6 +4,7 @@ using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using NexusPdf.App.Desktop.Localization;
+using NexusPdf.App.Desktop.Services;
 using NexusPdf.App.Desktop.ViewModels;
 
 namespace NexusPdf.App.Desktop.Views;
@@ -159,6 +160,9 @@ public partial class DocumentView : UserControl
 
     private void ResetDrag()
     {
+        // Захват отобрали (Alt+Tab, чужое окно) — рука не должна остаться
+        // «зажатой»: страница поехала бы за курсором без нажатой кнопки.
+        _panning = false;
         if (_dragPage != null)
             _dragPage.DragPreviewRect = null;
         _dragPage = null;
@@ -248,7 +252,13 @@ public partial class DocumentView : UserControl
         {
             // Обычный просмотр: клик по ссылке — переход, иначе начало выделения текста.
             var readHit = FindPageAt(e.OriginalSource);
-            if (readHit == null) return;
+            if (readHit == null)
+            {
+                // Мимо страницы — поле вокруг неё. Тащить оттуда можно только
+                // сам документ, и это ровно то, чего от пустого места и ждут.
+                if (BeginPan(e)) e.Handled = true;
+                return;
+            }
             var (readPage, readElement) = readHit.Value;
             var readScale = readPage.DisplayScale;
             if (readScale <= 0) return;
@@ -288,6 +298,16 @@ public partial class DocumentView : UserControl
             if (_vm.LinkAt(readPage, readPos.X, readPos.Y) is { } link)
             {
                 _vm.ActivateLink(link);
+                e.Handled = true;
+                return;
+            }
+
+            // Пустое место страницы: там нечего выделять, зато есть что
+            // подвинуть. Проверка по тому же кэшу, что и курсор, — рука не
+            // может обещать одно, а нажатие делать другое.
+            _ = _vm.EnsureTextAreasAsync(readPage);
+            if (!_vm.HasTextAt(readPage, readPos.X, readPos.Y) && BeginPan(e))
+            {
                 e.Handled = true;
                 return;
             }
@@ -340,6 +360,118 @@ public partial class DocumentView : UserControl
     private PageViewModel? _objectPage;
     private FrameworkElement? _objectElement;
     private Point _objectStartPt;
+
+    // ----- Перестановка разделов правой панели -----
+
+    private Services.Ux.ToolGroup? _groupDrag;
+    private FrameworkElement? _groupGrip;
+
+    /// <summary>
+    /// Перестановка разделов сделана своими руками, а не библиотекой
+    /// перетаскивания: та вешает обработчики на элемент-источник, а внутри
+    /// заголовка Expander мышь захватывает его ToggleButton, и события до
+    /// источника уже не доходят. Здесь захват берётся сразу на ручке, поэтому
+    /// движение отслеживается до самого отпускания.
+    /// </summary>
+    private void OnGroupGripDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: Services.Ux.ToolGroup group } grip) return;
+        _groupDrag = group;
+        _groupGrip = grip;
+        grip.Opacity = 1.0;
+        grip.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OnGroupGripMove(object sender, MouseEventArgs e)
+    {
+        if (_groupDrag == null || _groupGrip == null) return;
+        if (e.LeftButton != MouseButtonState.Pressed)
+            ReleaseGroupGrip();
+    }
+
+    private void OnGroupGripUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_groupDrag == null) return;
+        var group = _groupDrag;
+        var index = GroupIndexAt(e.GetPosition(ToolGroups));
+        ReleaseGroupGrip();
+        if (Window.GetWindow(this) is MainWindow window)
+            window.ViewModel.Tools.MoveGroup(group, index);
+        e.Handled = true;
+    }
+
+    private void OnGroupGripLost(object sender, MouseEventArgs e) => ReleaseGroupGrip();
+
+    private void ReleaseGroupGrip()
+    {
+        if (_groupGrip != null)
+        {
+            _groupGrip.Opacity = 0.5;
+            if (_groupGrip.IsMouseCaptured)
+                _groupGrip.ReleaseMouseCapture();
+        }
+        _groupDrag = null;
+        _groupGrip = null;
+    }
+
+    /// <summary>
+    /// Куда встанет раздел, если отпустить здесь. Считается по серединам
+    /// заголовков: пока курсор выше середины раздела, вставка идёт ПЕРЕД ним.
+    /// </summary>
+    private int GroupIndexAt(Point position)
+    {
+        for (var i = 0; i < ToolGroups.Items.Count; i++)
+        {
+            if (ToolGroups.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement container)
+                continue;
+            var top = container.TranslatePoint(new Point(0, 0), ToolGroups).Y;
+            if (position.Y < top + container.ActualHeight / 2)
+                return i;
+        }
+        return ToolGroups.Items.Count;
+    }
+
+    // ----- Ведение страницы рукой -----
+
+    private bool _panning;
+    private Point _panStart;
+    private Point _panOffset;
+
+    /// <summary>
+    /// Есть ли куда двигать. Рука над страницей, которая и так помещается
+    /// целиком, обманывает: нажмёшь — ничего не произойдёт.
+    /// </summary>
+    private bool CanPan()
+    {
+        HookScroller();
+        if (_scroller == null || _vm == null) return false;
+        if (_vm.IsOrganizeMode || _vm.IsFormMode || _vm.IsDrawing || _vm.PendingOverlay != null)
+            return false;
+        return _scroller.ExtentHeight > _scroller.ViewportHeight + 1 ||
+               _scroller.ExtentWidth > _scroller.ViewportWidth + 1;
+    }
+
+    private bool BeginPan(MouseButtonEventArgs e)
+    {
+        if (!CanPan() || _scroller == null) return false;
+        _panning = true;
+        _panStart = e.GetPosition(PagesList);
+        _panOffset = new Point(_scroller.HorizontalOffset, _scroller.VerticalOffset);
+        PagesList.Cursor = HandCursors.Grab;
+        PagesList.CaptureMouse();
+        PagesList.Focus();
+        return true;
+    }
+
+    private void EndPan()
+    {
+        if (!_panning) return;
+        _panning = false;
+        if (PagesList.IsMouseCaptured)
+            PagesList.ReleaseMouseCapture();
+        PagesList.Cursor = CanPan() ? HandCursors.Open : Cursors.Arrow;
+    }
 
     private void OnPagesPreviewMouseMove(object sender, MouseEventArgs e)
     {
@@ -402,20 +534,49 @@ public partial class DocumentView : UserControl
             return;
         }
 
-        // Курсор-рука над ссылкой (попадание проверяется по кэшу, без вызовов движка).
-        if (_vm != null && _dragPage == null && FindPageAt(e.OriginalSource) is { } hoverHit)
+        // Ведение страницы рукой.
+        if (_panning)
         {
-            var (hoverPage, hoverElement) = hoverHit;
-            _ = _vm.EnsureLinksAsync(hoverPage);
-            var hoverPos = e.GetPosition(hoverElement);
-            _ = _vm.EnsureTextAreasAsync(hoverPage);
-            var overLink = _vm.LinkAt(hoverPage, hoverPos.X, hoverPos.Y) != null;
-            // Текстовый курсор — ТОЛЬКО над текстом. Раньше он стоял над всей
-            // страницей, и программа выглядела так, будто везде можно печатать.
-            var wanted = overLink ? Cursors.Hand
-                : _vm.PendingOverlay != null ? Cursors.Cross
-                : _vm.HasTextAt(hoverPage, hoverPos.X, hoverPos.Y) ? Cursors.IBeam
-                : Cursors.Arrow;
+            if (e.LeftButton != MouseButtonState.Pressed || !PagesList.IsMouseCaptured)
+            {
+                EndPan();
+                return;
+            }
+            var now = e.GetPosition(PagesList);
+            _scroller!.ScrollToHorizontalOffset(_panOffset.X - (now.X - _panStart.X));
+            _scroller.ScrollToVerticalOffset(_panOffset.Y - (now.Y - _panStart.Y));
+            e.Handled = true;
+            return;
+        }
+
+        // Курсор-рука над ссылкой (попадание проверяется по кэшу, без вызовов движка).
+        if (_vm != null && _dragPage == null)
+        {
+            Cursor wanted;
+            if (FindPageAt(e.OriginalSource) is { } hoverHit)
+            {
+                var (hoverPage, hoverElement) = hoverHit;
+                _ = _vm.EnsureLinksAsync(hoverPage);
+                var hoverPos = e.GetPosition(hoverElement);
+                _ = _vm.EnsureTextAreasAsync(hoverPage);
+                var overLink = _vm.LinkAt(hoverPage, hoverPos.X, hoverPos.Y) != null;
+                // Текстовый курсор — ТОЛЬКО над текстом. Раньше он стоял над всей
+                // страницей, и программа выглядела так, будто везде можно печатать.
+                wanted = overLink ? Cursors.Hand
+                    : _vm.PendingOverlay != null ? Cursors.Cross
+                    : _vm.HasTextAt(hoverPage, hoverPos.X, hoverPos.Y) ? Cursors.IBeam
+                    // Пустое место страницы, которая не влезла в окно: отсюда
+                    // её можно взять рукой и подвинуть.
+                    : CanPan() ? HandCursors.Open
+                    : Cursors.Arrow;
+            }
+            else
+            {
+                // Поле вокруг страницы: там ни текста, ни ссылок — только рука.
+                wanted = _vm.PendingOverlay != null ? Cursors.Cross
+                    : CanPan() ? HandCursors.Open
+                    : Cursors.Arrow;
+            }
             if (PagesList.Cursor != wanted)
                 PagesList.Cursor = wanted;
         }
@@ -433,6 +594,13 @@ public partial class DocumentView : UserControl
 
     private void OnPagesPreviewMouseUp(object sender, MouseButtonEventArgs e)
     {
+        if (_panning)
+        {
+            EndPan();
+            e.Handled = true;
+            return;
+        }
+
         if (_objectPage != null)
         {
             EndObjectDrag(e, commit: true);

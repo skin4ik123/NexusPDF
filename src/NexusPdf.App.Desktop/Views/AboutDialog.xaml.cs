@@ -20,8 +20,16 @@ public partial class AboutDialog : Window
         {
             Loc.Get("AboutEngineRender"),
             Loc.Get("AboutEngineStructure"),
+            // MuPDF в списке обязателен: он занимает 74 МБ поставки, выполняет
+            // всё сжатие и распространяется под AGPL-3.0, а такую лицензию
+            // получатель копии должен видеть, а не искать.
+            Loc.Get("AboutEngineCompress"),
             Loc.F("AboutEngineOcr", ocrEngine),
+            Loc.Get("AboutEngineOffice"),
         });
+        // Копирайт берётся ИЗ СБОРКИ по той же причине, что и версия: строку в
+        // словаре забывают обновить, и окно годами показывает чужой год.
+        LicenseText.Text = Loc.F("AboutLicense", ReadCopyright());
     }
 
     public static void Show(Window? owner, string ocrEngine)
@@ -42,6 +50,18 @@ public partial class AboutDialog : Window
         var plus = informational.IndexOf('+');
         return plus > 0 ? informational[..plus] : informational;
     }
+
+    private static string ReadCopyright() =>
+        Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright ?? "";
+
+    /// <summary>
+    /// Ведёт на раздел поддержки сайта, а не показывает реквизиты в самой
+    /// программе: способы оплаты меняются, а установленная копия обновляется
+    /// редко, и зашитый в неё кошелёк однажды окажется чужим.
+    /// </summary>
+    private void OnSupport(object sender, RoutedEventArgs e) =>
+        Services.ProjectLinks.Open(Services.ProjectLinks.Support);
 
     /// <summary>Список сторонних компонентов и их лицензий лежит рядом с программой.</summary>
     private void OnNotices(object sender, RoutedEventArgs e)

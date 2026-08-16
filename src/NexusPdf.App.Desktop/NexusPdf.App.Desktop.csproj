@@ -8,12 +8,33 @@
     <RootNamespace>NexusPdf.App.Desktop</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
-    <SatelliteResourceLanguages>ru;en</SatelliteResourceLanguages>
+    <!-- Список должен совпадать с языками интерфейса из Loc.Supported: иначе
+         сообщения, приходящие из самого .NET и из пакетов, останутся на
+         английском в украинском интерфейсе. -->
+    <SatelliteResourceLanguages>ru;en;uk</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <!-- Раньше эти свойства жили только в аргументах build.ps1, и обычный
+       `dotnet publish -c Release` тихо давал сборку без среды выполнения и без
+       предварительной компиляции — внешне такую же. Только для Release:
+       в Debug привязка к win-x64 переносит вывод в подпапку и без нужды
+       замедляет обычную пересборку. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="Resources\i18n\*.json" />
     <Resource Include="Assets\app.ico" />
+    <!-- Уведомления о сторонних лицензиях кладутся рядом с программой самим
+         проектом, а не скриптом сборки: кнопка «Лицензии компонентов» в окне
+         «О программе» открывает именно этот файл, и в любой сборке мимо
+         build.ps1 она честно сообщала, что файла нет. Требование AGPL-3.0 от
+         MuPDF делает его обязательным в поставке, а не желательным. -->
+    <Content Include="..\..\docs\THIRD_PARTY_NOTICES.md"
+             Link="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

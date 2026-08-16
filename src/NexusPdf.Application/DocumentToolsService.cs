@@ -14,10 +14,12 @@ public sealed record CompressImagesResult(
 
 /// <summary>
 /// Операции над документом, требующие структурного движка (qpdf):
-/// защита паролем и оптимизация без потерь. Всегда создают новую копию,
-/// исходный файл и текущая сессия не изменяются.
+/// защита паролем и оптимизация без потерь. Копирующие методы (…CopyAsync)
+/// создают новый файл и не трогают ни исходник, ни сессию; конвейер обработки
+/// из <see cref="ProcessInPlaceAsync"/> наоборот меняет открытый документ и
+/// ничего не пишет на диск — он живёт в DocumentPipeline.cs.
 /// </summary>
-public sealed class DocumentToolsService
+public sealed partial class DocumentToolsService
 {
     private readonly IPdfRenderEngine _renderEngine;
     private readonly IPdfStructureEngine _structure;

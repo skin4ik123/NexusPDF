@@ -35,7 +35,8 @@ public static class AppMenuTree
         {
             CommandIds.ToggleOrganize,
             CommandIds.RotateRight, CommandIds.RotateLeft, CommandIds.Rotate180,
-            CommandIds.Duplicate, CommandIds.ExtractPages, CommandIds.DeletePages,
+            CommandIds.Duplicate, CommandIds.SendPagesToDocument,
+            CommandIds.ExtractPages, CommandIds.DeletePages,
             CommandIds.PageProperties,
         }),
         new MenuSection("MenuContent", new[]
@@ -66,7 +67,7 @@ public static class AppMenuTree
             CommandIds.ExportImages, CommandIds.ExportWord, CommandIds.ExportExcel,
             CommandIds.ExtractText,
             CommandIds.CreateFromImages, CommandIds.MergePdfs, CommandIds.CompareDocuments,
-            CommandIds.CompressPages, CommandIds.OptimizeCopy,
+            CommandIds.OptimizeDocument,
             CommandIds.BatchProcess,
         }),
         new MenuSection("MenuDocument", new[]

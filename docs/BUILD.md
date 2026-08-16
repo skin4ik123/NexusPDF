@@ -21,7 +21,9 @@ dotnet test tests/NexusPdf.PdfEngineTests    # интеграционные те
 ./build.ps1                                  # всё сразу + publish в artifacts/
 ```
 
-Запуск из сборки: `src\NexusPdf.App.Desktop\bin\Release\net10.0-windows\NexusPdf.exe [файлы.pdf]`.
+Запуск из сборки: `src\NexusPdf.App.Desktop\bin\Release\net10.0-windows\win-x64\NexusPdf.exe [файлы.pdf]`.
+Подкаталог `win-x64` появляется потому, что в Release проект собирается вместе
+со средой выполнения; в Debug его нет.
 
 ## Publish
 

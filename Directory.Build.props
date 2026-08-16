@@ -5,16 +5,36 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Deterministic>true</Deterministic>
     <Product>NexusPDF</Product>
-    <Company>NexusPDF</Company>
-    <Copyright>В© 2026 NexusPDF</Copyright>
-    <Version>0.19.1</Version>
-    <AssemblyVersion>0.19.1.0</AssemblyVersion>
-    <FileVersion>0.19.1.0</FileVersion>
-    <InformationalVersion>0.19.1-alpha.1</InformationalVersion>
+    <Company>Artur Yurchuk</Company>
+    <Authors>Artur Yurchuk</Authors>
+    <!-- Знак © пишется escape-последовательностью намеренно: в файле он уже
+         однажды оказался закодирован дважды, и в свойствах exe годами стояло
+         «В© 2026 NexusPDF». Так это не повторится ни при какой перекодировке. -->
+    <Copyright>Copyright &#169; 2026 Artur Yurchuk</Copyright>
+    <Version>0.20.1</Version>
+    <AssemblyVersion>0.20.1.0</AssemblyVersion>
+    <FileVersion>0.20.1.0</FileVersion>
+    <InformationalVersion>0.20.1</InformationalVersion>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest</AnalysisLevel>
-    <NeutralLanguage>ru</NeutralLanguage>
+    <NeutralLanguage>en</NeutralLanguage>
+  </PropertyGroup>
+
+  <!--
+    Символы релиза. Отдельные .pdb рядом с программой не нужны никому: сборщик
+    забирал папку целиком, и они уезжали и в MSI, и в переносимый архив, то есть
+    устанавливались в Program Files. Но и выбрасывать их полностью нельзя —
+    приложение показывает пользователю копируемый отчёт об ошибке, а без символов
+    в нём остаются только имена методов без файлов и строк.
+    Поэтому символы встраиваются внутрь самих сборок: отдельных файлов нет,
+    номера строк есть.
+
+    PathMap убирает из этих символов путь машины сборщика. Без него в сборке
+    лежал абсолютный путь разработчика, и он же попадал бы в каждый отчёт об
+    ошибке, отправленный пользователем.
+  -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>embedded</DebugType>
+    <PathMap>$(MSBuildThisFileDirectory)=./</PathMap>
   </PropertyGroup>
 </Project>
-
-

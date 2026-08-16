@@ -135,6 +135,43 @@ public sealed class MovePagesOperation : DocumentOperationBase
     }
 }
 
+/// <summary>
+/// Полная замена страниц ссылками на ОДИН новый источник.
+///
+/// Так документ переключается на обработанный файл — вычищенный, пересжатый,
+/// оптимизированный — не сохраняясь на диск: обработка идёт во временный файл,
+/// он становится источником вкладки, документ помечается изменённым, а куда его
+/// класть, пользователь решает потом обычным сохранением.
+///
+/// Обработанный файл уже содержит и порядок страниц, и повороты, и все правки,
+/// поэтому новые ссылки идут подряд и без наложений. Откат возвращает прежний
+/// список целиком — вместе с правками, которые в обработку и попали.
+/// </summary>
+public sealed class ReplacePagesWithSourceOperation : DocumentOperationBase
+{
+    private readonly Guid _sourceId;
+    private readonly int _pageCount;
+
+    public ReplacePagesWithSourceOperation(Guid sourceId, int pageCount)
+    {
+        if (pageCount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(pageCount), "В обработанном документе нет страниц.");
+        _sourceId = sourceId;
+        _pageCount = pageCount;
+    }
+
+    public override string Name => "Обработка документа";
+
+    protected override void ApplyCore(DocumentModel model)
+    {
+        if (!model.Sources.ContainsKey(_sourceId))
+            throw new InvalidOperationException("Обработанный файл не зарегистрирован источником.");
+        model.Pages.Clear();
+        for (var i = 0; i < _pageCount; i++)
+            model.Pages.Add(new PageRef(_sourceId, i, 0));
+    }
+}
+
 /// <summary>Добавление нового контента (текст/изображение) на одну страницу.</summary>
 public sealed class AddOverlayOperation : DocumentOperationBase
 {

@@ -181,6 +181,15 @@ public static class AppCommands
         };
         yield return new CommandDescriptor
         {
+            Id = CommandIds.SendPagesToDocument, TitleKey = "SendPagesTo", Glyph = "\uE8AB",
+            Category = CommandCategory.Pages, Group = MenuGroup.Special,
+            Danger = CommandDanger.Safe, OpensDialog = true, SupportsMultiSelection = true,
+            Keywords = new[] { "в другой документ", "в другую вкладку", "перенести страницы",
+                               "переместить в документ", "send pages" },
+            Unavailable = NeedsSecondDocument,
+        };
+        yield return new CommandDescriptor
+        {
             Id = CommandIds.ExtractPages, TitleKey = "ExtractPages", Glyph = "\uE898",
             Category = CommandCategory.Pages, Group = MenuGroup.Special,
             Danger = CommandDanger.Safe, OpensDialog = true, SupportsMultiSelection = true,
@@ -384,13 +393,12 @@ public static class AppCommands
         };
 
         // ---------- Преобразование ----------
-        yield return Tool(CommandIds.CompressPages, "CompressMenu", "\uE8B9",
-            new[] { "сжать", "уменьшить размер", "compress", "оптимизировать картинки" });
-        yield return Tool(CommandIds.OptimizeCopy, "OptimizeCopy", "\uEC4A",
-            new[] { "оптимизировать", "линеаризовать", "быстрый просмотр в сети" });
-        yield return Tool(CommandIds.EnhanceScans, "EnhanceScansMenu", "\uE90F",
-            new[] { "скан", "кривой скан", "выровнять наклон", "кривая страница",
-                    "убрать шум", "почистить скан", "выровнять фон", "deskew", "despeckle" });
+        yield return Tool(CommandIds.OptimizeDocument, "OptimizeDocMenu", "\uE9F5",
+            new[] { "оптимизировать", "сжать", "уменьшить размер", "compress", "линеаризовать",
+                    "быстрый просмотр в сети", "оптимизировать картинки",
+                    "скан", "кривой скан", "выровнять наклон", "кривая страница",
+                    "убрать шум", "почистить скан", "выровнять фон", "засвет", "серый фон",
+                    "качество страниц", "deskew", "despeckle", "optimize" });
         yield return Tool(CommandIds.ExportImages, "ExportImagesMenu", "\uE898",
             new[] { "экспорт страниц", "в картинки", "png", "jpeg" });
         yield return Tool(CommandIds.ExportWord, "ExportWordMenu", "\uE729",
@@ -470,12 +478,23 @@ public static class AppCommands
             Danger = CommandDanger.Safe, OpensDialog = true,
             Keywords = new[] { "о программе", "версия", "about", "лицензии" },
         };
+        yield return new CommandDescriptor
+        {
+            Id = CommandIds.Support, TitleKey = "SupportProject", Glyph = "",
+            Category = CommandCategory.Help, Group = MenuGroup.Properties,
+            Danger = CommandDanger.Safe,
+            Keywords = new[] { "поддержать", "донат", "кофе", "support", "donate", "coffee" },
+        };
     }
 
     // ----- Общие правила доступности -----
 
     private static string? NeedsDocument(SelectionContext c) =>
         !c.HasDocument ? "UxNoDocument" : null;
+
+    /// <summary>Отправлять страницы некуда, пока открыт один документ.</summary>
+    private static string? NeedsSecondDocument(SelectionContext c) =>
+        !c.HasDocument ? "UxNoDocument" : c.OpenDocumentCount < 2 ? "UxNeedsSecondDocument" : null;
 
     private static string? NeedsEditableDocument(SelectionContext c) =>
         !c.HasDocument ? "UxNoDocument" : !c.AllowsEditing ? "UxEditForbidden" : null;

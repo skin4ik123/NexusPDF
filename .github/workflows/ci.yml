@@ -31,9 +31,21 @@ jobs:
       - name: PDF engine tests
         run: dotnet test tests/NexusPdf.PdfEngineTests -c Release --no-build --logger "trx"
 
+      - name: Printing tests
+        run: dotnet test tests/NexusPdf.PrintingTests -c Release --no-build --logger "trx"
+
       - name: Full artifact pipeline (publish + MSI + Setup + ZIP)
         shell: pwsh
         run: ./build.ps1 -All -SkipTests
+
+      # Отчёты .trx создавались и раньше, но никуда не выкладывались: разбирать
+      # упавший тест приходилось по сырому выводу шага.
+      - name: Test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/TestResults/*.trx'
 
       - uses: actions/upload-artifact@v4
         with:

@@ -89,7 +89,22 @@ public sealed record InstallResult(int ExitCode, string LogPath);
 
 public static class SetupEngine
 {
-    public const string ProductVersion = "0.15.0";
+    /// <summary>
+    /// Версия берётся ИЗ СБОРКИ, а не из константы: константу забыли обновить, и
+    /// установщик четыре выпуска показывал чужой номер. Сборка же получает
+    /// версию из Directory.Build.props, то есть из единственного места.
+    /// </summary>
+    public static string ProductVersion { get; } = ReadVersion();
+
+    private static string ReadVersion()
+    {
+        var informational = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (string.IsNullOrWhiteSpace(informational))
+            return Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "";
+        var plus = informational.IndexOf('+');
+        return plus > 0 ? informational[..plus] : informational;
+    }
 
     /// <summary>Распаковывает встроенный MSI во временный каталог и возвращает путь.</summary>
     public static string ExtractMsi()
@@ -97,9 +112,12 @@ public static class SetupEngine
         using var stream = Assembly.GetExecutingAssembly()
             .GetManifestResourceStream("NexusPdf.Setup.Payload.NexusPdf.msi");
         if (stream == null)
+            // Текст читает пользователь на экране «Installation did not finish»,
+            // поэтому здесь не может быть команды сборки из репозитория: она
+            // сообщала бы человеку то, чего он всё равно не сделает.
             throw new InvalidOperationException(
-                "Установочный пакет не встроен в эту сборку (dev-версия Setup). " +
-                "Соберите артефакты через ./build.ps1 -Msi.");
+                "This installer file is incomplete: the installation package is missing from it. " +
+                "Download NexusPdfSetup.exe again.");
 
         var dir = Path.Combine(Path.GetTempPath(), "NexusPdfSetup-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
@@ -131,7 +149,7 @@ public static class SetupEngine
         if (options.Silent && options.AllUsers && !IsElevated)
         {
             Console.Error.WriteLine(
-                "NexusPdfSetup: /allusers в тихом режиме требует запуска с правами администратора (код 740).");
+                "NexusPdfSetup: /allusers in silent mode requires administrator rights (code 740).");
             return new InstallResult(740, logPath);
         }
 
@@ -164,7 +182,7 @@ public static class SetupEngine
         try
         {
             using var process = Process.Start(psi)
-                ?? throw new InvalidOperationException("Не удалось запустить msiexec.");
+                ?? throw new InvalidOperationException("Could not start msiexec.");
             await process.WaitForExitAsync();
             return new InstallResult(process.ExitCode, logPath);
         }
@@ -175,7 +193,7 @@ public static class SetupEngine
         }
         catch (System.ComponentModel.Win32Exception ex)
         {
-            Console.Error.WriteLine($"NexusPdfSetup: не удалось запустить msiexec: {ex.Message}");
+            Console.Error.WriteLine($"NexusPdfSetup: could not start msiexec: {ex.Message}");
             return new InstallResult(1603, logPath);
         }
     }

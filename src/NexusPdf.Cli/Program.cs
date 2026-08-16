@@ -26,6 +26,11 @@ public static class Program
             return args.Length == 0 ? 1 : 0;
         }
 
+        // Без этой строки Serilog внутри общих с приложением библиотек молча
+        // писал в пустоту: журнал заводило только оконное приложение. Разбор
+        // сбоя пакетной обработки упирался в отсутствие любых следов.
+        Serilog.Log.Logger = NexusPdf.Infrastructure.LoggingSetup.Create("nexuspdfcli-");
+
         var engine = new PdfiumRenderEngine();
         try
         {
@@ -45,6 +50,9 @@ public static class Program
         finally
         {
             await engine.DisposeAsync();
+            // Серилог пишет с буферизацией: без явного сброса последние записи
+            // перед завершением процесса до файла не доходят.
+            await Serilog.Log.CloseAndFlushAsync();
         }
     }
 

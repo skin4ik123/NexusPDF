@@ -65,6 +65,144 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
         }
     }
 
+    public Task<RenderedPageImage> RenderPageForPrintAsync(
+        int pageIndex, int pixelWidth, int pixelHeight, int extraQuarterTurns,
+        PrintContentOptions options, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            if (!options.IncludeAnnotations)
+            {
+                return _thread.InvokeAsync(
+                    () => RenderCore(pageIndex, pixelWidth, pixelHeight, extraQuarterTurns, contentOnly: true), ct);
+            }
+            if (!options.NeedsFiltering)
+            {
+                return _thread.InvokeAsync(
+                    () => RenderCore(pageIndex, pixelWidth, pixelHeight, extraQuarterTurns, contentOnly: false), ct);
+            }
+            return _thread.InvokeAsync(
+                () => RenderFiltered(pageIndex, pixelWidth, pixelHeight, extraQuarterTurns, options), ct);
+        }
+    }
+
+    // Флаги аннотации PDF (таблица 8.16 спецификации).
+    private const int AnnotFlagHidden = 1 << 1;
+    private const int AnnotFlagPrint = 1 << 2;
+
+    /// <summary>Подтип Widget: аннотация, которой нарисовано поле формы.</summary>
+    private const int AnnotSubtypeWidget = 20;
+
+    /// <summary>
+    /// Рендер с ФИЛЬТРОМ аннотаций: то, что печатать не просили, прячется на
+    /// время отрисовки и сразу возвращается назад.
+    ///
+    /// Через флаг Hidden, а не удалением: удаление меняло бы документ ради
+    /// одной картинки. Флаг ставится и снимается внутри одного вызова на
+    /// выделенном потоке pdfium, поэтому увидеть документ в изменённом виде
+    /// не может ни один другой вызов.
+    /// </summary>
+    private RenderedPageImage RenderFiltered(
+        int pageIndex, int width, int height, int extraQuarterTurns, PrintContentOptions options)
+    {
+        // Страница берётся ТЕМ ЖЕ способом, что и в обычном рендере: окружение
+        // форм обязано знать о загруженной странице, иначе FFLDraw рисует по
+        // чужому состоянию и затирает уже нарисованное.
+        var activePage = _forms?.TryGetActivePage(pageIndex);
+        var page = activePage ?? fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
+        if (page == null || page.__Instance == IntPtr.Zero)
+            throw new PdfEngineException($"Не удалось открыть страницу {pageIndex + 1}.");
+        var transient = activePage == null;
+        if (transient && _forms is { IsActive: true })
+            _forms.OnTransientPageLoaded(page);
+
+        var restore = new List<(int Index, int Flags)>();
+        try
+        {
+            var count = fpdf_annot.FPDFPageGetAnnotCount(page);
+            for (var i = 0; i < count; i++)
+            {
+                var annot = fpdf_annot.FPDFPageGetAnnot(page, i);
+                if (annot == null || annot.__Instance == IntPtr.Zero) continue;
+                try
+                {
+                    var flags = fpdf_annot.FPDFAnnotGetFlags(annot);
+                    if ((flags & AnnotFlagHidden) != 0) continue; // и так не рисуется
+
+                    var isWidget = fpdf_annot.FPDFAnnotGetSubtype(annot) == AnnotSubtypeWidget;
+                    var hide = isWidget
+                        ? !options.IncludeFormFields
+                        : options.OnlyPrintableAnnotations && (flags & AnnotFlagPrint) == 0;
+                    if (!hide) continue;
+
+                    restore.Add((i, flags));
+                    fpdf_annot.FPDFAnnotSetFlags(annot, flags | AnnotFlagHidden);
+                }
+                finally
+                {
+                    fpdf_annot.FPDFPageCloseAnnot(annot);
+                }
+            }
+
+            return RenderLoadedPage(page, width, height, extraQuarterTurns,
+                drawFormFields: options.IncludeFormFields);
+        }
+        finally
+        {
+            foreach (var (index, flags) in restore)
+            {
+                var annot = fpdf_annot.FPDFPageGetAnnot(page, index);
+                if (annot == null || annot.__Instance == IntPtr.Zero) continue;
+                try { fpdf_annot.FPDFAnnotSetFlags(annot, flags); }
+                finally { fpdf_annot.FPDFPageCloseAnnot(annot); }
+            }
+            if (transient)
+            {
+                if (_forms is { IsActive: true })
+                    _forms.OnTransientPageClosing(page);
+                fpdfview.FPDF_ClosePage(page);
+            }
+        }
+    }
+
+    /// <summary>Отрисовка УЖЕ открытой страницы: общая часть обычного и фильтрованного рендера.</summary>
+    private RenderedPageImage RenderLoadedPage(
+        FpdfPageT page, int width, int height, int extraQuarterTurns, bool drawFormFields)
+    {
+        if (width < 1 || height < 1)
+            throw new ArgumentOutOfRangeException(nameof(width), "Размер растра должен быть положительным.");
+
+        var rotate = ((extraQuarterTurns % 4) + 4) % 4;
+        var stride = width * 4;
+        var pixels = new byte[stride * height];
+        var pin = System.Runtime.InteropServices.GCHandle.Alloc(
+            pixels, System.Runtime.InteropServices.GCHandleType.Pinned);
+        try
+        {
+            var bitmap = fpdfview.FPDFBitmapCreateEx(width, height, FpdfBitmapBgra, pin.AddrOfPinnedObject(), stride);
+            if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
+                throw new PdfEngineException("Не удалось создать растровый буфер.");
+            try
+            {
+                var flags = RenderFlagAnnot | RenderFlagLcdText;
+                fpdfview.FPDFBitmapFillRect(bitmap, 0, 0, width, height, 0xFFFFFFFFUL);
+                fpdfview.FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, rotate, flags);
+                if (drawFormFields)
+                    _forms?.DrawFields(bitmap, page, width, height, rotate, flags);
+            }
+            finally
+            {
+                fpdfview.FPDFBitmapDestroy(bitmap);
+            }
+        }
+        finally
+        {
+            pin.Free();
+        }
+        return new RenderedPageImage(width, height, stride, pixels);
+    }
+
     /// <summary>
     /// Рендер страницы; при активном окружении форм поверх содержимого
     /// дорисовываются поля (FFLDraw). Активная интерактивная страница формы

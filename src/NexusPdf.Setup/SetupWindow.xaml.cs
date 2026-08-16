@@ -9,11 +9,11 @@ public partial class SetupWindow : Window
 {
     private static readonly string[] ProgressPhrases =
     {
-        "Распаковка компонентов…",
-        "Копирование файлов…",
-        "Регистрация типов файлов…",
-        "Создание ярлыков…",
-        "Почти готово…",
+        "Unpacking components…",
+        "Copying files…",
+        "Registering file types…",
+        "Creating shortcuts…",
+        "Almost done…",
     };
 
     private readonly SetupOptions _options;
@@ -29,7 +29,7 @@ public partial class SetupWindow : Window
         _options = options;
         InitializeComponent();
         LicenseText.Text = SetupEngine.LoadLicenseText();
-        VersionText.Text = $"версия {SetupEngine.ProductVersion} (альфа)";
+        VersionText.Text = $"version {SetupEngine.ProductVersion}";
         PathBox.Text = SetupOptions.DefaultInstallDir(allUsers: false);
         _pathEditedByUser = false;
 
@@ -40,14 +40,14 @@ public partial class SetupWindow : Window
         {
             PerUserRadio.IsChecked = true;
             PerMachineRadio.IsEnabled = false;
-            ContextNote.Text = "Обнаружена установленная копия «только для меня» — обновление выполнится в том же режиме. Для смены режима сначала удалите текущую копию.";
+            ContextNote.Text = "An existing per-user installation was found — it will be upgraded in the same mode. To change the mode, remove the current copy first.";
             ContextNote.Visibility = Visibility.Visible;
         }
         else if (installed == InstalledContext.PerMachine)
         {
             PerMachineRadio.IsChecked = true;
             PerUserRadio.IsEnabled = false;
-            ContextNote.Text = "Обнаружена установленная копия «для всех пользователей» — обновление выполнится в том же режиме. Для смены режима сначала удалите текущую копию.";
+            ContextNote.Text = "An existing all-users installation was found — it will be upgraded in the same mode. To change the mode, remove the current copy first.";
             ContextNote.Visibility = Visibility.Visible;
         }
 
@@ -87,7 +87,7 @@ public partial class SetupWindow : Window
     {
         var dialog = new Microsoft.Win32.OpenFolderDialog
         {
-            Title = "Папка установки NexusPDF",
+            Title = "NexusPDF install folder",
             InitialDirectory = Path.GetDirectoryName(PathBox.Text) ?? "",
         };
         if (dialog.ShowDialog(this) == true)
@@ -118,12 +118,12 @@ public partial class SetupWindow : Window
             try
             {
                 if (!Path.IsPathRooted(rawPath))
-                    throw new ArgumentException("путь не полный");
+                    throw new ArgumentException("the path is not absolute");
                 fullPath = Path.GetFullPath(rawPath);
             }
             catch
             {
-                PathError.Text = "Укажите полный путь к папке, например C:\\Apps\\NexusPDF.";
+                PathError.Text = "Enter a full path to a folder, for example C:\\Apps\\NexusPDF.";
                 PathError.Visibility = Visibility.Visible;
                 _installing = false;
                 return;
@@ -134,7 +134,7 @@ public partial class SetupWindow : Window
         }
 
         ShowPage(ProgressPage);
-        HeaderText.Text = "Установка…";
+        HeaderText.Text = "Installing…";
         CloseButton.IsEnabled = false;
         _phraseIndex = 0;
         ProgressStatus.Text = ProgressPhrases[0];
@@ -148,9 +148,9 @@ public partial class SetupWindow : Window
 
             if (result.ExitCode is 0 or 3010)
             {
-                HeaderText.Text = "Установка завершена";
+                HeaderText.Text = "Installation complete";
                 if (result.ExitCode == 3010)
-                    DoneText.Text = "NexusPDF установлен. Для завершения может потребоваться перезагрузка.";
+                    DoneText.Text = "NexusPDF is installed. A restart may be needed to finish.";
                 LaunchButton.Visibility = LaunchCheck.IsChecked == true
                     ? Visibility.Visible
                     : Visibility.Collapsed;
@@ -158,13 +158,23 @@ public partial class SetupWindow : Window
             }
             else if (result.ExitCode == 1602)
             {
-                HeaderText.Text = "Установка";
+                HeaderText.Text = "Install";
                 ShowPage(OptionsPage); // пользователь отменил (или отклонил UAC) — вернуться к выбору
             }
             else
             {
-                ShowError($"Код ошибки установщика Windows: {result.ExitCode}." +
-                          (_lastLogPath != null ? $"\nЖурнал: {_lastLogPath}" : ""));
+                // Голый код Windows Installer человеку ничего не говорит, поэтому
+                // самые частые из них названы словами; остальные остаются номером
+                // для отчёта, который тут же можно скопировать кнопкой.
+                var reason = result.ExitCode switch
+                {
+                    1602 => "Installation was cancelled.",
+                    1603 => "Installation failed. Close NexusPDF if it is running and try again.",
+                    1618 => "Another installation is already running. Wait for it to finish.",
+                    1638 => "Another version of NexusPDF is installed. Remove it first.",
+                    _ => $"Installation failed (Windows Installer code {result.ExitCode}).",
+                };
+                ShowError(reason + (_lastLogPath != null ? $"\nLog: {_lastLogPath}" : ""));
             }
         }
         catch (Exception ex)
@@ -182,7 +192,7 @@ public partial class SetupWindow : Window
 
     private void ShowError(string message)
     {
-        HeaderText.Text = "Ошибка";
+        HeaderText.Text = "Error";
         ErrorText.Text = message;
         ShowPage(ErrorPage);
     }
@@ -198,7 +208,7 @@ public partial class SetupWindow : Window
 
     private void OnRetry(object sender, RoutedEventArgs e)
     {
-        HeaderText.Text = "Установка";
+        HeaderText.Text = "Install";
         ShowPage(OptionsPage);
     }
 
@@ -209,7 +219,7 @@ public partial class SetupWindow : Window
             var report = ErrorText.Text;
             if (_lastError != null) report += Environment.NewLine + _lastError;
             if (_lastLogPath != null && File.Exists(_lastLogPath))
-                report += Environment.NewLine + "--- msiexec log (хвост) ---" + Environment.NewLine +
+                report += Environment.NewLine + "--- msiexec log (tail) ---" + Environment.NewLine +
                           string.Join(Environment.NewLine, File.ReadLines(_lastLogPath).TakeLast(80));
             Clipboard.SetText(report);
         }

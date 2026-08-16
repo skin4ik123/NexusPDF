@@ -31,8 +31,11 @@ public sealed class PrintProfileTests : IDisposable
 
         Assert.Equal(BuiltInPrintProfiles.All.Count, all.Count);
         Assert.All(all, p => Assert.True(p.IsBuiltIn));
-        Assert.Contains(all, p => p.Name == "Буклет" && p.Imposition == ImpositionMode.Booklet);
-        Assert.Contains(all, p => p.Name == "4 страницы на лист" && p.NUpColumns == 2 && p.NUpRows == 2);
+        // Name у встроенных — неизменяемый опознаватель, а не надпись: на экран
+        // идёт перевод по NameKey, и он обязан быть заполнен у каждого.
+        Assert.Contains(all, p => p.Name == "Booklet" && p.Imposition == ImpositionMode.Booklet);
+        Assert.Contains(all, p => p.Name == "FourUp" && p.NUpColumns == 2 && p.NUpRows == 2);
+        Assert.All(BuiltInPrintProfiles.All, p => Assert.NotEmpty(p.NameKey));
     }
 
     [Fact]
@@ -101,11 +104,11 @@ public sealed class PrintProfileTests : IDisposable
     public void User_Profile_Overrides_A_Built_In_One_By_Name()
     {
         var store = NewStore();
-        store.Save(PrintProfile.FromSettings("Буклет",
+        store.Save(PrintProfile.FromSettings("Booklet",
             new LayoutSettings { Imposition = ImpositionMode.Single }));
 
         var all = NewStore().LoadAll();
-        var booklet = all.Single(p => p.Name == "Буклет");
+        var booklet = all.Single(p => p.Name == "Booklet");
         Assert.False(booklet.IsBuiltIn);
         Assert.Equal(ImpositionMode.Single, booklet.Imposition);
 
@@ -117,11 +120,11 @@ public sealed class PrintProfileTests : IDisposable
     public void Deleting_An_Override_Restores_The_Built_In_Profile()
     {
         var store = NewStore();
-        store.Save(PrintProfile.FromSettings("Буклет",
+        store.Save(PrintProfile.FromSettings("Booklet",
             new LayoutSettings { Imposition = ImpositionMode.Single }));
-        store.Delete("Буклет");
+        store.Delete("Booklet");
 
-        var booklet = NewStore().LoadAll().Single(p => p.Name == "Буклет");
+        var booklet = NewStore().LoadAll().Single(p => p.Name == "Booklet");
         Assert.True(booklet.IsBuiltIn);
         Assert.Equal(ImpositionMode.Booklet, booklet.Imposition);
     }
