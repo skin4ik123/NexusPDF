@@ -127,11 +127,21 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>Панель инструментов: всё, что умеет программа, видно списком.</summary>
     public Services.Ux.ToolsPanel Tools => _tools ??= new Services.Ux.ToolsPanel(
-        Ux, _services.Settings.ToolsLayout, layout =>
+        Ux, _services.Settings.ToolsLayout,
+        layout =>
         {
             _services.Settings.ToolsLayout = layout;
             _services.SaveSettings();
+        },
+        _services.Settings.RecentCommands,
+        recent =>
+        {
+            _services.Settings.RecentCommands = recent.ToList();
+            _services.SaveSettings();
         });
+
+    /// <summary>Отметить выполненную команду в разделе «Недавние».</summary>
+    public void NoteCommandUsed(string commandId) => Tools.NoteUsed(commandId);
 
     /// <summary>Вернуть расположение инструментов к исходному.</summary>
     [RelayCommand]

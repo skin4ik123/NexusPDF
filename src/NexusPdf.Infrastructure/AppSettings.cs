@@ -30,6 +30,9 @@ public sealed class AppSettings
     /// </summary>
     public List<string> QuickCommands { get; set; } = new();
 
+    /// <summary>Недавно использованные инструменты: верхний раздел панели.</summary>
+    public List<string> RecentCommands { get; set; } = new();
+
     /// <summary>Показывать подписи рядом со значками быстрой панели.</summary>
     public bool QuickPanelLabels { get; set; } = true;
 
