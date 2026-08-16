@@ -26,6 +26,7 @@ public sealed class AppServices : IAsyncDisposable
         Ocr = new OcrService(OcrEngine);
         Convert = new ConvertService(engine);
         Layers = new LayerService(Qpdf);
+        Office = new NexusPdf.Office.OfficeToPdfConverter();
     }
 
     /// <summary>
@@ -64,6 +65,9 @@ public sealed class AppServices : IAsyncDisposable
 
     /// <summary>Наблюдение за отправленными заданиями: ход, пауза, отмена.</summary>
     public NexusPdf.App.Desktop.Services.Printing.PrintQueueService PrintQueue { get; }
+
+    /// <summary>Документы Office → PDF экспортом самого Office (ссылки и оглавление живут).</summary>
+    public NexusPdf.Office.OfficeToPdfConverter Office { get; }
     public SignatureStore Signatures { get; }
     public NexusPdf.Ocr.ITextRecognizer OcrEngine { get; private set; }
     public OcrService Ocr { get; private set; }

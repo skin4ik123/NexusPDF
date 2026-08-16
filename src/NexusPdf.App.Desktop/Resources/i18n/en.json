@@ -10,6 +10,7 @@
   "UndoTooltip": "Undo (Ctrl+Z)",
   "Redo": "Redo",
   "RedoTooltip": "Redo (Ctrl+Y)",
+  "OfficeNotSupported": "This format is not an Office document.",
   "DropFilesStatus": "Inserting files…",
   "DropFilesProgress": "file {0} of {1}",
   "DropFilesDone": "Pages added: {0} (files: {1})",

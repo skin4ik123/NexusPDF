@@ -154,6 +154,68 @@ public sealed class DroppedFilesTests : IAsyncLifetime
         Assert.Equal(3, doc.Session.Model.Pages.Count);
     }
 
+    /// <summary>
+    /// Документ Word, брошенный в организатор, становится страницами — через
+    /// тот же экспорт Office, что и по команде. Без Word проверять нечего.
+    /// </summary>
+    [Fact]
+    public async Task A_Dropped_Word_Document_Becomes_Pages()
+    {
+        if (!NexusPdf.Office.OfficeToPdfConverter.IsInstalled("Word.Application")) return;
+
+        var dir = NewDir();
+        var basePath = await MakePdfAsync(dir, "base.pdf", 1, 30);
+        var docx = Path.Combine(dir, "письмо.docx");
+
+        dynamic app = Activator.CreateInstance(Type.GetTypeFromProgID("Word.Application")!)!;
+        try
+        {
+            app.Visible = false;
+            app.DisplayAlerts = 0;
+            dynamic word = app.Documents.Add();
+            word.Content.Text = "Текст письма для проверки переноса.";
+            word.SaveAs2(docx);
+            word.Close(0);
+        }
+        finally
+        {
+            try { app.Quit(); } catch (Exception) { }
+        }
+
+        var converter = new NexusPdf.Office.OfficeToPdfConverter();
+        await using var doc = await OpenedDocument.OpenAsync(_pdfium, basePath, null, CancellationToken.None);
+        var result = await doc.InsertFilesAsync(
+            _pdfium, new[] { docx }, 1, FakeDecode, dir, null, CancellationToken.None,
+            async (source, temp, ct) =>
+            {
+                var target = Path.Combine(temp, Guid.NewGuid().ToString("N") + ".pdf");
+                var converted = await converter.ConvertAsync(source, target, ct);
+                return converted.TargetPath;
+            });
+
+        Assert.Equal(1, result.FilesUsed);
+        Assert.True(result.PagesAdded >= 1);
+        Assert.Empty(result.Skipped);
+        Assert.Equal(1 + result.PagesAdded, doc.Session.Model.Pages.Count);
+    }
+
+    /// <summary>Без конвертера документ Office не молчит, а честно пропускается.</summary>
+    [Fact]
+    public async Task Without_A_Converter_An_Office_File_Is_Skipped_With_A_Reason()
+    {
+        var dir = NewDir();
+        var basePath = await MakePdfAsync(dir, "base.pdf", 1, 30);
+        var docx = Path.Combine(dir, "отчёт.docx");
+        await File.WriteAllTextAsync(docx, "не настоящий docx");
+
+        await using var doc = await OpenedDocument.OpenAsync(_pdfium, basePath, null, CancellationToken.None);
+        var result = await doc.InsertFilesAsync(
+            _pdfium, new[] { docx }, 1, FakeDecode, dir, null, CancellationToken.None);
+
+        Assert.Equal(0, result.PagesAdded);
+        Assert.Single(result.Skipped);
+    }
+
     [Fact]
     public async Task Everything_Dropped_Undoes_In_One_Step()
     {

@@ -10,6 +10,7 @@
   "UndoTooltip": "Отменить (Ctrl+Z)",
   "Redo": "Повторить",
   "RedoTooltip": "Повторить (Ctrl+Y)",
+  "OfficeNotSupported": "Этот формат не относится к документам Office.",
   "DropFilesStatus": "Вставка файлов…",
   "DropFilesProgress": "файл {0} из {1}",
   "DropFilesDone": "Добавлено страниц: {0} (файлов: {1})",
