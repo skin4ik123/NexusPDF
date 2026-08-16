@@ -43,6 +43,8 @@
 
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
         <Button Content="{l:Loc SupportProject}" Style="{StaticResource LinkButton}" Click="OnSupport"/>
+        <Button Content="{l:Loc AboutSource}" Style="{StaticResource LinkButton}" Click="OnSource"
+                Margin="14,0,0,0"/>
         <Button Content="{l:Loc AboutNotices}" Style="{StaticResource LinkButton}" Click="OnNotices"
                 Margin="14,0,0,0"/>
         <Button Content="{l:Loc OK}" Style="{StaticResource PrimaryButton}" MinWidth="100"

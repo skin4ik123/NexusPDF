@@ -63,6 +63,13 @@ public partial class AboutDialog : Window
     private void OnSupport(object sender, RoutedEventArgs e) =>
         Services.ProjectLinks.Open(Services.ProjectLinks.Support);
 
+    /// <summary>
+    /// Ссылка на исходный код — не украшение: AGPL-3.0 обязывает дать
+    /// получателю программы доступ к тому коду, из которого она собрана.
+    /// </summary>
+    private void OnSource(object sender, RoutedEventArgs e) =>
+        Services.ProjectLinks.Open(Services.ProjectLinks.Source);
+
     /// <summary>Список сторонних компонентов и их лицензий лежит рядом с программой.</summary>
     private void OnNotices(object sender, RoutedEventArgs e)
     {
