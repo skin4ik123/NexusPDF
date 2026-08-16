@@ -131,6 +131,71 @@ public sealed class ConvertService
     }
 
     /// <summary>
+    /// Документ → документ Word: абзацы абзацами, таблицы таблицами, ссылки
+    /// ссылками, аннотации примечаниями.
+    ///
+    /// Страницы обрабатываются и записываются по одной: растр страницы-скана
+    /// занимает десятки мегабайт, и собирать весь документ в памяти нельзя.
+    /// </summary>
+    public async Task<WordExportSummary> ExportToWordAsync(
+        OpenedDocument document,
+        string targetPath,
+        IReadOnlyList<int>? logicalIndices,
+        WordExportOptions options,
+        PageAnalysisOptions analysis,
+        IProgress<(int Done, int Total)>? progress,
+        CancellationToken ct)
+    {
+        var targets = logicalIndices ??
+                      Enumerable.Range(0, document.Session.Model.Pages.Count).ToList();
+        if (targets.Count == 0)
+            throw new InvalidOperationException("Нет страниц для экспорта.");
+
+        using var writer = new DocxExporter(targetPath, options);
+        for (var i = 0; i < targets.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var logical = targets[i];
+            var (handle, pageIndex) = await document.ResolveTextPageAsync(logical, ct).ConfigureAwait(false);
+            var descriptor = handle.Info.Pages[pageIndex];
+
+            var layout = PageAnalyzer.Analyze(
+                logical,
+                descriptor.WidthPoints,
+                descriptor.HeightPoints,
+                await handle.GetTextWordsAsync(pageIndex, ct).ConfigureAwait(false),
+                await handle.GetRulingLinesAsync(pageIndex, ct).ConfigureAwait(false),
+                analysis.IncludeFormValues
+                    ? await handle.GetFormFieldValuesAsync(pageIndex, ct).ConfigureAwait(false)
+                    : Array.Empty<PdfFormFieldValue>(),
+                analysis);
+
+            var links = options.KeepLinks
+                ? await handle.GetPageLinksAsync(pageIndex, ct).ConfigureAwait(false)
+                : Array.Empty<PdfPageLink>();
+            var notes = options.KeepComments
+                ? await handle.GetAnnotationsAsync(pageIndex, ct).ConfigureAwait(false)
+                : Array.Empty<PdfAnnotationInfo>();
+            var images = options.KeepImages
+                ? await handle.GetPageImagesAsync(pageIndex, MaxImagePixelsPerPage, ct).ConfigureAwait(false)
+                : Array.Empty<PdfPageImage>();
+
+            writer.AddPage(layout, links, notes, images, targets.Count);
+            progress?.Report((i + 1, targets.Count));
+        }
+
+        writer.Finish();
+        return writer.Summary;
+    }
+
+    /// <summary>
+    /// Предел площади картинок одной страницы. 40 мегапикселей — это скан A4
+    /// при 600 dpi; больше на странице не бывает ничего осмысленного, а память
+    /// такой растр съедает по 160 МБ.
+    /// </summary>
+    private const long MaxImagePixelsPerPage = 40_000_000;
+
+    /// <summary>
     /// Объединяет PDF-файлы в один (страницы в порядке перечисления файлов).
     /// Защищённые паролем исходники дают честную ошибку с именем файла.
     /// </summary>

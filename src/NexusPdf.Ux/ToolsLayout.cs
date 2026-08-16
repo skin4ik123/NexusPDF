@@ -43,7 +43,8 @@ public static class ToolsLayout
         new ToolsGroupLayout("MenuRecognize", new[] { CommandIds.Ocr }),
         new ToolsGroupLayout("MenuConvert", new[]
         {
-            CommandIds.ExportImages, CommandIds.ExportExcel, CommandIds.ExtractText,
+            CommandIds.ExportImages, CommandIds.ExportWord, CommandIds.ExportExcel,
+            CommandIds.ExtractText,
             CommandIds.CreateFromImages,
             CommandIds.MergePdfs, CommandIds.CompareDocuments,
             CommandIds.CompressPages, CommandIds.OptimizeCopy, CommandIds.EnhanceScans,

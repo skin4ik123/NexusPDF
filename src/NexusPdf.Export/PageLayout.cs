@@ -77,13 +77,20 @@ public sealed record ExtractedTable(
 }
 
 /// <summary>Разобранная страница: таблицы и строки текста вне таблиц.</summary>
+/// <param name="AllWords">
+/// Все слова страницы, включая попавшие в таблицы. Нужны экспорту в Word:
+/// текст ячейки хранится строкой, а начертание — только у слов.
+/// </param>
 public sealed record PageLayout(
     int PageIndex,
     double WidthPt,
     double HeightPt,
     IReadOnlyList<ExtractedTable> Tables,
-    IReadOnlyList<TextLine> Lines)
+    IReadOnlyList<TextLine> Lines,
+    IReadOnlyList<PdfTextWord>? AllWords = null)
 {
+    public IReadOnlyList<PdfTextWord> Words => AllWords ?? Array.Empty<PdfTextWord>();
+
     /// <summary>Есть ли на странице хоть что-нибудь текстовое.</summary>
     public bool IsEmpty => Tables.Count == 0 && Lines.Count == 0;
 }

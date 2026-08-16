@@ -103,4 +103,51 @@ public sealed class PdfToExcelTests : IAsyncLifetime
         // Значение поля формы доехало до книги.
         Assert.Contains(cells, c => c.InlineString?.Text?.Text == "Acme Ltd");
     }
+
+    [Fact]
+    public async Task A_Real_Pdf_Becomes_A_Word_Document()
+    {
+        var path = PdfFixture.WriteTableToTemp("договор.pdf");
+        var target = Path.Combine(Path.GetDirectoryName(path)!, "договор.docx");
+
+        await using (var doc = await _engine.OpenAsync(path, null, CancellationToken.None))
+        {
+            var layout = PageAnalyzer.Analyze(
+                0, doc.Info.Pages[0].WidthPoints, doc.Info.Pages[0].HeightPoints,
+                await doc.GetTextWordsAsync(0, CancellationToken.None),
+                await doc.GetRulingLinesAsync(0, CancellationToken.None),
+                await doc.GetFormFieldValuesAsync(0, CancellationToken.None));
+
+            using var writer = new DocxExporter(target);
+            writer.AddPage(
+                layout,
+                await doc.GetPageLinksAsync(0, CancellationToken.None),
+                await doc.GetAnnotationsAsync(0, CancellationToken.None),
+                await doc.GetPageImagesAsync(0, 40_000_000, CancellationToken.None),
+                1);
+            writer.Finish();
+
+            Assert.Equal(1, writer.Tables);
+            Assert.Equal(1, writer.Links);
+        }
+
+        using var document = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(target, false);
+        var main = document.MainDocumentPart!;
+        var body = main.Document.Body!;
+
+        // Таблица из PDF стала таблицей Word с тремя колонками.
+        var table = body.Descendants<DocumentFormat.OpenXml.Wordprocessing.Table>().Single();
+        Assert.Equal(3, table.Elements<DocumentFormat.OpenXml.Wordprocessing.TableRow>().Count());
+        Assert.Contains("Bolt", table.InnerText);
+        Assert.Contains("25,50", table.InnerText);
+
+        // Ссылка живая, а текст вне таблицы не потерялся.
+        var hyperlink = body.Descendants<DocumentFormat.OpenXml.Wordprocessing.Hyperlink>().Single();
+        Assert.Equal("https://example.org/bolt",
+            main.HyperlinkRelationships.Single(r => r.Id == hyperlink.Id!.Value).Uri.ToString());
+        Assert.Contains("Total order", body.InnerText);
+
+        // Значение поля формы доехало до документа.
+        Assert.Contains("Acme Ltd", body.InnerText);
+    }
 }

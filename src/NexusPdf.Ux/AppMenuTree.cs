@@ -63,7 +63,8 @@ public static class AppMenuTree
         }),
         new MenuSection("MenuConvert", new[]
         {
-            CommandIds.ExportImages, CommandIds.ExportExcel, CommandIds.ExtractText,
+            CommandIds.ExportImages, CommandIds.ExportWord, CommandIds.ExportExcel,
+            CommandIds.ExtractText,
             CommandIds.CreateFromImages, CommandIds.MergePdfs, CommandIds.CompareDocuments,
             CommandIds.CompressPages, CommandIds.OptimizeCopy,
             CommandIds.BatchProcess,

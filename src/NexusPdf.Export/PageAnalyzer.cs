@@ -54,7 +54,8 @@ public static class PageAnalyzer
         return new PageLayout(
             pageIndex, widthPt, heightPt,
             tables.OrderByDescending(t => t.Bounds.Top).ToList(),
-            lines);
+            lines,
+            all);
     }
 
     /// <summary>

@@ -110,6 +110,76 @@ internal sealed partial class PdfiumDocumentHandle
         }
     }
 
+    /// <summary>
+    /// Картинки страницы с их местом. Крошечные отбрасываются: линейки,
+    /// маркеры и однопиксельные распорки в Word не нужны, а замусорить
+    /// документ ими проще простого.
+    /// </summary>
+    /// <param name="maxPixels">
+    /// Предел суммарной площади: страница-скан в 300 dpi — это 34 МБ в
+    /// памяти, и без предела десяток таких страниц кладёт процесс.
+    /// </param>
+    public Task<IReadOnlyList<PdfPageImage>> GetPageImagesAsync(
+        int pageIndex, long maxPixels, CancellationToken ct)
+    {
+        const double minSidePt = 6.0;
+        const int minPixelSide = 8;
+
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync<IReadOnlyList<PdfPageImage>>(() =>
+            {
+                var page = fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
+                if (page == null || page.__Instance == IntPtr.Zero)
+                    return Array.Empty<PdfPageImage>();
+                try
+                {
+                    var images = new List<PdfPageImage>();
+                    long pixels = 0;
+                    var count = fpdf_edit.FPDFPageCountObjects(page);
+                    for (var i = 0; i < count; i++)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var obj = fpdf_edit.FPDFPageGetObject(page, i);
+                        if (obj == null || obj.__Instance == IntPtr.Zero) continue;
+                        if (fpdf_edit.FPDFPageObjGetType(obj) != PageObjectImage) continue;
+
+                        float left = 0, bottom = 0, right = 0, top = 0;
+                        if (fpdf_edit.FPDFPageObjGetBounds(obj, ref left, ref bottom, ref right, ref top) == 0)
+                            continue;
+                        var width = Math.Abs(right - left);
+                        var height = Math.Abs(top - bottom);
+                        if (width < minSidePt || height < minSidePt) continue;
+
+                        var bitmap = fpdf_edit.FPDFImageObjGetBitmap(obj);
+                        if (bitmap == null || bitmap.__Instance == IntPtr.Zero) continue;
+                        try
+                        {
+                            var bgra = BitmapToBgra(bitmap, out var bw, out var bh);
+                            if (bgra == null || bw < minPixelSide || bh < minPixelSide) continue;
+                            if (pixels + (long)bw * bh > maxPixels) break;
+                            pixels += (long)bw * bh;
+
+                            images.Add(new PdfPageImage(bgra, bw, bh, new PdfTextRect(
+                                Math.Min(left, right), Math.Max(top, bottom),
+                                Math.Max(left, right), Math.Min(top, bottom))));
+                        }
+                        finally
+                        {
+                            fpdfview.FPDFBitmapDestroy(bitmap);
+                        }
+                    }
+                    return images;
+                }
+                finally
+                {
+                    fpdfview.FPDF_ClosePage(page);
+                }
+            }, ct);
+        }
+    }
+
     // ----- слова -----
 
     private IReadOnlyList<PdfTextWord> CollectWords(int pageIndex, CancellationToken ct)
@@ -159,6 +229,7 @@ internal sealed partial class PdfiumDocumentHandle
         double sizeSum = 0;
         int weightSum = 0, styled = 0;
         uint color = 0xFF000000;
+        var font = string.Empty;
         double previousLeft = 0, previousRight = 0, previousTop = 0, previousBottom = 0;
         double previousSize = 0;
         var previousVertical = false;
@@ -177,7 +248,8 @@ internal sealed partial class PdfiumDocumentHandle
                     styled > 0 ? sizeSum / styled : 0,
                     styled > 0 ? (int)Math.Round((double)weightSum / styled) : 400,
                     color,
-                    quarters));
+                    quarters,
+                    font));
             }
             pending.Clear();
             open = false;
@@ -259,7 +331,10 @@ internal sealed partial class PdfiumDocumentHandle
                 styled++;
             }
             if (pending.Length == 1)
+            {
                 color = ReadFillColor(textPage, i);
+                font = ReadFontName(textPage, i);
+            }
 
             previousLeft = cl;
             previousRight = cr;
@@ -294,6 +369,57 @@ internal sealed partial class PdfiumDocumentHandle
         // приходит не идеально круглым.
         if (exact > Math.PI / 12.0) return 0;
         return (4 - quarter) & 3;
+    }
+
+    /// <summary>
+    /// Имя шрифта символа в человеческом виде.
+    ///
+    /// В PDF оно приходит как «ABCDEF+TimesNewRoman,Bold»: шесть букв впереди —
+    /// метка вшитого подмножества, хвост после запятой — начертание, которое в
+    /// Word задаётся отдельно. И то и другое здесь снимается, иначе Word будет
+    /// искать несуществующий шрифт и подставит свой.
+    /// </summary>
+    private static string ReadFontName(FpdfTextpageT textPage, int index)
+    {
+        const int capacity = 128;
+        var buffer = System.Runtime.InteropServices.Marshal.AllocHGlobal(capacity);
+        try
+        {
+            var flags = 0;
+            var written = fpdf_text.FPDFTextGetFontInfo(textPage, index, buffer, capacity, ref flags);
+            if (written <= 1 || written > capacity) return string.Empty;
+
+            var bytes = new byte[written - 1]; // без завершающего нуля
+            System.Runtime.InteropServices.Marshal.Copy(buffer, bytes, 0, bytes.Length);
+            var name = System.Text.Encoding.UTF8.GetString(bytes);
+
+            var plus = name.IndexOf('+');
+            if (plus == 6) name = name[(plus + 1)..];
+            var comma = name.IndexOf(',');
+            if (comma > 0) name = name[..comma];
+            var dash = name.IndexOf('-');
+            if (dash > 0) name = name[..dash];
+
+            return SpaceOutCamelCase(name.Trim());
+        }
+        finally
+        {
+            System.Runtime.InteropServices.Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    /// <summary>«TimesNewRoman» → «Times New Roman»: именно так шрифт зовут в Word.</summary>
+    private static string SpaceOutCamelCase(string name)
+    {
+        if (name.Length == 0 || name.Contains(' ')) return name;
+        var result = new System.Text.StringBuilder(name.Length + 4);
+        for (var i = 0; i < name.Length; i++)
+        {
+            if (i > 0 && char.IsUpper(name[i]) && !char.IsUpper(name[i - 1]))
+                result.Append(' ');
+            result.Append(name[i]);
+        }
+        return result.ToString();
     }
 
     private static uint ReadFillColor(FpdfTextpageT textPage, int index)

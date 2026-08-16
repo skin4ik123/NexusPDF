@@ -393,6 +393,9 @@ public static class AppCommands
                     "убрать шум", "почистить скан", "выровнять фон", "deskew", "despeckle" });
         yield return Tool(CommandIds.ExportImages, "ExportImagesMenu", "\uE898",
             new[] { "экспорт страниц", "в картинки", "png", "jpeg" });
+        yield return Tool(CommandIds.ExportWord, "ExportWordMenu", "\uE729",
+            new[] { "в word", "docx", "ворд", "word", "в текстовый редактор",
+                    "редактируемый документ", "конвертировать в word" });
         yield return Tool(CommandIds.ExportExcel, "ExportExcelMenu", "\uE8EF",
             new[] { "в excel", "таблицы", "xlsx", "эксель", "excel", "таблица в эксель",
                     "распознать таблицы", "выгрузить таблицы" });
