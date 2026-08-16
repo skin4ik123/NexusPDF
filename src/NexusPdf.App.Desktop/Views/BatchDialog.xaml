@@ -65,6 +65,11 @@
         <ComboBoxItem Content="{l:Loc BatchOpOptimize}"/>
         <ComboBoxItem Content="{l:Loc BatchOpProtect}"/>
         <ComboBoxItem Content="{l:Loc BatchOpExport}"/>
+        <ComboBoxItem Content="{l:Loc BatchOpCompress}"/>
+        <ComboBoxItem Content="{l:Loc BatchOpEnhance}"/>
+        <ComboBoxItem Content="{l:Loc BatchOpOcr}"/>
+        <ComboBoxItem Content="{l:Loc BatchOpWord}"/>
+        <ComboBoxItem Content="{l:Loc BatchOpExcel}"/>
       </ComboBox>
 
       <TextBlock Grid.Row="1" Grid.Column="0" x:Name="PasswordLabel" Text="{l:Loc BatchPassword}"

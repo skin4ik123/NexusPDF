@@ -24,7 +24,7 @@ public sealed class AppServices : IAsyncDisposable
         Signatures = new SignatureStore();
         OcrEngine = CreateRecognizer(settings);
         Ocr = new OcrService(OcrEngine);
-        Convert = new ConvertService(engine);
+        Convert = new ConvertService(engine, Ocr);
         Layers = new LayerService(Qpdf);
         Office = new NexusPdf.Office.OfficeToPdfConverter();
     }

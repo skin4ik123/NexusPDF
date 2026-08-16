@@ -57,6 +57,39 @@ public sealed class OcrService
     /// скана НАСТОЯЩИМ видимым текстом, который можно править; начертание
     /// оригинала при этом теряется.
     /// </param>
+    /// <summary>
+    /// Распознаёт страницу и отдаёт слова, НИЧЕГО не меняя в документе.
+    ///
+    /// Нужно экспорту: чтобы выгрузить скан в Word или Excel, распознанный
+    /// текст требуется здесь и сейчас, а вот право дописать в чужой документ
+    /// невидимый слой экспорт не имеет — это отдельное решение пользователя.
+    ///
+    /// Рамки — в отображаемых пунктах текущей рамки страницы, от левого
+    /// ВЕРХНЕГО угла.
+    /// </summary>
+    public async Task<IReadOnlyList<OcrWordBox>> RecognizePageWordsAsync(
+        OpenedDocument document, int logicalIndex, CancellationToken ct)
+    {
+        var size = document.GetLogicalPageSize(logicalIndex);
+        var scale = Math.Min(TargetDpi / 72.0,
+            MaxRenderSide / Math.Max(size.WidthPoints, size.HeightPoints));
+        var pixelWidth = Math.Max(1, (int)Math.Round(size.WidthPoints * scale));
+        var pixelHeight = Math.Max(1, (int)Math.Round(size.HeightPoints * scale));
+        var dpi = (int)Math.Round(scale * 72.0);
+
+        var image = await document.RenderLogicalPageContentOnlyAsync(
+            logicalIndex, pixelWidth, pixelHeight, ct).ConfigureAwait(false);
+        var result = await _ocr.RecognizeAsync(image, dpi, ct).ConfigureAwait(false);
+
+        var ptPerPxX = size.WidthPoints / pixelWidth;
+        var ptPerPxY = size.HeightPoints / pixelHeight;
+        return result.Words
+            .Where(w => w.Confidence >= MinWordConfidence)
+            .Select(w => new OcrWordBox(
+                w.Text, w.X * ptPerPxX, w.Y * ptPerPxY, w.Width * ptPerPxX, w.Height * ptPerPxY))
+            .ToList();
+    }
+
     public async Task<OcrRunResult> RecognizeAsync(
         OpenedDocument document,
         IReadOnlyList<int>? logicalIndices,
