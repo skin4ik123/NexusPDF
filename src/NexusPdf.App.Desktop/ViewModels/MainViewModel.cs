@@ -212,7 +212,8 @@ public sealed partial class MainViewModel : ObservableObject
         {
             var result = await doc.Document.InsertFilesAsync(
                 _services.Engine, files, insertIndex, ImageEncoder.DecodeAsPageSpec,
-                NexusPdf.Infrastructure.AppPaths.DroppedFilesFolder, progress, ct);
+                NexusPdf.Infrastructure.AppPaths.DroppedFilesFolder, progress, ct,
+                ConvertOfficeToPdfAsync);
 
             doc.StatusText = result.PagesAdded > 0
                 ? Loc.F("DropFilesDone", result.PagesAdded, result.FilesUsed)
@@ -243,6 +244,27 @@ public sealed partial class MainViewModel : ObservableObject
             doc.Busy.Finish();
             doc.IsBusy = false;
         }
+    }
+
+    /// <summary>
+    /// Документ Office → временный PDF рядом с прочими перетащенными файлами.
+    /// Экспортом самого Office: ссылки, оглавление по заголовкам и теги
+    /// структуры остаются живыми, чего печать в PDF-принтер не умеет.
+    /// </summary>
+    private async Task<string> ConvertOfficeToPdfAsync(string source, string tempFolder, CancellationToken ct)
+    {
+        if (!NexusPdf.Office.OfficeToPdfConverter.IsOfficeFile(source))
+            throw new NotSupportedException(Loc.Get("OfficeNotSupported"));
+        if (!NexusPdf.Office.OfficeToPdfConverter.CanConvert(source))
+            throw new InvalidOperationException(
+                NexusPdf.Office.OfficeToPdfConverter.UnavailableReason(source));
+
+        Directory.CreateDirectory(tempFolder);
+        var target = Path.Combine(tempFolder,
+            $"{Path.GetFileNameWithoutExtension(source)}-{Guid.NewGuid():N}.pdf");
+        var result = await _services.Office.ConvertAsync(source, target, ct);
+        Log.Information("Office → PDF: {Source} через {App}", Path.GetFileName(source), result.Application);
+        return result.TargetPath;
     }
 
     /// <summary>Отметить выполненную команду в разделе «Недавние».</summary>

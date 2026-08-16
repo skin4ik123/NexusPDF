@@ -26,6 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\NexusPdf.Office\NexusPdf.Office.csproj" />
     <ProjectReference Include="..\NexusPdf.Pdf.MuPdf\NexusPdf.Pdf.MuPdf.csproj" />
     <ProjectReference Include="..\NexusPdf.Application\NexusPdf.Application.csproj" />
     <ProjectReference Include="..\NexusPdf.Printing\NexusPdf.Printing.csproj" />

@@ -196,7 +196,8 @@ public sealed class OpenedDocument : IAsyncDisposable
     public async Task<InsertFilesResult> InsertFilesAsync(
         IPdfRenderEngine engine, IReadOnlyList<string> paths, int insertIndex,
         Func<string, ImagePageSpec> decodeImage, string tempFolder,
-        IProgress<(int Done, int Total)>? progress, CancellationToken ct)
+        IProgress<(int Done, int Total)>? progress, CancellationToken ct,
+        Func<string, string, CancellationToken, Task<string>>? convertOffice = null)
     {
         var skipped = new List<(string File, string Reason)>();
         // Порядок сохраняется ТОТ, в котором файлы дали: картинки собираются в
@@ -240,15 +241,32 @@ public sealed class OpenedDocument : IAsyncDisposable
                     continue;
                 }
 
+                var pdfPath = path;
                 if (!string.Equals(extension, ".pdf", StringComparison.OrdinalIgnoreCase))
                 {
-                    skipped.Add((path, "не PDF и не изображение"));
-                    continue;
+                    // Документ Office превращается в PDF тем же способом, что и
+                    // по команде «Создать PDF из Office»: экспортом, а не
+                    // печатью, — со ссылками и оглавлением.
+                    if (convertOffice == null)
+                    {
+                        skipped.Add((path, "не PDF и не изображение"));
+                        continue;
+                    }
+                    try
+                    {
+                        pdfPath = await convertOffice(path, tempFolder, ct).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        skipped.Add((path, ex.Message));
+                        continue;
+                    }
                 }
 
                 try
                 {
-                    var (sourceId, handle) = await EnsureSourceAsync(engine, path, null, ct).ConfigureAwait(false);
+                    var (sourceId, handle) = await EnsureSourceAsync(engine, pdfPath, null, ct)
+                        .ConfigureAwait(false);
                     if (handle != null) opened.Add(handle);
                     for (var i = 0; i < Handles[sourceId].Info.PageCount; i++)
                         collected.Add(new PageRef(sourceId, i, 0));
