@@ -146,6 +146,13 @@ public sealed class ContextMenuComposer
     /// страниц вправо» вместо «Повернуть страницу». Без этого пользователь не
     /// понимает, сколько всего он сейчас изменит.
     /// </summary>
+    /// <summary>
+    /// Состав меню по видам выделения — только для чтения. Нужен проверкам:
+    /// в одном меню не должно быть двух пунктов с одинаковой картинкой.
+    /// </summary>
+    public static IReadOnlyDictionary<SelectionKind, IReadOnlyList<string>> MenuIds { get; } =
+        Menus.ToDictionary(p => p.Key, p => (IReadOnlyList<string>)p.Value);
+
     public static string Title(
         CommandDescriptor command, SelectionContext context,
         Func<string, string> resolve, Func<string, object[], string> format)
