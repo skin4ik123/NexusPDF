@@ -1,4 +1,5 @@
 using System.Text;
+using NexusPdf.Export;
 using NexusPdf.Infrastructure;
 using NexusPdf.Pdf.Abstractions;
 
@@ -75,6 +76,58 @@ public sealed class ConvertService
             builder.AppendLine();
         }
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// Документ → книга Excel: таблицы таблицами, числа числами, ссылки
+    /// ссылками.
+    ///
+    /// Разбор идёт по странице С ПРАВКАМИ — по той же, что видит пользователь:
+    /// экспорт сразу после распознавания или правки не должен молча отдавать
+    /// исходный лист.
+    /// </summary>
+    public async Task<ExcelExportSummary> ExportToExcelAsync(
+        OpenedDocument document,
+        string targetPath,
+        IReadOnlyList<int>? logicalIndices,
+        ExcelExportOptions options,
+        PageAnalysisOptions analysis,
+        IProgress<(int Done, int Total)>? progress,
+        CancellationToken ct)
+    {
+        var targets = logicalIndices ??
+                      Enumerable.Range(0, document.Session.Model.Pages.Count).ToList();
+        if (targets.Count == 0)
+            throw new InvalidOperationException("Нет страниц для экспорта.");
+
+        var pages = new List<ExportPage>(targets.Count);
+        for (var i = 0; i < targets.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var logical = targets[i];
+            var (handle, pageIndex) = await document.ResolveTextPageAsync(logical, ct).ConfigureAwait(false);
+            var descriptor = handle.Info.Pages[pageIndex];
+
+            var layout = PageAnalyzer.Analyze(
+                logical,
+                descriptor.WidthPoints,
+                descriptor.HeightPoints,
+                await handle.GetTextWordsAsync(pageIndex, ct).ConfigureAwait(false),
+                await handle.GetRulingLinesAsync(pageIndex, ct).ConfigureAwait(false),
+                analysis.IncludeFormValues
+                    ? await handle.GetFormFieldValuesAsync(pageIndex, ct).ConfigureAwait(false)
+                    : Array.Empty<PdfFormFieldValue>(),
+                analysis);
+
+            var links = options.KeepLinks
+                ? await handle.GetPageLinksAsync(pageIndex, ct).ConfigureAwait(false)
+                : Array.Empty<PdfPageLink>();
+
+            pages.Add(new ExportPage(layout, links));
+            progress?.Report((i + 1, targets.Count));
+        }
+
+        return XlsxExporter.Write(targetPath, pages, options);
     }
 
     /// <summary>

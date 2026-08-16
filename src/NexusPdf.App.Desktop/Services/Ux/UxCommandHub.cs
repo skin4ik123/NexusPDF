@@ -297,6 +297,7 @@ public sealed class UxCommandHub
         [CommandIds.EnhanceScans] = _ => _main.EnhanceScansCommand.Execute(null),
         [CommandIds.OptimizeCopy] = _ => _main.OptimizeCopyCommand.Execute(null),
         [CommandIds.ExportImages] = _ => _main.ExportImagesCommand.Execute(null),
+        [CommandIds.ExportExcel] = _ => _main.ExportExcelCommand.Execute(null),
         [CommandIds.ExtractText] = _ => _main.ExtractTextCommand.Execute(null),
         [CommandIds.CreateFromImages] = _ => _main.CreateFromImagesCommand.Execute(null),
         [CommandIds.MergePdfs] = _ => _main.MergePdfsCommand.Execute(null),

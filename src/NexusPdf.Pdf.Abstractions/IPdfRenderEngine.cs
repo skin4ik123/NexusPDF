@@ -119,6 +119,24 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     Task<IReadOnlyList<PdfTextRect>> GetTextRectsAsync(int pageIndex, int startCharIndex, int charCount, CancellationToken ct);
 
     /// <summary>
+    /// Слова страницы с рамками и начертанием — для экспорта в Word и Excel.
+    /// Собираются из символов: в PDF слов как таковых нет.
+    /// </summary>
+    Task<IReadOnlyList<PdfTextWord>> GetTextWordsAsync(int pageIndex, CancellationToken ct);
+
+    /// <summary>
+    /// Горизонтальные и вертикальные линии страницы — нарисованные границы
+    /// таблиц. По ним таблица восстанавливается точно, без догадок по пробелам.
+    /// </summary>
+    Task<IReadOnlyList<PdfRulingLine>> GetRulingLinesAsync(int pageIndex, CancellationToken ct);
+
+    /// <summary>
+    /// Заполненные поля формы с их рамками. В текст страницы значения полей не
+    /// входят, поэтому без этого экспорт анкеты вышел бы пустым бланком.
+    /// </summary>
+    Task<IReadOnlyList<PdfFormFieldValue>> GetFormFieldValuesAsync(int pageIndex, CancellationToken ct);
+
+    /// <summary>
     /// Индекс символа в точке (отображаемые пункты от левого верхнего угла)
     /// или -1, если в точке текста нет. Нужен для выделения текста мышью.
     /// </summary>

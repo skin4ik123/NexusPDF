@@ -9,6 +9,7 @@ using NexusPdf.App.Desktop.Localization;
 using NexusPdf.App.Desktop.Services;
 using NexusPdf.App.Desktop.Views;
 using NexusPdf.Application;
+using NexusPdf.Export;
 using NexusPdf.Pdf.Abstractions;
 using Serilog;
 
@@ -1808,6 +1809,65 @@ public sealed partial class MainViewModel : ObservableObject
         {
             Log.Error(ex, "Ошибка экспорта изображений");
             ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"), Loc.Get("ExportImagesTitle"), ex.ToString());
+            doc.StatusText = Loc.Get("Ready");
+        }
+        finally
+        {
+            doc.Busy.Finish();
+            doc.IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Таблицы документа → книга Excel.
+    ///
+    /// Итог показывается разбором: сколько таблиц взято по нарисованным
+    /// границам, а сколько восстановлено по расположению текста. Второе —
+    /// догадка, и пользователь должен об этом знать, а не выяснять потом.
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportExcel()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        var dialog = new SaveFileDialog
+        {
+            Filter = Loc.Get("XlsxFilter"),
+            FileName = Path.GetFileNameWithoutExtension(doc.Title) + ".xlsx",
+            DefaultExt = ".xlsx",
+        };
+        if (dialog.ShowDialog(OwnerWindow) != true) return;
+
+        doc.IsBusy = true;
+        try
+        {
+            var token = doc.Busy.Start(Loc.Get("ExportExcelTitle"), canCancel: true, determinate: true);
+            var summary = await _services.Convert.ExportToExcelAsync(
+                doc.Document, dialog.FileName, null,
+                // Запятая как десятичный разделитель — по языку интерфейса:
+                // однозначно определить «1,234» из самой строки невозможно.
+                new ExcelExportOptions(DecimalIsComma: Loc.CurrentLanguage != "en"),
+                new PageAnalysisOptions(),
+                new Progress<(int Done, int Total)>(p =>
+                {
+                    doc.Busy.Report(p.Total > 0 ? (double)p.Done / p.Total : 0,
+                        Loc.F("ExportExcelProgress", p.Done, p.Total));
+                }),
+                token);
+
+            doc.StatusText = Loc.F("ExportExcelDone", summary.Sheets, summary.Tables,
+                summary.RulingTables, summary.GuessedTables, summary.Links);
+            if (summary.GuessedTables > 0)
+                doc.StatusText += " — " + Loc.F("ExportExcelGuessHint", summary.GuessedTables);
+            Log.Information("Экспорт в Excel: {File}, таблиц {Tables}", dialog.FileName, summary.Tables);
+        }
+        catch (OperationCanceledException)
+        {
+            doc.StatusText = Loc.Get("BusyCancelled");
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка экспорта в Excel");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"), Loc.Get("ExportExcelTitle"), ex.ToString());
             doc.StatusText = Loc.Get("Ready");
         }
         finally

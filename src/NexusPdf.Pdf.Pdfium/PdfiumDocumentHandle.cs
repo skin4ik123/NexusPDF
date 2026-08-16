@@ -4,7 +4,7 @@ using PDFiumCore;
 
 namespace NexusPdf.Pdf.Pdfium;
 
-internal sealed class PdfiumDocumentHandle : IPdfDocumentHandle
+internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
 {
     private readonly PdfiumThread _thread;
     // У документа, собранного в ПАМЯТИ (страница с применёнными правками),

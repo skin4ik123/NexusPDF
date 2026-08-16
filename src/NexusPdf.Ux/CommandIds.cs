@@ -116,6 +116,9 @@ public static class CommandIds
 
     // Преобразование и пакетная обработка
     public const string ExportImages = "convert.exportImages";
+
+    /// <summary>Таблицы документа в книгу Excel: числа числами, ссылки ссылками.</summary>
+    public const string ExportExcel = "convert.exportExcel";
     public const string ExtractText = "convert.extractText";
     public const string CreateFromImages = "convert.fromImages";
     public const string MergePdfs = "convert.merge";
