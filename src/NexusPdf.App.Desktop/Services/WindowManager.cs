@@ -8,9 +8,16 @@ public static class WindowManager
 {
     private static readonly List<MainWindow> Windows = new();
 
-    public static MainWindow OpenWindow(AppServices services, DocumentViewModel? initialDocument)
+    /// <param name="pendingFiles">
+    /// Сколько файлов будет открыто сразу после показа окна (аргументы
+    /// командной строки, двойной щелчок в проводнике). Окно узнаёт об этом ДО
+    /// первой отрисовки: иначе оно успевает показать стартовый экран
+    /// «откройте файл» ровно тогда, когда файл уже открывается.
+    /// </param>
+    public static MainWindow OpenWindow(
+        AppServices services, DocumentViewModel? initialDocument, int pendingFiles = 0)
     {
-        var vm = new MainViewModel(services);
+        var vm = new MainViewModel(services) { PendingOpens = pendingFiles };
         var window = new MainWindow(vm);
         Windows.Add(window);
         window.Closed += (_, _) => Windows.Remove(window);

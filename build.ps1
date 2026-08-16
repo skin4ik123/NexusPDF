@@ -66,14 +66,20 @@ if (-not $SkipTests) {
     if ($LASTEXITCODE -ne 0) { exit 1 }
 }
 
+# Предкомпиляция в машинный код (ReadyToRun). Без неё первый запуск после
+# установки или перезагрузки уходит на JIT: замерено 4,8 с против 2,6 с на том
+# же файле. Плата — около 34 МБ к размеру, и она того стоит: холодный запуск
+# пользователь видит каждый рабочий день, а лишние мегабайты — один раз.
 Write-Host "== Publish app win-x64 =="
 $publishDir = Join-Path $root "artifacts/publish/win-x64"
-dotnet publish src/NexusPdf.App.Desktop -c $Configuration -r win-x64 --self-contained true -o $publishDir
+dotnet publish src/NexusPdf.App.Desktop -c $Configuration -r win-x64 --self-contained true `
+    -p:PublishReadyToRun=true -o $publishDir
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 # CLI publishes into the SAME folder: shares the self-contained runtime files
 Write-Host "== Publish CLI win-x64 =="
-dotnet publish src/NexusPdf.Cli -c $Configuration -r win-x64 --self-contained true -o $publishDir
+dotnet publish src/NexusPdf.Cli -c $Configuration -r win-x64 --self-contained true `
+    -p:PublishReadyToRun=true -o $publishDir
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 # Bundle qpdf + tessdata + notices + license with the app

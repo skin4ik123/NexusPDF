@@ -18,6 +18,12 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
+        // Отсчёт ведётся от СТАРТА ПРОЦЕССА, а не от этой строки: пользователь
+        // ждёт с двойного щелчка в проводнике, и время загрузки среды —
+        // такая же часть ожидания, как и наша работа.
+        var startedAt = System.Diagnostics.Process.GetCurrentProcess().StartTime;
+        double Elapsed() => (DateTime.Now - startedAt).TotalMilliseconds;
+
         AppPaths.EnsureCreated();
         var store = new JsonSettingsStore(AppPaths.SettingsFile);
         var settings = store.Load();
@@ -37,6 +43,7 @@ public partial class App : System.Windows.Application
         Log.Logger = LoggingSetup.Create();
         Log.Information("NexusPDF запускается. Версия {Version}",
             typeof(App).Assembly.GetName().Version?.ToString(3) ?? "?");
+        Log.Debug("Запуск: среда и настройки готовы за {Elapsed:N0} мс", Elapsed());
 
         Loc.Load(settings.Language);
         // Каждое окно красит свой системный заголовок под тему сразу, как
@@ -55,6 +62,7 @@ public partial class App : System.Windows.Application
         CrashSentinel.MarkSessionStarted();
 
         _services = new AppServices(new PdfiumRenderEngine(), settings, store);
+        Log.Debug("Запуск: службы созданы за {Elapsed:N0} мс", Elapsed());
 
         DispatcherUnhandledException += (_, args) =>
         {
@@ -85,8 +93,12 @@ public partial class App : System.Windows.Application
 
         BindingErrorTracing.Attach();
 
-        var window = WindowManager.OpenWindow(_services, null);
+        // Окно создаётся, уже ЗНАЯ, что файл открывается: иначе оно успевает
+        // показать стартовый экран «перетащите файл», и пользователь на долю
+        // секунды видит приглашение открыть то, что и так открывается.
+        var window = WindowManager.OpenWindow(_services, null, pendingFiles: files.Count);
         window.ViewModel.ShowCrashRestoreBanner = crashed && settings.LastSessionFiles.Count > 0;
+        Log.Debug("Запуск: окно показано за {Elapsed:N0} мс", Elapsed());
 
         _singleInstance.StartServer(received =>
         {
@@ -102,7 +114,11 @@ public partial class App : System.Windows.Application
         });
 
         if (files.Count > 0)
-            _ = window.ViewModel.OpenFilesAsync(files);
+        {
+            _ = window.ViewModel.OpenFilesAsync(files)
+                .ContinueWith(_ => Log.Debug("Запуск: документ открыт за {Elapsed:N0} мс", Elapsed()),
+                    TaskScheduler.Default);
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)

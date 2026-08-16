@@ -294,9 +294,21 @@
       </StackPanel>
     </Border>
 
+    <!-- Пока документ открывается, вместо приглашения открыть файл видно, что
+         файл уже открывается. -->
+    <Grid Grid.Row="2" Grid.ColumnSpan="2"
+          Visibility="{Binding IsOpeningFiles, Converter={StaticResource BoolToVis}}">
+      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+        <TextBlock Text="NexusPDF" FontSize="30" FontWeight="SemiBold" Opacity="0.55"
+                   Foreground="{DynamicResource TextBrush}" HorizontalAlignment="Center"/>
+        <TextBlock Text="{l:Loc OpeningDocument}" FontSize="13" Margin="0,10,0,0"
+                   Foreground="{DynamicResource TextSecondary}" HorizontalAlignment="Center"/>
+      </StackPanel>
+    </Grid>
+
     <!-- Стартовый экран -->
     <Grid Grid.Row="2" Grid.ColumnSpan="2"
-          Visibility="{Binding HasDocuments, Converter={StaticResource InvBoolToVis}}">
+          Visibility="{Binding ShowStartScreen, Converter={StaticResource BoolToVis}}">
       <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="520">
         <TextBlock Text="NexusPDF" FontSize="34" FontWeight="SemiBold"
                    Foreground="{DynamicResource TextBrush}" HorizontalAlignment="Center"/>
