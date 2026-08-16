@@ -192,6 +192,59 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Вставка файлов, брошенных из Проводника, в режим систематизации.
+    /// PDF отдают свои страницы, картинки становятся страницами; всё
+    /// добавляется на ту позицию, где отпустили мышь, одной операцией — одно
+    /// «Отменить» возвращает как было.
+    /// </summary>
+    public async Task InsertDroppedFilesAsync(
+        DocumentViewModel doc, IReadOnlyList<string> files, int insertIndex)
+    {
+        if (doc.IsBusy || files.Count == 0) return;
+
+        doc.IsBusy = true;
+        var ct = doc.Busy.Start(Loc.Get("DropFilesStatus"), canCancel: true, determinate: true);
+        var progress = new Progress<(int Done, int Total)>(p =>
+            doc.Busy.Report(p.Total > 0 ? (double)p.Done / p.Total : 0,
+                Loc.F("DropFilesProgress", p.Done, p.Total)));
+        try
+        {
+            var result = await doc.Document.InsertFilesAsync(
+                _services.Engine, files, insertIndex, ImageEncoder.DecodeAsPageSpec,
+                NexusPdf.Infrastructure.AppPaths.DroppedFilesFolder, progress, ct);
+
+            doc.StatusText = result.PagesAdded > 0
+                ? Loc.F("DropFilesDone", result.PagesAdded, result.FilesUsed)
+                : Loc.Get("DropFilesNothing");
+            if (result.Skipped.Count > 0)
+            {
+                // Пропущенное не прячем: молчание здесь читается как «всё
+                // получилось», а половина файлов осталась за бортом.
+                var details = string.Join("\n", result.Skipped.Select(x =>
+                    $"{Path.GetFileName(x.File)} — {x.Reason}"));
+                ErrorDialog.Show(OwnerWindow, Loc.Get("DropFilesSkippedTitle"),
+                    Loc.F("DropFilesSkipped", result.Skipped.Count), details);
+            }
+            Log.Information("Вставка файлов: страниц {Pages}, файлов {Files}, пропущено {Skipped}",
+                result.PagesAdded, result.FilesUsed, result.Skipped.Count);
+        }
+        catch (OperationCanceledException)
+        {
+            doc.StatusText = Loc.Get("BusyCancelled");
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка вставки перетащенных файлов");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"), Loc.Get("DropFilesFailed"), ex.ToString());
+        }
+        finally
+        {
+            doc.Busy.Finish();
+            doc.IsBusy = false;
+        }
+    }
+
     /// <summary>Отметить выполненную команду в разделе «Недавние».</summary>
     public void NoteCommandUsed(string commandId) => Tools.NoteUsed(commandId);
 

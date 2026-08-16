@@ -165,6 +165,164 @@ public sealed class OpenedDocument : IAsyncDisposable
                 p.OverlayList, p.RemovedAnnotationList))
             .ToList();
 
+    /// <summary>Что получилось при вставке файлов: сколько добавлено и что пропущено.</summary>
+    /// <param name="PagesAdded">Сколько страниц добавлено.</param>
+    /// <param name="FilesUsed">Сколько файлов пригодилось.</param>
+    /// <param name="Skipped">Файлы, которые взять не удалось, с причиной.</param>
+    public sealed record InsertFilesResult(
+        int PagesAdded, int FilesUsed, IReadOnlyList<(string File, string Reason)> Skipped);
+
+    /// <summary>Расширения, которые вставляются как страница-картинка.</summary>
+    private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp",
+    };
+
+    /// <summary>
+    /// Вставка ФАЙЛОВ (перетащенных из Проводника) на заданную позицию.
+    ///
+    /// PDF отдаёт свои страницы целиком; картинки собираются в один временный
+    /// PDF и становятся страницами. Временный файл живёт до закрытия документа:
+    /// страницы ссылаются на него ровно так же, как на любой другой источник,
+    /// и при сохранении запекаются в итоговый файл.
+    ///
+    /// Всё добавляется ОДНОЙ операцией: одно нажатие «Отменить» возвращает
+    /// документ к тому, что было до перетаскивания, сколько бы файлов ни
+    /// бросили.
+    ///
+    /// Непригодное не роняет всю вставку: защищённый паролем или битый файл
+    /// пропускается с причиной, остальные вставляются.
+    /// </summary>
+    public async Task<InsertFilesResult> InsertFilesAsync(
+        IPdfRenderEngine engine, IReadOnlyList<string> paths, int insertIndex,
+        Func<string, ImagePageSpec> decodeImage, string tempFolder,
+        IProgress<(int Done, int Total)>? progress, CancellationToken ct)
+    {
+        var skipped = new List<(string File, string Reason)>();
+        // Порядок сохраняется ТОТ, в котором файлы дали: картинки собираются в
+        // общий временный PDF, но их места в списке заняты заранее — иначе
+        // картинка, брошенная первой, оказалась бы последней.
+        var collected = new List<PageRef?>();
+        var imageSlots = new List<int>();
+        var opened = new List<IPdfDocumentHandle>();
+        var images = new List<ImagePageSpec>();
+        var filesUsed = 0;
+        var done = 0;
+
+        try
+        {
+            foreach (var path in paths)
+            {
+                ct.ThrowIfCancellationRequested();
+                progress?.Report((done, paths.Count));
+                done++;
+
+                if (!File.Exists(path))
+                {
+                    skipped.Add((path, "файл не найден"));
+                    continue;
+                }
+
+                var extension = Path.GetExtension(path);
+                if (ImageExtensions.Contains(extension))
+                {
+                    try
+                    {
+                        images.Add(decodeImage(path));
+                        imageSlots.Add(collected.Count);
+                        collected.Add(null); // место под будущую страницу-картинку
+                        filesUsed++;
+                    }
+                    catch (Exception ex)
+                    {
+                        skipped.Add((path, ex.Message));
+                    }
+                    continue;
+                }
+
+                if (!string.Equals(extension, ".pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    skipped.Add((path, "не PDF и не изображение"));
+                    continue;
+                }
+
+                try
+                {
+                    var (sourceId, handle) = await EnsureSourceAsync(engine, path, null, ct).ConfigureAwait(false);
+                    if (handle != null) opened.Add(handle);
+                    for (var i = 0; i < Handles[sourceId].Info.PageCount; i++)
+                        collected.Add(new PageRef(sourceId, i, 0));
+                    filesUsed++;
+                }
+                catch (PdfPasswordRequiredException)
+                {
+                    // Пароль здесь не спросить — перетаскивание не место для
+                    // диалогов; файл честно пропускается с причиной.
+                    skipped.Add((path, "защищён паролем"));
+                }
+                catch (Exception ex)
+                {
+                    skipped.Add((path, ex.Message));
+                }
+            }
+
+            if (images.Count > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                Directory.CreateDirectory(tempFolder);
+                var temporary = Path.Combine(tempFolder, $"images-{Guid.NewGuid():N}.pdf");
+                await engine.CreateImageDocumentAsync(images, temporary, ct).ConfigureAwait(false);
+                var (sourceId, handle) = await EnsureSourceAsync(engine, temporary, null, ct).ConfigureAwait(false);
+                if (handle != null) opened.Add(handle);
+                for (var i = 0; i < imageSlots.Count && i < Handles[sourceId].Info.PageCount; i++)
+                    collected[imageSlots[i]] = new PageRef(sourceId, i, 0);
+            }
+
+            var pages = collected.Where(p => p != null).Select(p => p!).ToList();
+            if (pages.Count > 0)
+            {
+                var index = Math.Clamp(insertIndex, 0, Session.Model.Pages.Count);
+                Session.Apply(new InsertPagesOperation(index, pages));
+            }
+            progress?.Report((paths.Count, paths.Count));
+            return new InsertFilesResult(pages.Count, filesUsed, skipped);
+        }
+        catch
+        {
+            foreach (var handle in opened)
+            {
+                var id = Handles.FirstOrDefault(pair => ReferenceEquals(pair.Value, handle)).Key;
+                if (id != Guid.Empty)
+                {
+                    Handles.Remove(id);
+                    Session.Model.Sources.Remove(id);
+                }
+                await handle.DisposeAsync().ConfigureAwait(false);
+            }
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Источник по пути файла: уже известный переиспользуется, новый
+    /// открывается. Второй элемент — дескриптор, ЕСЛИ он открыт сейчас (его
+    /// придётся закрыть при откате).
+    /// </summary>
+    private async Task<(Guid SourceId, IPdfDocumentHandle? Opened)> EnsureSourceAsync(
+        IPdfRenderEngine engine, string path, string? password, CancellationToken ct)
+    {
+        var known = Session.Model.Sources
+            .FirstOrDefault(p => string.Equals(p.Value, path, StringComparison.OrdinalIgnoreCase));
+        if (known.Value != null)
+            return (known.Key, null);
+
+        var handle = await engine.OpenAsync(path, password, ct).ConfigureAwait(false);
+        var id = Guid.NewGuid();
+        Handles[id] = handle;
+        Session.Model.Sources[id] = path;
+        return (id, handle);
+    }
+
     /// <summary>
     /// Вставка страниц ДРУГОГО открытого документа.
     ///
@@ -200,19 +358,9 @@ public sealed class OpenedDocument : IAsyncDisposable
                 if (!source.Session.Model.Sources.TryGetValue(sourceId, out var path))
                     throw new PdfEngineException("У переносимой страницы неизвестен файл-источник.");
 
-                var existing = Session.Model.Sources
-                    .FirstOrDefault(p => string.Equals(p.Value, path, StringComparison.OrdinalIgnoreCase));
-                if (existing.Value != null)
-                {
-                    remap[sourceId] = existing.Key;
-                    continue;
-                }
-
-                var handle = await engine.OpenAsync(path, source.Password, ct).ConfigureAwait(false);
-                opened.Add(handle);
-                var newId = Guid.NewGuid();
-                Handles[newId] = handle;
-                Session.Model.Sources[newId] = path;
+                var (newId, handle) = await EnsureSourceAsync(engine, path, source.Password, ct)
+                    .ConfigureAwait(false);
+                if (handle != null) opened.Add(handle);
                 remap[sourceId] = newId;
             }
 
