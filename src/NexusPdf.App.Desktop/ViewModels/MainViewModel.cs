@@ -472,6 +472,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         finally
         {
+            doc.Busy.Finish();
             doc.IsBusy = false;
         }
     }
@@ -505,6 +506,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         finally
         {
+            doc.Busy.Finish();
             doc.IsBusy = false;
         }
     }
@@ -723,6 +725,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         finally
         {
+            doc.Busy.Finish();
             doc.IsBusy = false;
         }
     }
@@ -823,16 +826,24 @@ public sealed partial class MainViewModel : ObservableObject
 
         doc.IsBusy = true;
         doc.StatusText = Loc.Get("EnhanceStatus");
+        var pages = Math.Max(1, doc.PageCount);
+        var ct = doc.Busy.Start(Loc.Get("EnhanceStatus"), canCancel: true, determinate: true);
+        var progress = new Progress<int>(done =>
+            doc.Busy.Report((double)done / pages, Loc.F("BusyPageOf", done, pages)));
         try
         {
             var stats = await _services.Tools.EnhanceScansCopyAsync(
-                doc.Document, dialog.FileName, options, null, CancellationToken.None);
+                doc.Document, dialog.FileName, options, progress, ct);
             doc.StatusText = stats.PagesStraightened > 0 || stats.SpecklesRemoved > 0
                 ? Loc.F("EnhanceDone", stats.PagesProcessed, stats.PagesStraightened,
                     stats.MaxAngleDegrees.ToString("0.0"), stats.ImagesCleaned, stats.SpecklesRemoved)
                 : Loc.F("EnhanceNothingFound", stats.PagesProcessed);
             Log.Information("Улучшение сканов: страниц {Pages}, выровнено {Fixed}, пятен {Speckles}",
                 stats.PagesProcessed, stats.PagesStraightened, stats.SpecklesRemoved);
+        }
+        catch (OperationCanceledException)
+        {
+            doc.StatusText = Loc.Get("BusyCancelled");
         }
         catch (Exception ex)
         {
@@ -843,6 +854,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         finally
         {
+            doc.Busy.Finish();
             doc.IsBusy = false;
         }
     }
@@ -869,11 +881,12 @@ public sealed partial class MainViewModel : ObservableObject
 
         doc.IsBusy = true;
         doc.StatusText = Loc.Get("CompressingStatus");
+        var ct = doc.Busy.Start(Loc.Get("CompressingStatus"));
         try
         {
             var result = await _services.Tools.CompressImagesCopyAsync(
                 doc.Document, dialog.FileName, request.Dpi, request.Quality,
-                ImageEncoder.EncodeChosen, CancellationToken.None,
+                ImageEncoder.EncodeChosen, ct,
                 request.StructureOnly, request.SubsetFonts);
             var saved = result.BytesBefore - result.BytesAfter;
             doc.StatusText = saved > 0 && !result.KeptOriginal
@@ -885,6 +898,10 @@ public sealed partial class MainViewModel : ObservableObject
             Log.Information("Пересжатие: {Before} → {After} байт, изображений {N}",
                 result.BytesBefore, result.BytesAfter, result.Recompressed);
         }
+        catch (OperationCanceledException)
+        {
+            doc.StatusText = Loc.Get("BusyCancelled");
+        }
         catch (Exception ex)
         {
             Log.Error(ex, "Ошибка пересжатия изображений");
@@ -894,6 +911,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         finally
         {
+            doc.Busy.Finish();
             doc.IsBusy = false;
         }
     }
@@ -1059,6 +1077,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         finally
         {
+            doc.Busy.Finish();
             doc.IsBusy = false;
         }
     }
@@ -1626,6 +1645,7 @@ public sealed partial class MainViewModel : ObservableObject
             var n = 2;
             while (Directory.EnumerateFiles(folder.FolderName, $"{prefix}-*.{extension}").Any())
                 prefix = $"{baseName} ({n++})";
+            var token = doc.Busy.Start(Loc.Get("ExportImagesTitle"), canCancel: true, determinate: true);
             var count = await _services.Convert.ExportImagesAsync(
                 doc.Document, targets, request.Dpi,
                 async (image, pageIndex, effectiveDpi, ct) =>
@@ -1634,10 +1654,18 @@ public sealed partial class MainViewModel : ObservableObject
                     await File.WriteAllBytesAsync(path, ImageEncoder.Encode(image, request.Jpeg, effectiveDpi), ct);
                 },
                 new Progress<(int Done, int Total)>(p =>
-                    doc.StatusText = Loc.F("ExportImagesProgress", p.Done, p.Total)),
-                CancellationToken.None);
+                {
+                    doc.Busy.Report(p.Total > 0 ? (double)p.Done / p.Total : 0,
+                        Loc.F("BusyPageOf", p.Done, p.Total));
+                    doc.StatusText = Loc.F("ExportImagesProgress", p.Done, p.Total);
+                }),
+                token);
             doc.StatusText = Loc.F("ExportImagesDone", count, folder.FolderName);
             Log.Information("Экспортировано {Count} страниц в {Folder}", count, folder.FolderName);
+        }
+        catch (OperationCanceledException)
+        {
+            doc.StatusText = Loc.Get("BusyCancelled");
         }
         catch (Exception ex)
         {
@@ -1647,6 +1675,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         finally
         {
+            doc.Busy.Finish();
             doc.IsBusy = false;
         }
     }
@@ -1665,9 +1694,14 @@ public sealed partial class MainViewModel : ObservableObject
         doc.IsBusy = true;
         try
         {
-            var text = await _services.Convert.ExtractTextAsync(doc.Document, CancellationToken.None);
+            var text = await _services.Convert.ExtractTextAsync(
+                doc.Document, doc.Busy.Start(Loc.Get("ExtractTextMenu")));
             await File.WriteAllTextAsync(dialog.FileName, text, System.Text.Encoding.UTF8);
             doc.StatusText = Loc.F("ExtractTextDone", Path.GetFileName(dialog.FileName));
+        }
+        catch (OperationCanceledException)
+        {
+            doc.StatusText = Loc.Get("BusyCancelled");
         }
         catch (Exception ex)
         {
@@ -1678,6 +1712,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         finally
         {
+            doc.Busy.Finish();
             doc.IsBusy = false;
         }
     }
@@ -1837,6 +1872,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         finally
         {
+            doc.Busy.Finish();
             doc.IsBusy = false;
         }
     }
@@ -1874,6 +1910,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         finally
         {
+            doc.Busy.Finish();
             doc.IsBusy = false;
         }
     }

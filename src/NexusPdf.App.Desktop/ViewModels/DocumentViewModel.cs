@@ -156,6 +156,12 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     [ObservableProperty]
     private bool _isBusy;
 
+    /// <summary>
+    /// Ход текущей длинной операции. Живёт рядом с документом, потому что
+    /// занят именно документ: в другой вкладке работа продолжается.
+    /// </summary>
+    public BusyOperation Busy { get; } = new();
+
     // ----- Поиск -----
 
     [ObservableProperty]

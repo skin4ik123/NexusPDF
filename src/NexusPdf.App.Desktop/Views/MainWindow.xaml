@@ -16,6 +16,7 @@
     <BooleanToVisibilityConverter x:Key="BoolToVis"/>
     <app:InverseBoolToVisibilityConverter x:Key="InvBoolToVis"/>
     <app:AllTrueToVisibilityConverter x:Key="AllTrue"/>
+    <app:InverseBoolConverter x:Key="InvBool"/>
   </Window.Resources>
 
   <Window.InputBindings>
@@ -462,7 +463,39 @@
         <TextBlock Grid.Column="1" Text="{Binding ActiveDocument.StatusText, FallbackValue=''}"
                    Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"
                    Margin="16,0,8,0" TextTrimming="CharacterEllipsis"
-                   ToolTip="{Binding ActiveDocument.StatusText, FallbackValue=''}"/>
+                   ToolTip="{Binding ActiveDocument.StatusText, FallbackValue=''}"
+                   Visibility="{Binding ActiveDocument.Busy.IsRunning, FallbackValue=Visible,
+                                Converter={StaticResource InvBoolToVis}}"/>
+
+        <!-- Пока идёт долгая работа, та же строка показывает ХОД: доля, время
+             и кнопка «Прервать». Минута тишины и «Готово» в конце — не отчёт. -->
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
+                    Margin="16,0,8,0"
+                    Visibility="{Binding ActiveDocument.Busy.IsRunning, FallbackValue=Collapsed,
+                                 Converter={StaticResource BoolToVis}}">
+          <TextBlock Text="{Binding ActiveDocument.Busy.Title}" VerticalAlignment="Center"
+                     Foreground="{DynamicResource TextBrush}" TextTrimming="CharacterEllipsis"
+                     MaxWidth="260"/>
+          <ProgressBar Width="150" Height="6" Margin="10,0,0,0" VerticalAlignment="Center"
+                       Minimum="0" Maximum="1"
+                       Value="{Binding ActiveDocument.Busy.Progress, Mode=OneWay}"
+                       IsIndeterminate="{Binding ActiveDocument.Busy.IsIndeterminate}"
+                       Foreground="{DynamicResource Accent}"
+                       Background="{DynamicResource CardBg}" BorderThickness="0"/>
+          <TextBlock Text="{Binding ActiveDocument.Busy.PercentText}" VerticalAlignment="Center"
+                     Margin="8,0,0,0" Foreground="{DynamicResource TextSecondary}" MinWidth="34"/>
+          <TextBlock Text="{Binding ActiveDocument.Busy.Detail}" VerticalAlignment="Center"
+                     Margin="4,0,0,0" Foreground="{DynamicResource TextSecondary}"
+                     TextTrimming="CharacterEllipsis" MaxWidth="200"/>
+          <TextBlock Text="{Binding ActiveDocument.Busy.ElapsedText}" VerticalAlignment="Center"
+                     Margin="8,0,0,0" Foreground="{DynamicResource TextSecondary}"/>
+          <Button Content="{l:Loc BusyCancel}" Style="{StaticResource LinkButton}" Margin="10,0,0,0"
+                  Command="{Binding ActiveDocument.Busy.CancelCommand}"
+                  IsEnabled="{Binding ActiveDocument.Busy.IsCancelling,
+                              Converter={StaticResource InvBool}}"
+                  Visibility="{Binding ActiveDocument.Busy.CanCancel,
+                               Converter={StaticResource BoolToVis}}"/>
+        </StackPanel>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
           <Button Style="{StaticResource ToolButton}" Command="{Binding ZoomOutActiveCommand}"
