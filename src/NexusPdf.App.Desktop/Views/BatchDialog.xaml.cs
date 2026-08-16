@@ -120,36 +120,50 @@ public partial class BatchDialog : Window
         try
         {
             Directory.CreateDirectory(outputDir);
-            foreach (var row in _rows.ToList())
-            {
-                // Отмена — строго между файлами: обрыв qpdf посреди записи
-                // оставил бы обрубок вместо результата.
-                if (_cts.Token.IsCancellationRequested) break;
-                row.Status = Loc.Get("BatchStatusWorking");
-                try
+
+            // Файлы обрабатываются по нескольку разом: они друг от друга не
+            // зависят, а сорок счетов по очереди — это как раз то ожидание,
+            // ради избавления от которого пакетную обработку и открывают.
+            // Сколько именно — решает машина: на одноядерной будет ровно как
+            // раньше, по одному.
+            var workers = NexusPdf.Export.ParallelWork.Workers(items: _rows.Count);
+            var status = new Progress<(Row Row, string Text)>(update => update.Row.Status = update.Text);
+
+            await Parallel.ForEachAsync(
+                _rows.ToList(),
+                new ParallelOptions { MaxDegreeOfParallelism = workers, CancellationToken = CancellationToken.None },
+                async (row, _) =>
                 {
-                    await ProcessAsync(row.Path, outputDir, operation, password, takenNames, _cts.Token);
-                    row.Status = Loc.Get("BatchStatusOk");
-                    ok++;
-                }
-                catch (OperationCanceledException) when (_cts.Token.IsCancellationRequested)
-                {
-                    row.Status = Loc.Get("BatchStatusPending");
-                    break;
-                }
-                catch (OperationCanceledException)
-                {
-                    // Не отмена пользователя, а 5-минутный таймаут qpdf.
-                    row.Status = Loc.F("BatchStatusError", Loc.Get("BatchTimeout"));
-                    failed++;
-                }
-                catch (Exception ex)
-                {
-                    Log.Warning(ex, "Пакетная обработка: {Path}", row.Path);
-                    row.Status = Loc.F("BatchStatusError", Shorten(ex.Message));
-                    failed++;
-                }
-            }
+                    // Отмена — строго между файлами: обрыв посреди записи
+                    // оставил бы обрубок вместо результата.
+                    if (_cts.Token.IsCancellationRequested) return;
+                    ((IProgress<(Row, string)>)status).Report((row, Loc.Get("BatchStatusWorking")));
+                    try
+                    {
+                        await ProcessAsync(row.Path, outputDir, operation, password, takenNames, _cts.Token);
+                        ((IProgress<(Row, string)>)status).Report((row, Loc.Get("BatchStatusOk")));
+                        Interlocked.Increment(ref ok);
+                    }
+                    catch (OperationCanceledException) when (_cts.Token.IsCancellationRequested)
+                    {
+                        ((IProgress<(Row, string)>)status).Report((row, Loc.Get("BatchStatusPending")));
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Не отмена пользователя, а 5-минутный таймаут qpdf.
+                        ((IProgress<(Row, string)>)status).Report(
+                            (row, Loc.F("BatchStatusError", Loc.Get("BatchTimeout"))));
+                        Interlocked.Increment(ref failed);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "Пакетная обработка: {Path}", row.Path);
+                        ((IProgress<(Row, string)>)status).Report(
+                            (row, Loc.F("BatchStatusError", Shorten(ex.Message))));
+                        Interlocked.Increment(ref failed);
+                    }
+                });
+
             SummaryLabel.Text = Loc.F("BatchSummary", ok, failed);
         }
         finally
@@ -160,19 +174,31 @@ public partial class BatchDialog : Window
         }
     }
 
-    /// <summary>Свободное имя в папке результатов: занятые (набором или диском) получают « (2)», « (3)»…</summary>
+    /// <summary>
+    /// Свободное имя в папке результатов: занятые (набором или диском) получают
+    /// « (2)», « (3)»…
+    ///
+    /// Файлы обрабатываются одновременно, поэтому выбор имени защищён замком:
+    /// два потока, одновременно проверившие «свободно», записали бы результат
+    /// в один и тот же файл, и один из них пропал бы бесследно.
+    /// </summary>
+    private static readonly object NameGate = new();
+
     private static string UniqueTarget(string outputDir, string fileName, HashSet<string> takenNames, bool directory = false)
     {
-        var stem = Path.GetFileNameWithoutExtension(fileName);
-        var extension = Path.GetExtension(fileName);
-        var candidate = fileName;
-        var n = 2;
-        while (takenNames.Contains(candidate) ||
-               (directory ? Directory.Exists(Path.Combine(outputDir, candidate))
-                          : File.Exists(Path.Combine(outputDir, candidate))))
-            candidate = $"{stem} ({n++}){extension}";
-        takenNames.Add(candidate);
-        return Path.Combine(outputDir, candidate);
+        lock (NameGate)
+        {
+            var stem = Path.GetFileNameWithoutExtension(fileName);
+            var extension = Path.GetExtension(fileName);
+            var candidate = fileName;
+            var n = 2;
+            while (takenNames.Contains(candidate) ||
+                   (directory ? Directory.Exists(Path.Combine(outputDir, candidate))
+                              : File.Exists(Path.Combine(outputDir, candidate))))
+                candidate = $"{stem} ({n++}){extension}";
+            takenNames.Add(candidate);
+            return Path.Combine(outputDir, candidate);
+        }
     }
 
     private async Task ProcessAsync(

@@ -487,6 +487,15 @@ public sealed class DocxExporter : IDisposable
         if (placed > 0) _body.AppendChild(paragraph);
     }
 
+    /// <summary>
+    /// Картинки сжимаются по одной, в том же потоке.
+    ///
+    /// Сжатие нескольких разом было измерено и отвергнуто: на кодеках Windows
+    /// оно дало 0–4 % (в пределах шума), потому что время экспорта делится
+    /// примерно поровну между PDFium и записью документа, а на сжатие уходит
+    /// шестая часть. Зато несколько ФАЙЛОВ разом дают 1,75x — параллелить
+    /// стоит там, а не здесь.
+    /// </summary>
     private Drawing? BuildDrawing(PdfPageImage image)
     {
         var encoded = _encode(image.Bgra, image.PixelWidth, image.PixelHeight);
