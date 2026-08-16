@@ -11,11 +11,7 @@ images, annotate, fill forms, sign, recognise scanned text, clean up scans,
 export to Word and Excel, and print — with every engine running on your own
 processor. No account, no upload, no subscription.
 
-[![Version](https://img.shields.io/github/v/tag/skin4ik123/NexusPDF?label=version&sort=semver&color=6366f1&style=flat-square)](https://nexus.internetdeco.com)
-[![Windows](https://img.shields.io/badge/Windows%2010%20%C2%B7%2011-64--bit-0ea5e9?style=flat-square&logo=windows&logoColor=white)](https://nexus.internetdeco.com)
-[![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?style=flat-square&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/download)
-[![Licence](https://img.shields.io/badge/licence-AGPL--3.0-7c3aed?style=flat-square)](LICENSE)
-[![Telemetry](https://img.shields.io/badge/telemetry-none-10b981?style=flat-square)](#privacy)
+[![Version](https://img.shields.io/github/v/tag/skin4ik123/NexusPDF?label=version&sort=semver&color=6366f1&style=flat-square)](https://nexus.internetdeco.com) [![Windows](https://img.shields.io/badge/Windows%2010%20%C2%B7%2011-64--bit-0ea5e9?style=flat-square&logo=windows&logoColor=white)](https://nexus.internetdeco.com) [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?style=flat-square&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/download) [![Licence](https://img.shields.io/badge/licence-AGPL--3.0-7c3aed?style=flat-square)](LICENSE) [![Telemetry](https://img.shields.io/badge/telemetry-none-10b981?style=flat-square)](#privacy)
 
 **[Download](https://nexus.internetdeco.com)** · [Website](https://nexus.internetdeco.com) · [Changelog](https://nexus.internetdeco.com/changelog) · [Support the work](#support-the-work)
 
@@ -31,17 +27,15 @@ saved you an hour, a coffee is a fair trade.
 
 <div align="center">
 
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/clfankitm8)
-[![Binance Pay](https://img.shields.io/badge/Binance%20Pay-90127003-F0B90B?style=for-the-badge&logo=binance&logoColor=black)](https://nexus.internetdeco.com/#support)
-[![USDT TRC20](https://img.shields.io/badge/USDT-TRC20-26A17B?style=for-the-badge&logo=tether&logoColor=white)](https://nexus.internetdeco.com/#support)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/clfankitm8) [![Binance Pay](https://img.shields.io/badge/Binance%20Pay-90127003-F0B90B?style=for-the-badge&logo=binance&logoColor=black)](https://nexus.internetdeco.com/#support) [![USDT TRC20](https://img.shields.io/badge/USDT-TRC20-26A17B?style=for-the-badge&logo=tether&logoColor=white)](https://nexus.internetdeco.com/#support)
 
 </div>
 
 | Method | Details |
 | --- | --- |
-| Buy Me a Coffee | [buymeacoffee.com/clfankitm8](https://buymeacoffee.com/clfankitm8) — card, one-off or monthly |
-| Binance Pay | ID `90127003` |
-| USDT (TRC20) | address below |
+| **Buy Me a Coffee** | [buymeacoffee.com/clfankitm8](https://buymeacoffee.com/clfankitm8) — card, one-off or monthly |
+| **Binance Pay** | ID `90127003` |
+| **USDT · TRC20** | wallet address below |
 
 ```text
 TLbuKujXxfZgAobVsQZ9igTFiGCB12x6Tq
@@ -53,7 +47,7 @@ just as much as money.
 
 ## What it does
 
-| | |
+| Feature | Details |
 | --- | --- |
 | **Pages in any order** | Reorder, rotate, duplicate, extract. Drag pages from one open document straight into another and drop them where you want. |
 | **Scans that come out clean** | Straighten the sheet, remove scanner speckles, turn uneven grey paper into even white — with a before-and-after preview. |
@@ -78,12 +72,6 @@ compress, protect, recognise and compare.
 <tr>
 <td align="center"><b>Scan cleanup</b><br>before and after, on the same page</td>
 <td align="center"><b>Print centre</b><br>the sheet as it will actually come out</td>
-</tr>
-<tr>
-<td colspan="2"><img src="docs/images/organize.png" alt="Page organizer"></td>
-</tr>
-<tr>
-<td colspan="2" align="center"><b>Page organizer</b><br>select, rotate, extract, drag between documents</td>
 </tr>
 </table>
 
