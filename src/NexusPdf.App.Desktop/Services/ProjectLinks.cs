@@ -16,6 +16,13 @@ public static class ProjectLinks
     public const string Changelog = "https://nexus.internetdeco.com/changelog";
 
     /// <summary>
+    /// Исходный код. AGPL-3.0 обязывает дать получателю программы тот код, из
+    /// которого она собрана, поэтому ссылка обязана быть в самой программе,
+    /// а не только на сайте.
+    /// </summary>
+    public const string Source = "https://github.com/skin4ik123/NexusPDF";
+
+    /// <summary>
     /// Открывает адрес в браузере по умолчанию.
     ///
     /// Подтверждение здесь не спрашивается, в отличие от ссылок ИЗ документа:

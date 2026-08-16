@@ -119,7 +119,10 @@ New-Item -ItemType Directory -Force (Join-Path $publishDir "tools/ocrmodels") | 
 Copy-Item "$root\tools\ocrmodels\*" (Join-Path $publishDir "tools/ocrmodels") -Force
 Copy-Item "$root\tools\ocrmodels.lock.json" (Join-Path $publishDir "tools") -Force
 Copy-Item "$root\docs\THIRD_PARTY_NOTICES.md" $publishDir -Force
-Copy-Item "$root\installer\Assets\license.en.txt" (Join-Path $publishDir "LICENSE.txt") -Force
+# Полный текст AGPL-3.0, а не краткая заметка: лицензия обязывает поставлять
+# её саму вместе с программой.
+Copy-Item "$root\LICENSE" (Join-Path $publishDir "LICENSE.txt") -Force
+Copy-Item "$root\installer\Assets\license.en.txt" (Join-Path $publishDir "LICENSE-NOTICE.txt") -Force
 Copy-Item "$root\installer\Assets\license.ru.txt" (Join-Path $publishDir "LICENSE.ru.txt") -Force
 
 $hashTargets = @()

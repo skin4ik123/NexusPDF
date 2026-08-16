@@ -1,87 +1,123 @@
 # NexusPDF
 
-Настольная Windows-программа для работы с PDF: просмотр, систематизация страниц,
-объединение, извлечение, поворот — локально, без отправки документов в интернет.
+**PDF work that never leaves your computer.**
 
-**Статус: 0.20.0-alpha.** Работают все запланированные этапы 0–10 и часть
-пост-ТЗ: просмотр и систематизация, правка содержимого, аннотации и рисование,
-формы, подписи, распознавание текста, конвертация, сравнение, вымарывание,
-слои и вложения, установщик и CLI. Честный список того, чего ещё нет — в
-[docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md), состояние по функциям —
-в [docs/FUNCTIONAL_AUDIT.md](docs/FUNCTIONAL_AUDIT.md).
+A desktop PDF editor for Windows: read and rearrange pages, edit existing text
+and images, annotate and draw, fill forms, sign, recognise scanned text,
+clean up scans, export to Word and Excel, and print. No account, no upload,
+no subscription — every engine runs on your own processor.
 
-Установка: `./build.ps1 -All`, затем запустите `artifacts/NexusPdfSetup.exe`.
+[Download](https://nexus.internetdeco.com) · [Changelog](https://nexus.internetdeco.com/changelog)
 
-*Рабочее название.* «NexusPDF» задаётся в одном месте (`Directory.Build.props`,
-`Product`) и в словарях `Resources/i18n`; переименование продукта — точечная замена.
+![NexusPDF](docs/images/main.png)
 
-## Возможности сейчас
+## What it does
 
-- открытие PDF (диалог, drag-drop, двойной клик/командная строка, юникод-пути);
-- защищённые паролем документы (пароль не журналируется);
-- вкладки, несколько окон, отделение вкладки в отдельное окно;
-- ленивый рендеринг с виртуализацией и LRU-кэшем (большие документы не
-  загружаются в память целиком — используется memory-mapped file);
-- масштаб: Ctrl+колесо, кнопки, по ширине, страница целиком, 100%;
-- панель миниатюр, переход по клику, текущая страница в статус-баре;
-- поиск по текстовому слою с подсветкой найденного (Ctrl+F);
-- режим «Страницы»: мультивыбор, поворот 90°/180°/270°, дублирование,
-  удаление, перестановка перетаскиванием, извлечение выбранных в новый PDF;
-- Undo/Redo всех структурных операций;
-- сохранение по схеме «временный файл → проверка → атомарная замена»
-  (оригинал не портится ни при какой ошибке);
-- RU/EN интерфейс, светлая/тёмная/системная тема, Per-Monitor V2 DPI;
-- одиночный экземпляр: новые файлы открываются во вкладках работающего окна;
-- восстановление сессии после аварийного завершения;
-- печать (Ctrl+P): все/текущая/диапазон, вписать/фактический размер;
-- защита паролем: зашифрованная AES-256 копия (qpdf);
-- оптимизация без потерь с отчётом «до → после» (qpdf);
-- установщик: NexusPdfSetup.exe с собственным интерфейсом, тихий режим /S,
-  корректное удаление через «Установленные приложения»;
-- колонтитулы и номера страниц ({n}/{N}/{file}/{date}), водяные знаки;
-- добавление текста (кириллица встраивается шрифтом) и изображений
-  размещением кликом, с живым предпросмотром до сохранения;
-- визуальная подпись: библиотека шаблонов, зашифрованная ключом Windows;
-- правка существующего текста и изображений страницы, правка растра
-  во внешнем редакторе с возвратом на место;
-- аннотации (выделение, заметки, фигуры) и рисование: карандаш, линия,
-  стрелка со стабилизацией и выпрямлением;
-- закладки/оглавление, слои OCG, список и извлечение вложений;
-- формы AcroForm: заполнение и прямое сохранение;
-- цифровые подписи: проверка и подписание сертификатом;
-- распознавание текста офлайн: PaddleOCR PP-OCRv6 (16 языковых пакетов —
-  кириллица, латиница, греческий, арабский, деванагари, корейский, японский,
-  китайский, тайский, тамильский, телугу, каннада) или Tesseract 5;
-  невидимый слой для поиска либо замена настоящим редактируемым текстом;
-- вымарывание с растеризацией, пересжатие изображений, сравнение документов;
-- конвертация: экспорт в изображения/текст, PDF из изображений, объединение;
-- NexusPdfCli: пакетные операции, OCR, сравнение из командной строки.
+- **Pages in any order** — reorder, rotate, duplicate, extract. Drag pages from
+  one open document straight into another and drop them where you want.
+- **Scans that come out clean** — straighten the sheet, remove scanner speckles
+  and turn uneven grey paper into even white, with a before-and-after preview.
+- **Text and images edited in place** — change existing text keeping its font,
+  size and position; replace a picture, or send a page to an image editor and
+  bring it back.
+- **Text recognition, offline** — scanned pages get a searchable text layer.
+  Sixteen language packs ship with the program.
+- **Export to Word and Excel** — paragraphs, tables, links and comments. Tables
+  are taken from drawn borders, and where there are none, from column gaps.
+- **Print centre** — booklets, posters, several pages per sheet, manual duplex,
+  crop marks and bleed, with a preview of the actual sheet.
+- **Comments and drawing** — highlight, note, pencil, line and arrow with stroke
+  stabilisation. Every mark is a standard PDF annotation.
+- **Passwords and redaction** — AES-256 encryption, and redaction that removes
+  the content underneath rather than covering it with a black box.
+- **Signatures and comparison** — sign with a certificate, verify existing
+  signatures, compare two files page by page.
 
-## Сборка
+There is also a command-line tool (`NexusPdfCli`) for batch work: export,
+merge, compress, protect, recognise and compare.
+
+## System requirements
+
+- Windows 10 version 21H2 or Windows 11, 64-bit
+- About 1 GB of free disk space
+- 4 GB of memory; 8 GB is more comfortable for large scans
+- No .NET installation needed — the runtime is included
+- No internet connection required, during install or afterwards
+
+## Privacy
+
+Documents are processed locally and never uploaded. There is no account, no
+licence server and no telemetry. Logs stay on the device and never contain
+document content or passwords.
+
+## Building from source
+
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download) and Windows.
 
 ```powershell
-./build.ps1            # сборка + тесты + publish в artifacts/
+./build.ps1 -All
 ```
 
-Требуется .NET SDK 10 (x64). Подробности — [docs/BUILD.md](docs/BUILD.md).
+This restores the pinned native dependencies (qpdf, Tesseract data, OCR
+models — versions and SHA-256 sums are in `tools/*.lock.json`), builds, runs
+the tests, and produces the installer, the MSI, and a portable archive in
+`artifacts/`.
 
-Бинарники qpdf и модели распознавания в репозиторий не кладутся: при первой
-сборке `build.ps1` докачивает их по закреплённым версиям и SHA-256 из
-`tools/qpdf.lock.json`, `tools/tessdata.lock.json` и `tools/ocrmodels.lock.json`.
-Отдельно модели OCR (около 280 МБ, все 16 языков) ставятся так:
+For a plain build and test run:
 
 ```powershell
-./tools/fetch-ocrmodels.ps1 -All
+dotnet build NexusPdf.slnx -c Release
+dotnet test tests/NexusPdf.UnitTests -c Release
 ```
 
-## Документация
+More detail in [docs/BUILD.md](docs/BUILD.md) and
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Most documentation in `docs/` is
+written in Russian.
 
-| Файл | Что внутри |
-| --- | --- |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | слои, модель документа, PDFium-поток, сохранение |
-| [docs/DEPENDENCY_AND_LICENSE_MATRIX.md](docs/DEPENDENCY_AND_LICENSE_MATRIX.md) | зависимости, лицензии, риски |
-| [docs/SECURITY.md](docs/SECURITY.md) | модель угроз |
-| [docs/PRIVACY.md](docs/PRIVACY.md) | что (не) покидает компьютер |
-| [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) | чего пока нет и почему |
-| [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md) | что покрыто тестами |
-| [docs/RELEASE.md](docs/RELEASE.md) | версия, канал, подпись, установщик |
+## Licence
+
+NexusPDF is licensed under the **GNU Affero General Public License v3.0** —
+see [LICENSE](LICENSE).
+
+The reason is MuPDF: document compression uses MuPDF by Artifex Software, which
+is distributed under the AGPL-3.0. Bundling it means the combined work carries
+the same licence. In practice: you may use, study, modify and redistribute
+NexusPDF, and anyone who distributes a modified version must publish their
+source under the same terms.
+
+## Third-party components
+
+| Component | Purpose | Licence |
+| --- | --- | --- |
+| PDFium | page rendering, text and content editing | Apache-2.0 / BSD-3-Clause |
+| qpdf | file structure, AES-256 encryption, optimization | Apache-2.0 |
+| MuPDF, MuPDF.NET | image and font compression | AGPL-3.0 |
+| PaddleOCR (via RapidOcrNet) + ONNX Runtime | text recognition | Apache-2.0 / MIT |
+| Tesseract + Leptonica | fallback recognition | Apache-2.0 / BSD-2-Clause |
+| DocumentFormat.OpenXml | export to Word and Excel | MIT |
+| SkiaSharp, Clipper2 | raster and geometry | MIT / BSL-1.0 |
+| .NET, WPF, CommunityToolkit.Mvvm | platform | MIT |
+| Serilog | logging | Apache-2.0 |
+| gong-wpf-dragdrop | drag and drop | BSD-3-Clause |
+
+Full notices: [docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md).
+Licence compatibility is tracked in
+[docs/DEPENDENCY_AND_LICENSE_MATRIX.md](docs/DEPENDENCY_AND_LICENSE_MATRIX.md).
+
+## Known limitations
+
+Kept deliberately honest, not hidden:
+[docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md),
+[docs/PRINT_KNOWN_LIMITATIONS.md](docs/PRINT_KNOWN_LIMITATIONS.md).
+
+The builds are not code-signed, so SmartScreen warns on download. Checksums are
+published with every release.
+
+## Support the work
+
+NexusPDF is free and stays free. If it saved you time:
+[nexus.internetdeco.com/#support](https://nexus.internetdeco.com/#support)
+
+---
+
+Crafted by Artur Yurchuk.
