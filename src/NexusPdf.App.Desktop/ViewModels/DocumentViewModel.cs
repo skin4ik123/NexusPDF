@@ -43,7 +43,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     public OpenedDocument Document { get; }
     public RenderCache Cache { get; }
 
-    public ObservableCollection<PageViewModel> Pages { get; } = new();
+    /// <summary>
+    /// Страницы документа. Коллекция с пакетной заменой: перечисление по одной
+    /// заставляло списки интерфейса пересчитывать раскладку на каждую строку.
+    /// </summary>
+    public BulkObservableCollection<PageViewModel> Pages { get; } = new();
 
     public event EventHandler<int>? ScrollToPageRequested;
 
@@ -2223,10 +2227,19 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     {
         foreach (var page in Pages)
             page.CancelAll();
-        Pages.Clear();
+
         var model = Document.Session.Model;
+        var rebuilt = new List<PageViewModel>(model.Pages.Count);
         for (var i = 0; i < model.Pages.Count; i++)
-            Pages.Add(new PageViewModel(this, i, model.Pages[i], Document.GetLogicalPageSize(i)));
+            rebuilt.Add(new PageViewModel(this, i, model.Pages[i], Document.GetLogicalPageSize(i)));
+        // Одно уведомление на весь список: триста отдельных добавлений держали
+        // поток интерфейса секунду, и всё это время документ не показывался.
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        Pages.ReplaceAll(rebuilt);
+        if (rebuilt.Count > 50)
+            Serilog.Log.Debug("Список из {Count} страниц собран за {Ms:N0} мс",
+                rebuilt.Count, started.Elapsed.TotalMilliseconds);
+
         OnPropertyChanged(nameof(PageCount));
         OnPropertyChanged(nameof(PageOfText));
         OnPropertyChanged(nameof(CurrentPageSizeText));

@@ -165,9 +165,20 @@ public sealed partial class PageViewModel : ObservableObject
         OnPropertyChanged(nameof(DisplayScale));
     }
 
-    /// <summary>Запрос полноразмерного растра под текущую ширину в устройственных пикселях.</summary>
+    /// <summary>
+    /// Запрос полноразмерного растра под текущую ширину в устройственных
+    /// пикселях.
+    ///
+    /// Заодно готовится миниатюра: пока страница рисуется, она показывается
+    /// растянутой вместо пустого листа. Полноразмерный растр большой страницы
+    /// считается сотни миллисекунд, и всё это время человек смотрел на белое
+    /// поле с надписью «Отрисовка» — теперь он видит саму страницу, пусть
+    /// сначала и нерезко.
+    /// </summary>
     public async void EnsureImage(double dpiScale)
     {
+        EnsureThumbnail();
+
         var pixelWidth = Math.Max(16, (int)Math.Round(WidthDiu * dpiScale));
         var pixelHeight = Math.Max(16, (int)Math.Round(HeightDiu * dpiScale));
         var formVersion = _owner.FormRenderVersion;
@@ -192,9 +203,18 @@ public sealed partial class PageViewModel : ObservableObject
         var cts = new CancellationTokenSource();
         _renderCts = cts;
         IsRendering = true;
+        var started = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             var raw = await _owner.Document.RenderLogicalPageAsync(LogicalIndex, pixelWidth, pixelHeight, cts.Token);
+            // В журнал попадают только МЕДЛЕННЫЕ страницы. Обычный рендер —
+            // это десятки миллисекунд; всё, что заметно дольше, означает либо
+            // тяжёлую страницу, либо занятый поток интерфейса, и разбираться в
+            // этом лучше по журналу, чем по ощущениям.
+            var elapsed = started.Elapsed.TotalMilliseconds;
+            if (elapsed > 200)
+                Serilog.Log.Debug("Медленный рендер стр. {Page} ({Width} px): {Ms:N0} мс",
+                    PageNumber, pixelWidth, elapsed);
             var bitmap = BitmapFactory.ToBitmapSource(raw);
             // Растры устаревших форм-версий больше никогда не запросятся —
             // не даём им хоронить бюджет LRU при наборе текста в поле.
