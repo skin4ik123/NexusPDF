@@ -17,7 +17,36 @@ public sealed class RenderCache
     private long _budgetBytes;
     private long _usedBytes;
 
-    public RenderCache(int budgetMegabytes) => SetBudget(budgetMegabytes);
+    /// <summary>
+    /// Прежний потолок в 256 МБ. На современном экране страница в масштабе по
+    /// ширине занимает 12–15 МБ, то есть в кэш помещалось СЕМНАДЦАТЬ страниц:
+    /// на документе в триста листов он вымывался постоянно, и возврат к уже
+    /// прочитанной странице означал полный повторный рендер.
+    /// </summary>
+    public const int LegacyDefaultMegabytes = 256;
+
+    public RenderCache(int budgetMegabytes) => SetBudget(Resolve(budgetMegabytes));
+
+    /// <summary>
+    /// Бюджет по памяти машины: восьмая часть, но не меньше 384 МБ и не больше
+    /// 1,5 ГБ. Так на слабом ноутбуке кэш остаётся скромным, а на рабочей
+    /// машине держит сотню страниц и перестаёт мешать чтению.
+    ///
+    /// Значение, оставшееся от прежнего умолчания, заменяется вычисленным:
+    /// это не «настройка пользователя», а старый потолок, который и был
+    /// причиной тормозов.
+    /// </summary>
+    public static int Resolve(int settingMegabytes)
+    {
+        if (settingMegabytes != LegacyDefaultMegabytes && settingMegabytes > 0)
+            return settingMegabytes;
+
+        var available = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+        if (available <= 0) return LegacyDefaultMegabytes;
+
+        var eighth = available / 8 / (1024 * 1024);
+        return (int)Math.Clamp(eighth, 384, 1536);
+    }
 
     public void SetBudget(int megabytes)
     {

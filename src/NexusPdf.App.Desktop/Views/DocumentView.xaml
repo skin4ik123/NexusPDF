@@ -198,6 +198,12 @@
               <Grid>
                 <TextBlock Text="{l:Loc Rendering}" HorizontalAlignment="Center" VerticalAlignment="Center"
                            Foreground="{DynamicResource TextSecondary}"/>
+                <!-- Пока страница рисуется, показывается её миниатюра, растянутая
+                     на весь лист: нерезко, зато сразу и на своём месте. Пустой
+                     белый лист с надписью «Отрисовка» человек читает как
+                     «программа висит». Полный растр появляется поверх. -->
+                <Image Source="{Binding ThumbImage}" Stretch="Fill"
+                       RenderOptions.BitmapScalingMode="LowQuality"/>
                 <Image Source="{Binding Image}" Stretch="Fill"/>
                 <!-- Выделенный мышью текст -->
                 <ItemsControl ItemsSource="{Binding SelectionRects}" IsHitTestVisible="False">
