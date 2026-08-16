@@ -10,6 +10,8 @@
   "UndoTooltip": "Undo (Ctrl+Z)",
   "Redo": "Redo",
   "RedoTooltip": "Redo (Ctrl+Y)",
+  "DropPagesDone": "Pages brought over: {0} from «{1}»",
+  "DropPagesFailed": "Could not bring the pages into this document.",
   "CloseTab": "Close tab",
   "RecentFiles": "Recent documents",
   "NoRecentFiles": "No recent documents yet",

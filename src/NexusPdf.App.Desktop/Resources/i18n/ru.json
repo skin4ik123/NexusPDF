@@ -10,6 +10,8 @@
   "UndoTooltip": "Отменить (Ctrl+Z)",
   "Redo": "Повторить",
   "RedoTooltip": "Повторить (Ctrl+Y)",
+  "DropPagesDone": "Перенесено страниц: {0} из «{1}»",
+  "DropPagesFailed": "Не удалось перенести страницы в этот документ.",
   "CloseTab": "Закрыть вкладку",
   "RecentFiles": "Недавние документы",
   "NoRecentFiles": "Недавних документов пока нет",

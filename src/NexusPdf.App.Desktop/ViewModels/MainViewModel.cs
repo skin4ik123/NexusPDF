@@ -155,6 +155,43 @@ public sealed partial class MainViewModel : ObservableObject
         });
     }
 
+    /// <summary>
+    /// Перенос страниц в ДРУГОЙ открытый документ: пользователь тащит их из
+    /// режима систематизации на вкладку соседа.
+    ///
+    /// Страницы копируются, а не изымаются: перетаскивание между документами
+    /// чаще означает «возьми это и туда», а не «перенеси и убери отсюда», и
+    /// потеря страниц в исходнике была бы неприятным сюрпризом. Удалить их
+    /// можно тем же выделением, которое осталось на месте.
+    /// </summary>
+    public async Task DropPagesOnDocumentAsync(
+        DocumentViewModel target, DocumentViewModel source, IReadOnlyList<int> logicalIndices)
+    {
+        if (ReferenceEquals(target, source) || logicalIndices.Count == 0) return;
+        if (target.IsBusy || source.IsBusy) return;
+
+        target.IsBusy = true;
+        try
+        {
+            var inserted = await target.Document.InsertPagesFromAsync(
+                _services.Engine, source.Document, logicalIndices,
+                target.Document.Session.Model.Pages.Count, CancellationToken.None);
+            ActiveDocument = target;
+            target.StatusText = Loc.F("DropPagesDone", inserted, source.Title);
+            Log.Information("Перенос страниц: {Count} из {Source} в {Target}",
+                inserted, source.Title, target.Title);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка переноса страниц между документами");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"), Loc.Get("DropPagesFailed"), ex.ToString());
+        }
+        finally
+        {
+            target.IsBusy = false;
+        }
+    }
+
     /// <summary>Отметить выполненную команду в разделе «Недавние».</summary>
     public void NoteCommandUsed(string commandId) => Tools.NoteUsed(commandId);
 

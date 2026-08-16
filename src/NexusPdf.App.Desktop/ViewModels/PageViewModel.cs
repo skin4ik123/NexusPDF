@@ -35,6 +35,9 @@ public sealed partial class PageViewModel : ObservableObject
     }
 
     public int LogicalIndex { get; }
+    /// <summary>Документ, которому принадлежит страница: нужен переносу между документами.</summary>
+    public DocumentViewModel Owner => _owner;
+
     public PageRef PageRef { get; }
     public PdfPageDescriptor SizePt { get; }
     public int PageNumber => LogicalIndex + 1;
@@ -83,6 +86,15 @@ public sealed partial class PageViewModel : ObservableObject
         Array.Empty<(Rect, NexusPdf.Pdf.Abstractions.PdfPageLink)>();
 
     public bool LinksLoaded { get; set; }
+
+    /// <summary>
+    /// Строки текста страницы в единицах показа. Нужны курсору: над текстом он
+    /// обязан быть текстовым, а над пустым полем и картинкой — обычной стрелкой.
+    /// Считаются один раз на страницу и переживают перерисовку.
+    /// </summary>
+    public IReadOnlyList<Rect> TextAreas { get; set; } = Array.Empty<Rect>();
+
+    public bool TextAreasLoaded { get; set; }
 
     // ----- Живая рамка при drag-размещении аннотации (в пунктах страницы) -----
 
