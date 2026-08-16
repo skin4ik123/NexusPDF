@@ -1,40 +1,100 @@
+<div align="center">
+
+<img src="docs/images/logo.png" width="112" alt="NexusPDF">
+
 # NexusPDF
 
-**PDF work that never leaves your computer.**
+### PDF work that never leaves your computer.
 
-A desktop PDF editor for Windows: read and rearrange pages, edit existing text
-and images, annotate and draw, fill forms, sign, recognise scanned text,
-clean up scans, export to Word and Excel, and print. No account, no upload,
-no subscription — every engine runs on your own processor.
+A desktop PDF editor for Windows. Read and rearrange pages, edit existing text and
+images, annotate, fill forms, sign, recognise scanned text, clean up scans,
+export to Word and Excel, and print — with every engine running on your own
+processor. No account, no upload, no subscription.
 
-[Download](https://nexus.internetdeco.com) · [Changelog](https://nexus.internetdeco.com/changelog)
+[![Version](https://img.shields.io/github/v/tag/skin4ik123/NexusPDF?label=version&sort=semver&color=6366f1&style=flat-square)](https://nexus.internetdeco.com)
+[![Windows](https://img.shields.io/badge/Windows%2010%20%C2%B7%2011-64--bit-0ea5e9?style=flat-square&logo=windows&logoColor=white)](https://nexus.internetdeco.com)
+[![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?style=flat-square&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/download)
+[![Licence](https://img.shields.io/badge/licence-AGPL--3.0-7c3aed?style=flat-square)](LICENSE)
+[![Telemetry](https://img.shields.io/badge/telemetry-none-10b981?style=flat-square)](#privacy)
 
-![NexusPDF](docs/images/main.png)
+**[Download](https://nexus.internetdeco.com)** · [Website](https://nexus.internetdeco.com) · [Changelog](https://nexus.internetdeco.com/changelog) · [Support the work](#support-the-work)
+
+<img src="docs/images/main.png" alt="NexusPDF main window">
+
+</div>
+
+## Support the work
+
+NexusPDF is free and stays free — no subscription, no paid tier, no ads, nothing
+held back for a “pro” version. It is written by one person in his own time. If it
+saved you an hour, a coffee is a fair trade.
+
+<div align="center">
+
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/clfankitm8)
+[![Binance Pay](https://img.shields.io/badge/Binance%20Pay-90127003-F0B90B?style=for-the-badge&logo=binance&logoColor=black)](https://nexus.internetdeco.com/#support)
+[![USDT TRC20](https://img.shields.io/badge/USDT-TRC20-26A17B?style=for-the-badge&logo=tether&logoColor=white)](https://nexus.internetdeco.com/#support)
+
+</div>
+
+| Method | Details |
+| --- | --- |
+| Buy Me a Coffee | [buymeacoffee.com/clfankitm8](https://buymeacoffee.com/clfankitm8) — card, one-off or monthly |
+| Binance Pay | ID `90127003` |
+| USDT (TRC20) | address below |
+
+```text
+TLbuKujXxfZgAobVsQZ9igTFiGCB12x6Tq
+```
+
+All methods, with QR codes, are on the
+[website](https://nexus.internetdeco.com/#support). Stars and bug reports help
+just as much as money.
 
 ## What it does
 
-- **Pages in any order** — reorder, rotate, duplicate, extract. Drag pages from
-  one open document straight into another and drop them where you want.
-- **Scans that come out clean** — straighten the sheet, remove scanner speckles
-  and turn uneven grey paper into even white, with a before-and-after preview.
-- **Text and images edited in place** — change existing text keeping its font,
-  size and position; replace a picture, or send a page to an image editor and
-  bring it back.
-- **Text recognition, offline** — scanned pages get a searchable text layer.
-  Sixteen language packs ship with the program.
-- **Export to Word and Excel** — paragraphs, tables, links and comments. Tables
-  are taken from drawn borders, and where there are none, from column gaps.
-- **Print centre** — booklets, posters, several pages per sheet, manual duplex,
-  crop marks and bleed, with a preview of the actual sheet.
-- **Comments and drawing** — highlight, note, pencil, line and arrow with stroke
-  stabilisation. Every mark is a standard PDF annotation.
-- **Passwords and redaction** — AES-256 encryption, and redaction that removes
-  the content underneath rather than covering it with a black box.
-- **Signatures and comparison** — sign with a certificate, verify existing
-  signatures, compare two files page by page.
+| | |
+| --- | --- |
+| **Pages in any order** | Reorder, rotate, duplicate, extract. Drag pages from one open document straight into another and drop them where you want. |
+| **Scans that come out clean** | Straighten the sheet, remove scanner speckles, turn uneven grey paper into even white — with a before-and-after preview. |
+| **Text and images edited in place** | Change existing text keeping its font, size and position. Replace a picture, or send a page to an image editor and bring it back. |
+| **Text recognition, offline** | Scanned pages get a searchable text layer. Sixteen language packs ship with the program. |
+| **Export to Word and Excel** | Paragraphs, tables, links and comments. Tables are taken from drawn borders, and where there are none, from column gaps. |
+| **Print centre** | Booklets, posters, several pages per sheet, manual duplex, crop marks and bleed, with a preview of the actual sheet. |
+| **Comments and drawing** | Highlight, note, pencil, line and arrow with stroke stabilisation. Every mark is a standard PDF annotation. |
+| **Passwords and redaction** | AES-256 encryption, and redaction that removes the content underneath rather than covering it with a black box. |
+| **Signatures and comparison** | Sign with a certificate, verify existing signatures, compare two files page by page. |
 
-There is also a command-line tool (`NexusPdfCli`) for batch work: export,
-merge, compress, protect, recognise and compare.
+There is also a command-line tool (`NexusPdfCli`) for batch work: export, merge,
+compress, protect, recognise and compare.
+
+## Screenshots
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/scan-cleanup.png" alt="Scan cleanup with before and after preview"></td>
+<td width="50%"><img src="docs/images/print-centre.png" alt="Print centre with sheet preview"></td>
+</tr>
+<tr>
+<td align="center"><b>Scan cleanup</b><br>before and after, on the same page</td>
+<td align="center"><b>Print centre</b><br>the sheet as it will actually come out</td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/images/organize.png" alt="Page organizer"></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><b>Page organizer</b><br>select, rotate, extract, drag between documents</td>
+</tr>
+</table>
+
+Dark and light themes, three interface languages: English, Russian, Ukrainian.
+
+## Privacy
+
+Documents are processed locally and never uploaded. There is no account, no
+licence server and no telemetry. Nothing is sent while you work — the program
+opens no network connections at all. Logs stay on the device and never contain
+document content or passwords.
 
 ## System requirements
 
@@ -44,12 +104,6 @@ merge, compress, protect, recognise and compare.
 - No .NET installation needed — the runtime is included
 - No internet connection required, during install or afterwards
 
-## Privacy
-
-Documents are processed locally and never uploaded. There is no account, no
-licence server and no telemetry. Logs stay on the device and never contain
-document content or passwords.
-
 ## Building from source
 
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download) and Windows.
@@ -58,10 +112,9 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download) and Windows.
 ./build.ps1 -All
 ```
 
-This restores the pinned native dependencies (qpdf, Tesseract data, OCR
-models — versions and SHA-256 sums are in `tools/*.lock.json`), builds, runs
-the tests, and produces the installer, the MSI, and a portable archive in
-`artifacts/`.
+This restores the pinned native dependencies (qpdf, Tesseract data, OCR models —
+versions and SHA-256 sums are in `tools/*.lock.json`), builds, runs the tests,
+and produces the installer, the MSI and a portable archive in `artifacts/`.
 
 For a plain build and test run:
 
@@ -76,14 +129,14 @@ written in Russian.
 
 ## Licence
 
-NexusPDF is licensed under the **GNU Affero General Public License v3.0** —
-see [LICENSE](LICENSE).
+NexusPDF is licensed under the **GNU Affero General Public License v3.0** — see
+[LICENSE](LICENSE).
 
 The reason is MuPDF: document compression uses MuPDF by Artifex Software, which
 is distributed under the AGPL-3.0. Bundling it means the combined work carries
 the same licence. In practice: you may use, study, modify and redistribute
-NexusPDF, and anyone who distributes a modified version must publish their
-source under the same terms.
+NexusPDF, and anyone who distributes a modified version must publish their source
+under the same terms.
 
 ## Third-party components
 
@@ -113,11 +166,10 @@ Kept deliberately honest, not hidden:
 The builds are not code-signed, so SmartScreen warns on download. Checksums are
 published with every release.
 
-## Support the work
-
-NexusPDF is free and stays free. If it saved you time:
-[nexus.internetdeco.com/#support](https://nexus.internetdeco.com/#support)
-
 ---
 
-Crafted by Artur Yurchuk.
+<div align="center">
+
+Crafted by Artur Yurchuk
+
+</div>
