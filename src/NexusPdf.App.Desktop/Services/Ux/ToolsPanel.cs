@@ -1,4 +1,7 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Windows.Data;
+using CommunityToolkit.Mvvm.ComponentModel;
 using GongSolutions.Wpf.DragDrop;
 using NexusPdf.App.Desktop.Localization;
 using NexusPdf.Ux;
@@ -6,11 +9,46 @@ using NexusPdf.Ux;
 namespace NexusPdf.App.Desktop.Services.Ux;
 
 /// <summary>Группа панели инструментов: заголовок и кнопки под ним.</summary>
-public sealed class ToolGroup
+public sealed partial class ToolGroup : ObservableObject
 {
     public required string Key { get; init; }
     public required string Title { get; init; }
     public required ObservableCollection<QuickPanelItem> Items { get; init; }
+
+    /// <summary>
+    /// Видимый состав группы. При поиске отсеивает не подошедшие кнопки, но
+    /// НЕ трогает <see cref="Items"/> — перетаскивание и сохранение раскладки
+    /// работают с настоящим списком.
+    /// </summary>
+    public ICollectionView View
+    {
+        get
+        {
+            _view ??= CollectionViewSource.GetDefaultView(Items);
+            return _view;
+        }
+    }
+
+    private ICollectionView? _view;
+
+    /// <summary>Пустая группа при поиске прячется целиком — заголовок без кнопок бесполезен.</summary>
+    [ObservableProperty] private bool _isVisible = true;
+
+    /// <summary>Во время поиска разделы раскрыты: искать в свёрнутом бессмысленно.</summary>
+    [ObservableProperty] private bool _isExpanded = true;
+
+    public void ApplyFilter(string query)
+    {
+        if (query.Length == 0)
+        {
+            View.Filter = null;
+            IsVisible = true;
+            return;
+        }
+        View.Filter = o => o is QuickPanelItem item && item.Matches(query);
+        IsVisible = Items.Any(i => i.Matches(query));
+        if (IsVisible) IsExpanded = true;
+    }
 }
 
 /// <summary>
@@ -26,7 +64,7 @@ public sealed class ToolGroup
 /// инструментов у каждого разная, и listать до неё каждый раз не должно быть
 /// работой.
 /// </summary>
-public sealed class ToolsPanel : IDropTarget
+public sealed partial class ToolsPanel : ObservableObject, IDropTarget
 {
     private readonly UxCommandHub _hub;
     private readonly Action<string> _save;
@@ -49,6 +87,34 @@ public sealed class ToolsPanel : IDropTarget
     }
 
     public ObservableCollection<ToolGroup> Groups { get; }
+
+    /// <summary>
+    /// Строка поиска по панели. Шестьдесят инструментов невозможно охватить
+    /// глазом, а прокручивать до нужного — работа: набранное слово оставляет
+    /// на экране только подходящее.
+    /// </summary>
+    public string Filter
+    {
+        get => _filter;
+        set
+        {
+            var query = (value ?? "").Trim();
+            if (_filter == query) return;
+            _filter = query;
+            foreach (var group in Groups)
+                group.ApplyFilter(query);
+            OnPropertyChanged(nameof(Filter));
+            OnPropertyChanged(nameof(HasFilter));
+            OnPropertyChanged(nameof(NothingFound));
+        }
+    }
+
+    private string _filter = "";
+
+    public bool HasFilter => _filter.Length > 0;
+
+    /// <summary>Ничего не нашлось — сказать об этом прямо, а не показывать пустоту.</summary>
+    public bool NothingFound => HasFilter && Groups.All(g => !g.IsVisible);
 
     /// <summary>Сброс к раскладке по умолчанию.</summary>
     public void Reset()

@@ -831,6 +831,23 @@ public partial class DocumentView : UserControl
         object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e) =>
         (Window.GetWindow(this) as MainWindow)?.ViewModel.SavePanelWidths();
 
+    /// <summary>Esc в строке поиска очищает её, а не закрывает окно.</summary>
+    private void OnToolsSearchKey(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Escape) return;
+        ClearToolsSearch();
+        e.Handled = true;
+    }
+
+    private void OnToolsSearchClear(object sender, RoutedEventArgs e) => ClearToolsSearch();
+
+    private void ClearToolsSearch()
+    {
+        if (Window.GetWindow(this) is MainWindow main)
+            main.ViewModel.Tools.Filter = "";
+        ToolsSearch.Clear();
+    }
+
     /// <summary>Элемент списка под курсором по его DataContext.</summary>
     private static T? FindItemAt<T>(object originalSource) where T : class
     {

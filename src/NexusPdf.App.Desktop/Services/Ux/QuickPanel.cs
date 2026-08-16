@@ -43,6 +43,21 @@ public sealed partial class QuickPanelItem : ObservableObject
     [ObservableProperty] private string _tooltip = "";
 
     /// <summary>
+    /// Подходит ли кнопка под строку поиска. Ищем не только по названию, но и
+    /// по синонимам из реестра: человек набирает «кривой скан» или «deskew», а
+    /// пункт называется «Улучшить сканы».
+    /// </summary>
+    public bool Matches(string query)
+    {
+        if (_command == null) return false;
+        if (query.Length == 0) return true;
+        if (Title.Contains(query, StringComparison.CurrentCultureIgnoreCase)) return true;
+        foreach (var word in _command.Keywords)
+            if (word.Contains(query, StringComparison.CurrentCultureIgnoreCase)) return true;
+        return false;
+    }
+
+    /// <summary>
     /// Пересчёт доступности. Вызывается по общему сигналу WPF о том, что
     /// состояние могло измениться, — отдельного «обнови панель» в двадцати
     /// местах быть не должно.

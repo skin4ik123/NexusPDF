@@ -382,8 +382,8 @@ public static class AppCommands
         yield return Tool(CommandIds.OptimizeCopy, "OptimizeCopy", "\uEC4A",
             new[] { "оптимизировать", "линеаризовать", "быстрый просмотр в сети" });
         yield return Tool(CommandIds.EnhanceScans, "EnhanceScansMenu", "\uE90F",
-            new[] { "скан", "выровнять наклон", "кривая страница", "убрать шум",
-                    "почистить скан", "deskew", "despeckle" });
+            new[] { "скан", "кривой скан", "выровнять наклон", "кривая страница",
+                    "убрать шум", "почистить скан", "выровнять фон", "deskew", "despeckle" });
         yield return Tool(CommandIds.ExportImages, "ExportImagesMenu", "\uE898",
             new[] { "экспорт страниц", "в картинки", "png", "jpeg" });
         yield return Tool(CommandIds.ExtractText, "ExtractTextMenu", "\uE8A5",
