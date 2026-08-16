@@ -83,7 +83,7 @@ public static class AppCommands
         };
         yield return new CommandDescriptor
         {
-            Id = CommandIds.SelectAllOnPage, TitleKey = "SelectAll",
+            Id = CommandIds.SelectAllOnPage, TitleKey = "SelectAll", Glyph = "\uE8B3",
             Category = CommandCategory.Edit, Group = MenuGroup.Quick,
             Danger = CommandDanger.Safe, Shortcut = "Ctrl+A",
             Keywords = new[] { "выделить всё", "select all", "весь текст страницы" },
@@ -91,7 +91,7 @@ public static class AppCommands
         };
         yield return new CommandDescriptor
         {
-            Id = CommandIds.Duplicate, TitleKey = "DuplicatePages", Glyph = "\uE8C8",
+            Id = CommandIds.Duplicate, TitleKey = "DuplicatePages", Glyph = "\uF413",
             Category = CommandCategory.Pages, Group = MenuGroup.Editing, SupportsMultiSelection = true,
             Keywords = new[] { "дублировать", "копия страницы", "duplicate", "размножить" },
             Unavailable = NeedsEditableDocument,
@@ -100,35 +100,35 @@ public static class AppCommands
         // ---------- Выбранный объект ----------
         yield return new CommandDescriptor
         {
-            Id = CommandIds.Delete, TitleKey = "UxDeleteObject", Glyph = "",
+            Id = CommandIds.Delete, TitleKey = "UxDeleteObject", Glyph = "\uE74D",
             Category = CommandCategory.Edit, Group = MenuGroup.Dangerous, Shortcut = "Delete",
             Keywords = new[] { "удалить объект", "стереть", "delete" },
             Unavailable = c => !c.HasObjectSelection ? "UxNoObjectSelection" : null,
         };
         yield return new CommandDescriptor
         {
-            Id = CommandIds.DuplicateObject, TitleKey = "UxDuplicateObject", Glyph = "",
+            Id = CommandIds.DuplicateObject, TitleKey = "UxDuplicateObject", Glyph = "\uE923",
             Category = CommandCategory.Edit, Group = MenuGroup.Editing,
             Keywords = new[] { "дублировать объект", "копия объекта" },
             Unavailable = c => !c.HasObjectSelection ? "UxNoObjectSelection" : null,
         };
         yield return new CommandDescriptor
         {
-            Id = CommandIds.BringForward, TitleKey = "UxBringForward", Glyph = "",
+            Id = CommandIds.BringForward, TitleKey = "UxBringForward", Glyph = "\uE74A",
             Category = CommandCategory.Content, Group = MenuGroup.Arrange,
             Keywords = new[] { "вперёд", "поверх", "на передний план" },
             Unavailable = c => !c.HasObjectSelection ? "UxNoObjectSelection" : null,
         };
         yield return new CommandDescriptor
         {
-            Id = CommandIds.SendBackward, TitleKey = "UxSendBackward", Glyph = "",
+            Id = CommandIds.SendBackward, TitleKey = "UxSendBackward", Glyph = "\uE74B",
             Category = CommandCategory.Content, Group = MenuGroup.Arrange,
             Keywords = new[] { "назад", "под низ", "на задний план" },
             Unavailable = c => !c.HasObjectSelection ? "UxNoObjectSelection" : null,
         };
         yield return new CommandDescriptor
         {
-            Id = CommandIds.ObjectProperties, TitleKey = "UxObjectProperties", Glyph = "",
+            Id = CommandIds.ObjectProperties, TitleKey = "UxObjectProperties", Glyph = "\uE713",
             Category = CommandCategory.Edit, Group = MenuGroup.Properties,
             Danger = CommandDanger.Safe, OpensDialog = true,
             Keywords = new[] { "свойства объекта", "размер объекта", "положение" },
@@ -142,7 +142,7 @@ public static class AppCommands
             "Ctrl+-", new[] { "мельче", "уменьшить", "zoom out", "отдалить", "масштаб" });
         yield return Safe(CommandIds.ZoomActual, "ZoomActual", "\uE9A6", CommandCategory.View,
             "Ctrl+1", new[] { "фактический размер", "100", "actual size" });
-        yield return Safe(CommandIds.FitWidth, "ZoomFitWidth", "\uE9A6", CommandCategory.View,
+        yield return Safe(CommandIds.FitWidth, "ZoomFitWidth", "\uEA4B", CommandCategory.View,
             "", new[] { "по ширине", "fit width", "вписать по ширине" });
         yield return Safe(CommandIds.FitPage, "ZoomFitPage", "\uE73F", CommandCategory.View,
             "Ctrl+0", new[] { "страница целиком", "fit page", "вписать страницу" });
@@ -150,24 +150,24 @@ public static class AppCommands
             "Ctrl+F", new[] { "поиск", "найти", "search", "find" });
         yield return new CommandDescriptor
         {
-            Id = CommandIds.FindSelection, TitleKey = "UxFindSelection", Glyph = "\uE721",
+            Id = CommandIds.FindSelection, TitleKey = "UxFindSelection", Glyph = "\uE773",
             Category = CommandCategory.View, Group = MenuGroup.Quick, Danger = CommandDanger.Safe,
             Keywords = new[] { "найти это", "искать выделенное", "найти такой же текст" },
             Unavailable = c => !c.HasTextSelection ? "UxNoTextSelection" : null,
         };
         yield return Safe(CommandIds.ToggleOrganize, "OrganizeTooltip", "\uE8A9", CommandCategory.View,
             "", new[] { "систематизация", "порядок страниц", "миниатюры", "organize" });
-        yield return Safe(CommandIds.ToggleOutline, "PanelTabOutline", "\uE8A4", CommandCategory.View,
+        yield return Safe(CommandIds.ToggleOutline, "PanelTabOutline", "\uE82D", CommandCategory.View,
             "", new[] { "оглавление", "закладки", "outline", "содержание" });
         yield return Safe(CommandIds.ToggleCommentsPanel, "CommentsPanel", "\uE8BD", CommandCategory.Comments,
             "", new[] { "панель комментариев", "список замечаний", "comments" });
 
         // ---------- Страницы ----------
-        yield return Page(CommandIds.RotateRight, "RotateRight", "\uE7AD",
+        yield return Page(CommandIds.RotateRight, "RotateRight", "\uE72C",
             new[] { "повернуть вправо", "перевернуть", "rotate right", "поворот" });
-        yield return Page(CommandIds.RotateLeft, "RotateLeft", "\uE80C",
+        yield return Page(CommandIds.RotateLeft, "RotateLeft", "\uE777",
             new[] { "повернуть влево", "перевернуть", "rotate left", "поворот" });
-        yield return Page(CommandIds.Rotate180, "Rotate180", "\uE777",
+        yield return Page(CommandIds.Rotate180, "Rotate180", "\uE895",
             new[] { "перевернуть", "180", "вверх ногами", "rotate 180" });
         yield return new CommandDescriptor
         {
@@ -189,7 +189,7 @@ public static class AppCommands
         };
         yield return new CommandDescriptor
         {
-            Id = CommandIds.PageProperties, TitleKey = "UxPageProperties",
+            Id = CommandIds.PageProperties, TitleKey = "UxPageProperties", Glyph = "\uE7C3",
             Category = CommandCategory.Pages, Group = MenuGroup.Properties,
             Danger = CommandDanger.Safe, OpensDialog = true, SupportsMultiSelection = true,
             Keywords = new[] { "свойства страницы", "размер страницы", "page size" },
@@ -217,7 +217,7 @@ public static class AppCommands
             new[] { "добавить текст", "надпись", "add text" });
         yield return Content(CommandIds.InsertImage, "InsertImageMenu", "\uEB9F", true,
             new[] { "вставить изображение", "картинка", "фото", "insert image" });
-        yield return Content(CommandIds.InsertSignatureImage, "InsertSignatureMenu", "\uE70F", true,
+        yield return Content(CommandIds.InsertSignatureImage, "InsertSignatureMenu", "\uEB7E", true,
             new[] { "подпись картинкой", "факсимиле", "вставить подпись" });
         yield return new CommandDescriptor
         {
@@ -243,7 +243,7 @@ public static class AppCommands
         };
         yield return new CommandDescriptor
         {
-            Id = CommandIds.EditPageInPaint, TitleKey = "PaintEditMenu", Glyph = "\uE70F",
+            Id = CommandIds.EditPageInPaint, TitleKey = "PaintEditMenu", Glyph = "\uE790",
             Category = CommandCategory.Content, Group = MenuGroup.Special, OpensDialog = true,
             Touch = TouchSuitability.NeedsPrecision,
             Keywords = new[] { "paint", "пейнт", "редактировать страницу", "внешний редактор" },
@@ -279,7 +279,7 @@ public static class AppCommands
             new[] { "стрелка", "arrow", "указатель" });
         yield return new CommandDescriptor
         {
-            Id = CommandIds.RestoreStroke, TitleKey = "DrawRestoreFree",
+            Id = CommandIds.RestoreStroke, TitleKey = "DrawRestoreFree", Glyph = "\uE845",
             DescriptionKey = "DrawRestoreFreeHint",
             Category = CommandCategory.Comments, Group = MenuGroup.Quick,
             Keywords = new[] { "вернуть штрих", "как было", "от руки", "не выпрямлять" },
@@ -298,7 +298,7 @@ public static class AppCommands
         // ---------- Защита ----------
         yield return new CommandDescriptor
         {
-            Id = CommandIds.Redact, TitleKey = "RedactShort", DescriptionKey = "RedactTool", Glyph = "\uE739", Category = CommandCategory.Security, Group = MenuGroup.Dangerous,
+            Id = CommandIds.Redact, TitleKey = "RedactShort", DescriptionKey = "RedactTool", Glyph = "\uE73B", Category = CommandCategory.Security, Group = MenuGroup.Dangerous,
             Danger = CommandDanger.Irreversible,
             Keywords = new[] { "вымарать", "удалить секретное", "redaction", "зачернить" },
             Unavailable = NeedsEditableDocument,
@@ -370,7 +370,7 @@ public static class AppCommands
         };
         yield return new CommandDescriptor
         {
-            Id = CommandIds.BatchPrint, TitleKey = "BpTitle", Glyph = "\uE749",
+            Id = CommandIds.BatchPrint, TitleKey = "BpTitle", Glyph = "\uE8F1",
             Category = CommandCategory.Print, Group = MenuGroup.Special,
             Danger = CommandDanger.Safe, OpensDialog = true,
             Keywords = new[] { "пакетная печать", "много файлов", "batch print" },
@@ -379,18 +379,18 @@ public static class AppCommands
         // ---------- Преобразование ----------
         yield return Tool(CommandIds.CompressPages, "CompressMenu", "\uE8B9",
             new[] { "сжать", "уменьшить размер", "compress", "оптимизировать картинки" });
-        yield return Tool(CommandIds.OptimizeCopy, "OptimizeCopy", "\uE8B9",
+        yield return Tool(CommandIds.OptimizeCopy, "OptimizeCopy", "\uEC4A",
             new[] { "оптимизировать", "линеаризовать", "быстрый просмотр в сети" });
         yield return Tool(CommandIds.EnhanceScans, "EnhanceScansMenu", "\uE90F",
             new[] { "скан", "выровнять наклон", "кривая страница", "убрать шум",
                     "почистить скан", "deskew", "despeckle" });
-        yield return Tool(CommandIds.ExportImages, "ExportImagesMenu", "\uEB9F",
+        yield return Tool(CommandIds.ExportImages, "ExportImagesMenu", "\uE898",
             new[] { "экспорт страниц", "в картинки", "png", "jpeg" });
         yield return Tool(CommandIds.ExtractText, "ExtractTextMenu", "\uE8A5",
             new[] { "текст в файл", "извлечь текст", "txt" });
         yield return new CommandDescriptor
         {
-            Id = CommandIds.CreateFromImages, TitleKey = "FromImagesMenu", Glyph = "\uE8B9",
+            Id = CommandIds.CreateFromImages, TitleKey = "FromImagesMenu", Glyph = "\uE91B",
             Category = CommandCategory.Convert, Group = MenuGroup.Special,
             Danger = CommandDanger.Safe, OpensDialog = true,
             Keywords = new[] { "pdf из картинок", "собрать из фото", "сканы в pdf" },
@@ -401,7 +401,7 @@ public static class AppCommands
             new[] { "сравнить", "различия", "compare", "две версии" });
         yield return new CommandDescriptor
         {
-            Id = CommandIds.BatchProcess, TitleKey = "BatchMenu", Glyph = "\uE8B9",
+            Id = CommandIds.BatchProcess, TitleKey = "BatchMenu", Glyph = "\uE8FD",
             Category = CommandCategory.Convert, Group = MenuGroup.Special,
             Danger = CommandDanger.Safe, OpensDialog = true,
             Keywords = new[] { "пакетная обработка", "много файлов", "batch" },
@@ -422,7 +422,7 @@ public static class AppCommands
         };
         yield return new CommandDescriptor
         {
-            Id = CommandIds.NextTab, TitleKey = "UxNextTab",
+            Id = CommandIds.NextTab, TitleKey = "UxNextTab", Glyph = "\uE76C",
             Category = CommandCategory.Window, Group = MenuGroup.Quick,
             Danger = CommandDanger.Safe, Shortcut = "Ctrl+Tab",
             Keywords = new[] { "следующая вкладка", "next tab" },
@@ -430,7 +430,7 @@ public static class AppCommands
         };
         yield return new CommandDescriptor
         {
-            Id = CommandIds.PreviousTab, TitleKey = "UxPreviousTab",
+            Id = CommandIds.PreviousTab, TitleKey = "UxPreviousTab", Glyph = "\uE76B",
             Category = CommandCategory.Window, Group = MenuGroup.Quick,
             Danger = CommandDanger.Safe, Shortcut = "Ctrl+Shift+Tab",
             Keywords = new[] { "предыдущая вкладка", "previous tab" },
@@ -445,14 +445,14 @@ public static class AppCommands
         };
         yield return new CommandDescriptor
         {
-            Id = CommandIds.CommandPalette, TitleKey = "UxCommandPalette", Glyph = "\uE721",
+            Id = CommandIds.CommandPalette, TitleKey = "UxCommandPalette", Glyph = "\uE712",
             Category = CommandCategory.Window, Group = MenuGroup.Quick,
             Danger = CommandDanger.Safe, Shortcut = "Ctrl+K", OpensDialog = true,
             Keywords = new[] { "все команды", "палитра", "найти команду", "command palette" },
         };
         yield return new CommandDescriptor
         {
-            Id = CommandIds.About, TitleKey = "About", Glyph = "\uE946",
+            Id = CommandIds.About, TitleKey = "About", Glyph = "\uE9CE",
             Category = CommandCategory.Help, Group = MenuGroup.Properties,
             Danger = CommandDanger.Safe, OpensDialog = true,
             Keywords = new[] { "о программе", "версия", "about", "лицензии" },
