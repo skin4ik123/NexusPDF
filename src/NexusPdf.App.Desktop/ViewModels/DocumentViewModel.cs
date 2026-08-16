@@ -71,7 +71,16 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PageOfText))]
     [NotifyPropertyChangedFor(nameof(CurrentPageSizeText))]
+    [NotifyPropertyChangedFor(nameof(CurrentPageSizeWithOrientation))]
+    [NotifyPropertyChangedFor(nameof(CurrentPageRotationText))]
     private int _currentPageNumber = 1;
+
+    partial void OnCurrentPageNumberChanged(int value)
+    {
+        // Свойства страницы обновляются вслед за страницей, но не мешают
+        // прокрутке: запрос текста уходит в фон и не ждётся.
+        _ = RefreshPagePropertiesAsync();
+    }
 
     public string PageOfText => Loc.F("PageOf", CurrentPageNumber, PageCount);
 
@@ -587,9 +596,105 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelection))]
+    [NotifyPropertyChangedFor(nameof(ShowsTextProperties))]
+    [NotifyPropertyChangedFor(nameof(ShowsPageProperties))]
+    [NotifyPropertyChangedFor(nameof(SelectedTextPreview))]
+    [NotifyPropertyChangedFor(nameof(SelectedTextStats))]
     private string _selectedText = "";
 
     public bool HasSelection => SelectedText.Length > 0;
+
+    /// <summary>
+    /// Панель свойств показывает ТО, ЧТО ВЫБРАНО: объект, выделенный текст
+    /// либо — когда не выбрано ничего — саму страницу. Пустая панель со словом
+    /// «выберите что-нибудь» занимала бы место и ничего не сообщала.
+    /// </summary>
+    public bool ShowsTextProperties => !HasObjectSelection && HasSelection;
+
+    public bool ShowsPageProperties => !HasObjectSelection && !HasSelection;
+
+    /// <summary>Первые слова выделения: по ним видно, что именно взято.</summary>
+    public string SelectedTextPreview
+    {
+        get
+        {
+            var text = SelectedText.Replace('\n', ' ').Replace('\r', ' ').Trim();
+            while (text.Contains("  ")) text = text.Replace("  ", " ");
+            return text.Length <= 160 ? text : text[..157] + "…";
+        }
+    }
+
+    /// <summary>Сколько взято: символы и слова считаются по факту, а не «примерно».</summary>
+    public string SelectedTextStats
+    {
+        get
+        {
+            var words = SelectedText.Split(
+
+                new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries).Length;
+            return Loc.F("PropTextStats", SelectedText.Length, words);
+        }
+    }
+
+    /// <summary>Размер текущей страницы с ориентацией: «210 × 297 мм, книжная».</summary>
+    public string CurrentPageSizeWithOrientation
+    {
+        get
+        {
+            if (Pages.Count == 0) return "";
+            var page = Pages[Math.Clamp(CurrentPageNumber - 1, 0, Pages.Count - 1)];
+            var orientation = Loc.Get(page.SizePt.WidthPoints > page.SizePt.HeightPoints
+                ? "PropLandscape"
+                : "PropPortrait");
+            return $"{page.SizeText}, {orientation}";
+        }
+    }
+
+    /// <summary>Поворот страницы, применённый пользователем в этой сессии.</summary>
+    public string CurrentPageRotationText
+    {
+        get
+        {
+            if (Pages.Count == 0) return "";
+            var page = Pages[Math.Clamp(CurrentPageNumber - 1, 0, Pages.Count - 1)];
+            var quarters = ((page.PageRef.RotationOffset % 4) + 4) % 4;
+            return quarters == 0 ? Loc.Get("PropRotationNone") : Loc.F("PropRotation", quarters * 90);
+        }
+    }
+
+    /// <summary>Есть ли на странице текстовый слой — по нему видно скан это или вёрстка.</summary>
+    [ObservableProperty]
+    private string _currentPageTextInfo = "";
+
+    /// <summary>
+    /// Разбор текущей страницы для панели свойств. Делается по смене страницы,
+    /// а не на каждый кадр: один запрос текста страницы дёшев, но не бесплатен.
+    /// </summary>
+    private async Task RefreshPagePropertiesAsync()
+    {
+        OnPropertyChanged(nameof(CurrentPageSizeWithOrientation));
+        OnPropertyChanged(nameof(CurrentPageRotationText));
+        try
+        {
+            var index = Math.Clamp(CurrentPageNumber - 1, 0, Math.Max(0, Pages.Count - 1));
+            if (Pages.Count == 0) { CurrentPageTextInfo = ""; return; }
+            var (handle, pageIndex) = await Document.ResolveTextPageAsync(index, CancellationToken.None);
+            var text = await handle.GetPageTextAsync(pageIndex, CancellationToken.None);
+            var letters = text.Count(char.IsLetterOrDigit);
+            CurrentPageTextInfo = letters switch
+            {
+                0 => Loc.Get("PropNoTextLayer"),
+                < 40 => Loc.F("PropLittleText", letters),
+                _ => Loc.F("PropHasText", letters),
+            };
+        }
+        catch (Exception)
+        {
+            // Свойства — справка, а не операция: молчим и не мешаем работать.
+            CurrentPageTextInfo = "";
+        }
+    }
+
 
     /// <summary>Начало выделения: символ под курсором становится якорем.</summary>
     public async Task<bool> BeginTextSelectionAsync(PageViewModel page, double xPt, double yPt)
@@ -2081,6 +2186,10 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         OnPropertyChanged(nameof(CurrentPageSizeText));
         if (CurrentPageNumber > Pages.Count)
             CurrentPageNumber = Pages.Count;
+        // Свойства страницы обновляются и при ПЕРЕСБОРКЕ (открытие документа,
+        // поворот, удаление): без этого панель показывала бы вчерашние данные
+        // или пустоту сразу после открытия.
+        _ = RefreshPagePropertiesAsync();
     }
 
     public async ValueTask DisposeAsync()
