@@ -119,6 +119,9 @@ public static class CommandIds
 
     /// <summary>Таблицы документа в книгу Excel: числа числами, ссылки ссылками.</summary>
     public const string ExportExcel = "convert.exportExcel";
+
+    /// <summary>Документ в Word: абзацы абзацами, таблицы таблицами, ссылки живыми.</summary>
+    public const string ExportWord = "convert.exportWord";
     public const string ExtractText = "convert.extractText";
     public const string CreateFromImages = "convert.fromImages";
     public const string MergePdfs = "convert.merge";

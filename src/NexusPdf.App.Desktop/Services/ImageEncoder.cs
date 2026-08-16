@@ -23,6 +23,30 @@ public static class ImageEncoder
         return stream.ToArray();
     }
 
+    /// <summary>
+    /// Картинка для вставки в документ Word: формат выбирается по содержимому.
+    ///
+    /// Фотографию и скан жмём JPEG — без потерь они весили бы в десятки раз
+    /// больше без всякой пользы для глаза. Схему, чертёж и снимок экрана JPEG,
+    /// наоборот, портит ореолами и часто РАЗДУВАЕТ, поэтому они идут PNG.
+    /// </summary>
+    public static NexusPdf.Export.EncodedImage EncodeForDocument(byte[] bgra, int width, int height)
+    {
+        var analysis = ImageCodecChooser.Analyze(bgra, width, height, quality: 82);
+        var lossless = analysis.Content == ImageContent.Graphics;
+
+        var source = BitmapSource.Create(
+            width, height, 96, 96, PixelFormats.Bgra32, null, bgra, width * 4);
+        BitmapEncoder encoder = lossless
+            ? new PngBitmapEncoder()
+            : new JpegBitmapEncoder { QualityLevel = analysis.Jpeg.Quality };
+        encoder.Frames.Add(BitmapFrame.Create(source));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return new NexusPdf.Export.EncodedImage(
+            stream.ToArray(), lossless ? "image/png" : "image/jpeg");
+    }
+
     /// <summary>Замороженный BitmapSource из BGRA-растра (для предпросмотра).</summary>
     public static BitmapSource ToBitmap(byte[] bgra, int width, int height)
     {

@@ -137,6 +137,12 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     Task<IReadOnlyList<PdfFormFieldValue>> GetFormFieldValuesAsync(int pageIndex, CancellationToken ct);
 
     /// <summary>
+    /// Картинки страницы с их местом — для экспорта в Word. Крошечные
+    /// отбрасываются, суммарная площадь ограничена <paramref name="maxPixels"/>.
+    /// </summary>
+    Task<IReadOnlyList<PdfPageImage>> GetPageImagesAsync(int pageIndex, long maxPixels, CancellationToken ct);
+
+    /// <summary>
     /// Индекс символа в точке (отображаемые пункты от левого верхнего угла)
     /// или -1, если в точке текста нет. Нужен для выделения текста мышью.
     /// </summary>

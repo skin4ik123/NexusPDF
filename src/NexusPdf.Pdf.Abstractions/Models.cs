@@ -287,13 +287,18 @@ public sealed record PdfPageLink(PdfTextRect RectPt, string? Uri, int TargetPage
 /// вверх, 3 — сверху вниз. Без него повёрнутую подпись невозможно прочитать в
 /// правильном порядке: слова идут не туда, куда растут координаты.
 /// </param>
+/// <param name="FontName">
+/// Имя шрифта без служебного префикса подмножества и без суффикса начертания —
+/// «Times New Roman», а не «ABCDEF+TimesNewRoman,Bold». Пусто, если неизвестно.
+/// </param>
 public sealed record PdfTextWord(
     string Text,
     PdfTextRect RectPt,
     double FontSizePt,
     int FontWeight,
     uint ColorArgb,
-    int RotationQuarters = 0)
+    int RotationQuarters = 0,
+    string FontName = "")
 {
     /// <summary>Повёрнут ли текст (не горизонтальная строка слева направо).</summary>
     public bool IsRotated => RotationQuarters != 0;
@@ -304,6 +309,17 @@ public sealed record PdfTextWord(
     /// <summary>Середина по вертикали — по ней слова собираются в строки.</summary>
     public double CenterY => (RectPt.Top + RectPt.Bottom) / 2.0;
 }
+
+/// <summary>
+/// Растровое изображение страницы вместе с местом, где оно нарисовано —
+/// в координатах PDF. Нужно экспорту: документ без картинок это не документ,
+/// а его пересказ.
+/// </summary>
+public sealed record PdfPageImage(
+    byte[] Bgra,
+    int PixelWidth,
+    int PixelHeight,
+    PdfTextRect RectPt);
 
 /// <summary>
 /// Заполненное поле формы: имя, значение и рамка на странице.
@@ -344,13 +360,18 @@ public sealed record PdfComboInfo(
     double HeightPt,
     bool IsListBox);
 
-/// <summary>Существующая аннотация документа (для панели комментариев; только чтение). Value — /V для виджетов форм.</summary>
+/// <summary>
+/// Существующая аннотация документа (для панели комментариев; только чтение).
+/// Value — /V для виджетов форм. RectPt — рамка на странице, по ней экспорт
+/// понимает, к какому месту текста относится примечание.
+/// </summary>
 public sealed record PdfAnnotationInfo(
     int AnnotIndex,
     int Subtype,
     string Contents,
     string Author,
-    string Value = "");
+    string Value = "",
+    PdfTextRect? RectPt = null);
 
 /// <summary>Метаданные документа: версия PDF, шифрование и строки словаря /Info (пустые, если не заданы).</summary>
 public sealed record PdfDocumentMetadata(

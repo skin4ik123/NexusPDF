@@ -1312,11 +1312,23 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
                         var subtype = fpdf_annot.FPDFAnnotGetSubtype(annot);
                         if (subtype is subtypeLink or subtypePopup)
                             continue;
+
+                        // Рамка нужна экспорту, чтобы привязать примечание к
+                        // нужному месту текста. Её отсутствие не повод терять
+                        // саму аннотацию.
+                        var box = new FS_RECTF_();
+                        PdfTextRect? rect = fpdf_annot.FPDFAnnotGetRect(annot, box) != 0
+                            ? new PdfTextRect(
+                                Math.Min(box.Left, box.Right), Math.Max(box.Top, box.Bottom),
+                                Math.Max(box.Left, box.Right), Math.Min(box.Top, box.Bottom))
+                            : null;
+
                         result.Add(new PdfAnnotationInfo(
                             i, subtype,
                             GetAnnotString(annot, "Contents"),
                             GetAnnotString(annot, "T"),
-                            GetAnnotString(annot, "V")));
+                            GetAnnotString(annot, "V"),
+                            rect));
                     }
                     finally
                     {

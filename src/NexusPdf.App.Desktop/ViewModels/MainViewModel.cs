@@ -1855,6 +1855,64 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Документ → документ Word.
+    ///
+    /// Пользователю честно говорится, что разметка ВОССТАНОВЛЕНА: в PDF нет ни
+    /// абзацев, ни таблиц, и результат всегда компромисс. Обещать «как в
+    /// оригинале» — значит подставить того, кто отправит файл дальше не глядя.
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportWord()
+    {
+        if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        var dialog = new SaveFileDialog
+        {
+            Filter = Loc.Get("DocxFilter"),
+            FileName = Path.GetFileNameWithoutExtension(doc.Title) + ".docx",
+            DefaultExt = ".docx",
+        };
+        if (dialog.ShowDialog(OwnerWindow) != true) return;
+
+        doc.IsBusy = true;
+        try
+        {
+            var token = doc.Busy.Start(Loc.Get("ExportWordTitle"), canCancel: true, determinate: true);
+            var summary = await _services.Convert.ExportToWordAsync(
+                doc.Document, dialog.FileName, null,
+                // Картинки жмутся кодеками Windows: фотография в PNG без
+                // потерь весила бы в десятки раз больше без всякой пользы.
+                new WordExportOptions(Encode: ImageEncoder.EncodeForDocument),
+                new PageAnalysisOptions(),
+                new Progress<(int Done, int Total)>(p =>
+                {
+                    doc.Busy.Report(p.Total > 0 ? (double)p.Done / p.Total : 0,
+                        Loc.F("ExportWordProgress", p.Done, p.Total));
+                }),
+                token);
+
+            doc.StatusText = Loc.F("ExportWordDone", summary.Pages, summary.Paragraphs,
+                summary.Tables, summary.Images, summary.Links, summary.Comments) +
+                " — " + Loc.Get("ExportWordHint");
+            Log.Information("Экспорт в Word: {File}, страниц {Pages}", dialog.FileName, summary.Pages);
+        }
+        catch (OperationCanceledException)
+        {
+            doc.StatusText = Loc.Get("BusyCancelled");
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка экспорта в Word");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"), Loc.Get("ExportWordTitle"), ex.ToString());
+            doc.StatusText = Loc.Get("Ready");
+        }
+        finally
+        {
+            doc.Busy.Finish();
+            doc.IsBusy = false;
+        }
+    }
+
+    /// <summary>
     /// Таблицы документа → книга Excel.
     ///
     /// Итог показывается разбором: сколько таблиц взято по нарисованным
