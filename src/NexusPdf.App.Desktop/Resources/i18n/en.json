@@ -23,6 +23,7 @@
   "CloseTab": "Close tab",
   "RecentFiles": "Recent documents",
   "NoRecentFiles": "No recent documents yet",
+  "OpeningDocument": "Opening the document…",
   "StartTitle": "Work with PDF locally and safely",
   "StartOpenHint": "Open a document or drop PDF files into this window",
   "RestoreSession": "Restore previous session",

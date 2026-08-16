@@ -407,6 +407,27 @@ public sealed partial class MainViewModel : ObservableObject
 
     public bool HasDocuments => Documents.Count > 0;
 
+    /// <summary>
+    /// Сколько файлов открывается прямо сейчас. Пока их открывают, стартовый
+    /// экран не показывается: приглашать открыть файл в тот момент, когда файл
+    /// уже открывается, — значит мигать пользователю ненужным экраном.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsOpeningFiles))]
+    [NotifyPropertyChangedFor(nameof(ShowStartScreen))]
+    private int _pendingOpens;
+
+    /// <summary>
+    /// Показывать ли «открываю…». Как только первый документ готов, надпись
+    /// убирается, даже если следом открываются ещё файлы: показывать заставку
+    /// поверх готового документа — значит прятать то, ради чего программу и
+    /// запустили.
+    /// </summary>
+    public bool IsOpeningFiles => PendingOpens > 0 && !HasDocuments;
+
+    /// <summary>Стартовый экран — только когда открывать действительно нечего.</summary>
+    public bool ShowStartScreen => !HasDocuments && PendingOpens == 0;
+
     public string WindowTitle => ActiveDocument is { } doc
         ? Loc.F("WindowTitle", doc.Title)
         : Loc.Get("AppName");
@@ -427,8 +448,21 @@ public sealed partial class MainViewModel : ObservableObject
 
     public async Task OpenFilesAsync(IEnumerable<string> paths)
     {
-        foreach (var path in paths)
-            await OpenSingleAsync(path);
+        var list = paths as IReadOnlyList<string> ?? paths.ToList();
+        if (list.Count == 0) return;
+
+        // Место могло быть занято заранее — при создании окна под файлы из
+        // проводника. Тогда занимать его второй раз не нужно.
+        PendingOpens = Math.Max(PendingOpens, list.Count);
+        try
+        {
+            foreach (var path in list)
+                await OpenSingleAsync(path);
+        }
+        finally
+        {
+            PendingOpens = 0;
+        }
     }
 
     private async Task OpenSingleAsync(string path)
@@ -457,6 +491,8 @@ public sealed partial class MainViewModel : ObservableObject
                 Documents.Add(vm);
                 ActiveDocument = vm;
                 OnPropertyChanged(nameof(HasDocuments));
+        OnPropertyChanged(nameof(ShowStartScreen));
+        OnPropertyChanged(nameof(IsOpeningFiles));
                 _ = vm.DetectFormsAsync();       // кнопка «Формы» появится, если есть AcroForm
                 _ = vm.LoadSignaturesAsync();    // значок статуса подписей в статус-баре
                 _ = vm.CheckActiveContentAsync(); // предупреждение о JS/вложениях/Launch
@@ -2142,6 +2178,8 @@ public sealed partial class MainViewModel : ObservableObject
         Documents.Remove(doc);
         ActiveDocument = Documents.LastOrDefault();
         OnPropertyChanged(nameof(HasDocuments));
+        OnPropertyChanged(nameof(ShowStartScreen));
+        OnPropertyChanged(nameof(IsOpeningFiles));
         await doc.DisposeAsync();
         UpdateSessionSnapshot();
     }
@@ -2189,6 +2227,8 @@ public sealed partial class MainViewModel : ObservableObject
         Documents.Remove(doc);
         ActiveDocument = Documents.LastOrDefault();
         OnPropertyChanged(nameof(HasDocuments));
+        OnPropertyChanged(nameof(ShowStartScreen));
+        OnPropertyChanged(nameof(IsOpeningFiles));
         WindowManager.OpenWindow(_services, doc);
     }
 
