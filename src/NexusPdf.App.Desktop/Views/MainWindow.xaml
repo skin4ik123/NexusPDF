@@ -381,7 +381,9 @@
                 ItemContainerStyle="{StaticResource DocTabItem}">
       <TabControl.ItemTemplate>
         <DataTemplate DataType="{x:Type vm:DocumentViewModel}">
-          <StackPanel Orientation="Horizontal" MaxWidth="240">
+          <!-- Вкладка принимает страницы, перетащенные из другого документа. -->
+          <StackPanel Orientation="Horizontal" MaxWidth="240" Background="Transparent"
+                      AllowDrop="True" DragOver="OnTabDragOver" Drop="OnTabDrop">
             <TextBlock Text="●" FontSize="9" Foreground="{DynamicResource Accent}"
                        VerticalAlignment="Center" Margin="0,0,5,0"
                        Visibility="{Binding IsDirty, Converter={StaticResource BoolToVis}}"/>

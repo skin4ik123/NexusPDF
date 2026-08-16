@@ -1426,6 +1426,52 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         return null;
     }
 
+    /// <summary>
+    /// Разовая загрузка строк текста страницы. Запрашивается ВЕСЬ текст сразу:
+    /// движок отдаёт его слитыми строками (их десятки, а не тысячи), поэтому
+    /// одна загрузка на страницу дешевле, чем вопрос на каждое движение мыши.
+    /// </summary>
+    public async Task EnsureTextAreasAsync(PageViewModel page)
+    {
+        if (page.TextAreasLoaded) return;
+        page.TextAreasLoaded = true; // повторных попыток при ошибке не делаем
+        try
+        {
+            var (handle, pageIndex) = await Document.ResolveTextPageAsync(
+                page.LogicalIndex, CancellationToken.None);
+            var text = await handle.GetPageTextAsync(pageIndex, CancellationToken.None);
+            if (text.Length == 0)
+            {
+                page.TextAreas = Array.Empty<Rect>();
+                return;
+            }
+            var rects = await handle.GetTextRectsAsync(pageIndex, 0, text.Length, CancellationToken.None);
+            page.TextAreas = rects.Select(r => TransformRectToDiu(r, page)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Не удалось получить строки текста страницы {Page}", page.PageNumber);
+            page.TextAreas = Array.Empty<Rect>();
+        }
+    }
+
+    /// <summary>
+    /// Есть ли текст под курсором. Строки чуть «подращиваются» по высоте:
+    /// попадание точно в границу строки требовало бы снайперской точности, а
+    /// мигание курсора между стрелкой и текстовым раздражает сильнее промаха.
+    /// </summary>
+    public bool HasTextAt(PageViewModel page, double xDiu, double yDiu)
+    {
+        const double slack = 2;
+        foreach (var area in page.TextAreas)
+        {
+            if (xDiu >= area.X - slack && xDiu <= area.X + area.Width + slack &&
+                yDiu >= area.Y - slack && yDiu <= area.Y + area.Height + slack)
+                return true;
+        }
+        return false;
+    }
+
     /// <summary>Событие: пользователь активировал внешнюю ссылку (подтверждение показывает окно).</summary>
     public event EventHandler<string>? ExternalLinkRequested;
 

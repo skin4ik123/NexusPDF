@@ -148,6 +148,46 @@ public partial class MainWindow : Window
     /// Меню вкладки. Щелчок правой кнопкой сначала делает вкладку активной:
     /// иначе «Сохранить» из меню одной вкладки сохранило бы другую.
     /// </summary>
+    /// <summary>
+    /// Что тащат: страницы другого документа. Формат — тот же, которым
+    /// пользуется перетаскивание внутри списка, поэтому отдельного режима
+    /// «перенос между документами» пользователю включать не надо.
+    /// </summary>
+    private static (DocumentViewModel Source, List<int> Indices)? DraggedPages(IDataObject data)
+    {
+        var payload = data.GetData(GongSolutions.Wpf.DragDrop.DragDrop.DataFormat.Name);
+        var pages = payload switch
+        {
+            PageViewModel single => new List<PageViewModel> { single },
+            System.Collections.IEnumerable many => many.OfType<PageViewModel>().ToList(),
+            _ => new List<PageViewModel>(),
+        };
+        if (pages.Count == 0) return null;
+        var owner = pages[0].Owner;
+        return (owner, pages.Where(p => ReferenceEquals(p.Owner, owner))
+            .Select(p => p.LogicalIndex).ToList());
+    }
+
+    private void OnTabDragOver(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        e.Effects = DragDropEffects.None;
+        if (sender is not FrameworkElement { DataContext: DocumentViewModel target }) return;
+        if (DraggedPages(e.Data) is not { } dragged) return;
+        // На свою же вкладку бросать нечего — этим занимается сам список.
+        if (ReferenceEquals(dragged.Source, target)) return;
+        e.Effects = DragDropEffects.Copy;
+    }
+
+    private void OnTabDrop(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not FrameworkElement { DataContext: DocumentViewModel target }) return;
+        if (DraggedPages(e.Data) is not { } dragged) return;
+        if (ReferenceEquals(dragged.Source, target)) return;
+        _ = ViewModel.DropPagesOnDocumentAsync(target, dragged.Source, dragged.Indices);
+    }
+
     private void OnTabRightClick(object sender, MouseButtonEventArgs e)
     {
         DocumentViewModel? document = null;

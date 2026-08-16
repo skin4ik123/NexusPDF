@@ -166,6 +166,83 @@ public sealed class OpenedDocument : IAsyncDisposable
             .ToList();
 
     /// <summary>
+    /// Вставка страниц ДРУГОГО открытого документа.
+    ///
+    /// Файл-источник открывается этим документом СВОИМ дескриптором: делить
+    /// дескриптор между документами нельзя — закрытие одной вкладки утащило бы
+    /// страницы из другой. Если тот же файл уже числится источником, он и
+    /// используется, второй раз файл не открывается.
+    ///
+    /// Ссылки переносятся целиком, вместе с поворотом и несохранёнными
+    /// правками страницы: перенос не должен молча терять работу.
+    /// </summary>
+    /// <returns>Сколько страниц вставлено.</returns>
+    public async Task<int> InsertPagesFromAsync(
+        IPdfRenderEngine engine, OpenedDocument source, IReadOnlyList<int> logicalIndices,
+        int insertIndex, CancellationToken ct)
+    {
+        if (ReferenceEquals(source, this))
+            throw new InvalidOperationException("Страницы переносятся между РАЗНЫМИ документами.");
+
+        var wanted = logicalIndices
+            .Where(i => i >= 0 && i < source.Session.Model.Pages.Count)
+            .Distinct()
+            .OrderBy(i => i)
+            .ToList();
+        if (wanted.Count == 0) return 0;
+
+        var remap = new Dictionary<Guid, Guid>();
+        var opened = new List<IPdfDocumentHandle>();
+        try
+        {
+            foreach (var sourceId in wanted.Select(i => source.Session.Model.Pages[i].SourceId).Distinct())
+            {
+                if (!source.Session.Model.Sources.TryGetValue(sourceId, out var path))
+                    throw new PdfEngineException("У переносимой страницы неизвестен файл-источник.");
+
+                var existing = Session.Model.Sources
+                    .FirstOrDefault(p => string.Equals(p.Value, path, StringComparison.OrdinalIgnoreCase));
+                if (existing.Value != null)
+                {
+                    remap[sourceId] = existing.Key;
+                    continue;
+                }
+
+                var handle = await engine.OpenAsync(path, source.Password, ct).ConfigureAwait(false);
+                opened.Add(handle);
+                var newId = Guid.NewGuid();
+                Handles[newId] = handle;
+                Session.Model.Sources[newId] = path;
+                remap[sourceId] = newId;
+            }
+
+            var pages = wanted
+                .Select(i => source.Session.Model.Pages[i])
+                .Select(p => p with { SourceId = remap[p.SourceId] })
+                .ToList();
+
+            var index = Math.Clamp(insertIndex, 0, Session.Model.Pages.Count);
+            Session.Apply(new InsertPagesOperation(index, pages));
+            return pages.Count;
+        }
+        catch
+        {
+            // Открытые ради переноса дескрипторы не должны пережить неудачу.
+            foreach (var handle in opened)
+            {
+                var id = Handles.FirstOrDefault(p => ReferenceEquals(p.Value, handle)).Key;
+                if (id != Guid.Empty)
+                {
+                    Handles.Remove(id);
+                    Session.Model.Sources.Remove(id);
+                }
+                await handle.DisposeAsync().ConfigureAwait(false);
+            }
+            throw;
+        }
+    }
+
+    /// <summary>
     /// После сохранения в новый файл (или на место старого) документ переоткрывается,
     /// чтобы ссылки страниц указывали на актуальный источник. История очищается.
     /// </summary>

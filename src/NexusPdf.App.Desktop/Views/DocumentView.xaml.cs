@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using NexusPdf.App.Desktop.Localization;
@@ -407,10 +408,14 @@ public partial class DocumentView : UserControl
             var (hoverPage, hoverElement) = hoverHit;
             _ = _vm.EnsureLinksAsync(hoverPage);
             var hoverPos = e.GetPosition(hoverElement);
+            _ = _vm.EnsureTextAreasAsync(hoverPage);
             var overLink = _vm.LinkAt(hoverPage, hoverPos.X, hoverPos.Y) != null;
+            // Текстовый курсор — ТОЛЬКО над текстом. Раньше он стоял над всей
+            // страницей, и программа выглядела так, будто везде можно печатать.
             var wanted = overLink ? Cursors.Hand
                 : _vm.PendingOverlay != null ? Cursors.Cross
-                : Cursors.IBeam;
+                : _vm.HasTextAt(hoverPage, hoverPos.X, hoverPos.Y) ? Cursors.IBeam
+                : Cursors.Arrow;
             if (PagesList.Cursor != wanted)
                 PagesList.Cursor = wanted;
         }
@@ -846,6 +851,104 @@ public partial class DocumentView : UserControl
         if (Window.GetWindow(this) is MainWindow main)
             main.ViewModel.Tools.Filter = "";
         ToolsSearch.Clear();
+    }
+
+    // ----- Выделение рамкой в режиме систематизации -----
+
+    private MarqueeAdorner? _marquee;
+    private Point _marqueeStart;
+    private List<PageViewModel>? _marqueeBase;
+
+    /// <summary>
+    /// Рамка начинается ТОЛЬКО с пустого места: нажатие на саму страницу — это
+    /// перетаскивание, и подменять его выделением нельзя.
+    /// </summary>
+    private void OnOrganizeMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left) return;
+        if (FindItemAt<PageViewModel>(e.OriginalSource) != null) return;
+        if (e.OriginalSource is DependencyObject source &&
+            FindAncestor<System.Windows.Controls.Primitives.ScrollBar>(source) != null)
+            return;
+
+        _marqueeStart = e.GetPosition(OrganizeList);
+        // Ctrl и Shift означают «добавить к выбранному», поэтому прежний выбор
+        // запоминается; без них рамка начинает с чистого листа.
+        var additive = (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Shift)) != 0;
+        _marqueeBase = additive
+            ? OrganizeList.SelectedItems.OfType<PageViewModel>().ToList()
+            : new List<PageViewModel>();
+        if (!additive)
+            OrganizeList.SelectedItems.Clear();
+
+        var layer = AdornerLayer.GetAdornerLayer(OrganizeList);
+        if (layer == null) return;
+        _marquee = new MarqueeAdorner(OrganizeList);
+        layer.Add(_marquee);
+        OrganizeList.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OnOrganizeMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_marquee == null) return;
+        if (e.LeftButton != MouseButtonState.Pressed || !OrganizeList.IsMouseCaptured)
+        {
+            EndMarquee();
+            return;
+        }
+
+        var current = e.GetPosition(OrganizeList);
+        var rect = new Rect(_marqueeStart, current);
+        _marquee.Rect = rect;
+        ApplyMarqueeSelection(rect);
+    }
+
+    private void OnOrganizeMouseUp(object sender, MouseButtonEventArgs e) => EndMarquee();
+
+    /// <summary>Страницы, задетые рамкой, попадают в выбор; остальные — нет.</summary>
+    private void ApplyMarqueeSelection(Rect rect)
+    {
+        if (_marqueeBase == null) return;
+        var chosen = new HashSet<PageViewModel>(_marqueeBase);
+        foreach (var item in OrganizeList.Items.OfType<PageViewModel>())
+        {
+            if (OrganizeList.ItemContainerGenerator.ContainerFromItem(item) is not FrameworkElement container)
+                continue;
+            if (!container.IsVisible) continue;
+            var origin = container.TransformToAncestor(OrganizeList).Transform(new Point(0, 0));
+            var bounds = new Rect(origin, new Size(container.ActualWidth, container.ActualHeight));
+            if (rect.IntersectsWith(bounds))
+                chosen.Add(item);
+        }
+
+        // Список правится по разнице, а не пересобирается: замена целиком
+        // сбрасывала бы прокрутку и мигала выделением на каждый пиксель.
+        foreach (var item in OrganizeList.SelectedItems.OfType<PageViewModel>().ToList())
+            if (!chosen.Contains(item))
+                OrganizeList.SelectedItems.Remove(item);
+        foreach (var item in chosen)
+            if (!OrganizeList.SelectedItems.Contains(item))
+                OrganizeList.SelectedItems.Add(item);
+    }
+
+    private void EndMarquee()
+    {
+        if (_marquee != null)
+        {
+            AdornerLayer.GetAdornerLayer(OrganizeList)?.Remove(_marquee);
+            _marquee = null;
+        }
+        _marqueeBase = null;
+        if (OrganizeList.IsMouseCaptured)
+            OrganizeList.ReleaseMouseCapture();
+    }
+
+    private static T? FindAncestor<T>(DependencyObject node) where T : DependencyObject
+    {
+        for (DependencyObject? current = node; current != null; current = VisualTreeHelper.GetParent(current))
+            if (current is T match) return match;
+        return null;
     }
 
     /// <summary>Элемент списка под курсором по его DataContext.</summary>

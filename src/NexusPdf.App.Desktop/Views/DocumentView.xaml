@@ -825,6 +825,9 @@
                dd:DragDrop.IsDropTarget="True"
                dd:DragDrop.DropHandler="{Binding}"
                PreviewMouseRightButtonDown="OnOrganizeRightClick"
+               PreviewMouseLeftButtonDown="OnOrganizeMouseDown"
+               MouseMove="OnOrganizeMouseMove"
+               PreviewMouseLeftButtonUp="OnOrganizeMouseUp"
                KeyDown="OnOrganizeKeyDown">
         <ListBox.ItemsPanel>
           <ItemsPanelTemplate>
