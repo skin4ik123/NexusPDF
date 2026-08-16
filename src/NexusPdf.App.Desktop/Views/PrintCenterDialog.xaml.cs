@@ -173,6 +173,7 @@ public partial class PrintCenterDialog : Window
             var progress = new Progress<Services.Printing.PrintProgress>(
                 p => _model.ReportSubmit(p.SheetsDone, p.SheetsTotal));
             var job = await _services.PrintJobs.SubmitAsync(_document.Document, plan, progress, ct);
+            _services.PrintQueue.Track(job.PrinterName, job.JobIds, _document.Title);
 
             InfoDialog.Show(this, Loc.Get("Print"),
                 Loc.F("PrintJobQueued", job.SheetsSent, plan.PrinterName));

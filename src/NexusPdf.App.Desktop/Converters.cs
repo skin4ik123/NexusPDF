@@ -32,6 +32,16 @@ public sealed class NonZeroToVisibilityConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+/// <summary>Ноль элементов — показать подсказку вместо пустого места.</summary>
+public sealed class ZeroToVisibilityConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is int i && i == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
 public sealed class MinusOneConverter : IValueConverter
 {
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>

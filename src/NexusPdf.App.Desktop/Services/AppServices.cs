@@ -20,6 +20,7 @@ public sealed class AppServices : IAsyncDisposable
         Compression = new MuPdfCompressionEngine();
         Tools = new DocumentToolsService(engine, Qpdf, Qpdf, Compression);
         PrintJobs = new NexusPdf.App.Desktop.Services.Printing.PrintJobService();
+        PrintQueue = new NexusPdf.App.Desktop.Services.Printing.PrintQueueService();
         Signatures = new SignatureStore();
         OcrEngine = CreateRecognizer(settings);
         Ocr = new OcrService(OcrEngine);
@@ -60,6 +61,9 @@ public sealed class AppServices : IAsyncDisposable
     public DocumentToolsService Tools { get; }
     /// <summary>Отправка заданий центра печати в очередь Windows.</summary>
     public NexusPdf.App.Desktop.Services.Printing.PrintJobService PrintJobs { get; }
+
+    /// <summary>Наблюдение за отправленными заданиями: ход, пауза, отмена.</summary>
+    public NexusPdf.App.Desktop.Services.Printing.PrintQueueService PrintQueue { get; }
     public SignatureStore Signatures { get; }
     public NexusPdf.Ocr.ITextRecognizer OcrEngine { get; private set; }
     public OcrService Ocr { get; private set; }

@@ -289,6 +289,7 @@ public sealed class UxCommandHub
         // Распознавание и печать
         [CommandIds.Ocr] = _ => _main.RecognizeTextCommand.Execute(null),
         [CommandIds.Print] = _ => _main.PrintActiveCommand.Execute(null),
+        [CommandIds.PrintQueue] = _ => Views.PrintQueueDialog.Show(Owner, _services.PrintQueue),
         [CommandIds.BatchPrint] = _ => _main.ShowBatchPrintCommand.Execute(null),
 
         // Преобразование
