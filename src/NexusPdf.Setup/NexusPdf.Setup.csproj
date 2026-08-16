@@ -15,7 +15,14 @@
     <EmbeddedResource Include="$(MsiPath)" Condition="'$(MsiPath)' != ''"
                       LogicalName="NexusPdf.Setup.Payload.NexusPdf.msi"
                       Link="Payload\NexusPdf.msi"/>
+    <!-- WithCulture=false обязателен. В имени license.en.txt участок «.en.»
+         MSBuild принимает за код языка и уводит файл в сателлитную сборку
+         en\*.resources.dll вместо основной. Ошибки при этом нет: окно
+         установщика просто показывает пустое соглашение — так и было
+         во всех выпусках до 0.20.2. -->
     <EmbeddedResource Include="..\..\installer\Assets\license.en.txt"
+                      Link="Payload\license.txt"
+                      WithCulture="false"
                       LogicalName="NexusPdf.Setup.Payload.license.txt"/>
   </ItemGroup>
 
