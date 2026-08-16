@@ -273,6 +273,67 @@ public sealed record PdfAttachment(
 /// <summary>Ссылка страницы вместе с её рамкой в координатах страницы PDF (для подсветки и наведения).</summary>
 public sealed record PdfPageLink(PdfTextRect RectPt, string? Uri, int TargetPageIndex);
 
+/// <summary>
+/// Слово страницы вместе с рамкой и начертанием — сырьё для экспорта в Word и
+/// Excel. Рамка в координатах PDF (начало — левый нижний угол, Top &gt; Bottom).
+/// В PDF нет ни слов, ни строк, ни таблиц: есть только символы с координатами,
+/// поэтому всё остальное приходится восстанавливать по расположению.
+/// </summary>
+/// <param name="FontSizePt">Кегль в пунктах (уже с учётом матрицы текста).</param>
+/// <param name="FontWeight">Вес шрифта: 400 — обычный, 700 — полужирный.</param>
+/// <param name="ColorArgb">Цвет заливки текста.</param>
+/// <param name="RotationQuarters">
+/// Поворот текста в четвертях против часовой стрелки: 0 — обычный, 1 — снизу
+/// вверх, 3 — сверху вниз. Без него повёрнутую подпись невозможно прочитать в
+/// правильном порядке: слова идут не туда, куда растут координаты.
+/// </param>
+public sealed record PdfTextWord(
+    string Text,
+    PdfTextRect RectPt,
+    double FontSizePt,
+    int FontWeight,
+    uint ColorArgb,
+    int RotationQuarters = 0)
+{
+    /// <summary>Повёрнут ли текст (не горизонтальная строка слева направо).</summary>
+    public bool IsRotated => RotationQuarters != 0;
+
+    public bool IsBold => FontWeight >= 600;
+    public double Width => RectPt.Right - RectPt.Left;
+    public double Height => RectPt.Top - RectPt.Bottom;
+    /// <summary>Середина по вертикали — по ней слова собираются в строки.</summary>
+    public double CenterY => (RectPt.Top + RectPt.Bottom) / 2.0;
+}
+
+/// <summary>
+/// Заполненное поле формы: имя, значение и рамка на странице.
+///
+/// Имя берётся из самого виджета; у полей, разложенных на группу (переключатели),
+/// оно хранится в родительском объекте и здесь окажется пустым — на перенос
+/// значения это не влияет.
+/// </summary>
+public sealed record PdfFormFieldValue(string Name, string Value, PdfTextRect RectPt);
+
+/// <summary>
+/// Нарисованная на странице линия — горизонтальная или вертикальная граница
+/// таблицы. В PDF таблицу рисуют либо тонкими штрихами, либо тонкими
+/// заливками, поэтому берутся оба случая.
+/// </summary>
+/// <param name="IsHorizontal">true — горизонтальная, false — вертикальная.</param>
+/// <param name="Position">Y для горизонтальной, X для вертикальной (в пунктах PDF).</param>
+/// <param name="Start">Начало линии по второй оси.</param>
+/// <param name="End">Конец линии по второй оси.</param>
+/// <param name="ThicknessPt">Толщина: очень толстые линии — уже не границы, а заливка.</param>
+public sealed record PdfRulingLine(
+    bool IsHorizontal,
+    double Position,
+    double Start,
+    double End,
+    double ThicknessPt)
+{
+    public double Length => End - Start;
+}
+
 /// <summary>Выпадающий список/список формы в точке клика: опции, выбор и рамка поля в отображаемых пунктах.</summary>
 public sealed record PdfComboInfo(
     IReadOnlyList<string> Options,

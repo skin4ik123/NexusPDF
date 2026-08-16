@@ -335,6 +335,92 @@ public static class PdfFixture
         return path;
     }
 
+    /// <summary>
+    /// Страница с НАСТОЯЩЕЙ таблицей: тонкие залитые прямоугольники вместо
+    /// границ (так рисует большинство генераторов), текст по ячейкам, ссылка
+    /// поверх одной из них и заполненное поле формы под таблицей.
+    ///
+    /// Только латиница: у стандартного Helvetica нет кириллицы, и текст из
+    /// такого PDF извлекался бы мусором — проверять было бы нечего.
+    /// </summary>
+    public static byte[] BuildWithTable()
+    {
+        var content = new StringBuilder();
+        content.Append("0 g\n");
+
+        // Горизонтальные границы: y = 700, 680, 660, 640.
+        foreach (var y in new[] { 700, 680, 660, 640 })
+            content.Append($"40 {y} 400 0.8 re f\n");
+        // Вертикальные границы: x = 40, 190, 320, 440.
+        foreach (var x in new[] { 40, 190, 320, 440 })
+            content.Append($"{x} 640 0.8 60 re f\n");
+
+        void Cell(int x, int y, string text) =>
+            content.Append($"BT /F1 10 Tf {x} {y} Td ({text}) Tj ET\n");
+
+        Cell(50, 686, "Item");
+        Cell(200, 686, "Qty");
+        Cell(330, 686, "Price");
+        Cell(50, 666, "Bolt");
+        Cell(200, 666, "10");
+        Cell(330, 666, "25,50");
+        Cell(50, 646, "Nut");
+        Cell(200, 646, "20");
+        Cell(330, 646, "7,00");
+
+        // Обычная строка вне таблицы.
+        Cell(40, 560, "Total order for the month");
+
+        // Подпись, повёрнутая на 90° против часовой (читается снизу вверх) —
+        // так подписывают узкие колонки в бланках.
+        content.Append("BT /F1 9 Tf 0 1 -1 0 470 640 Tm (SIDE LABEL) Tj ET\n");
+
+        var stream = content.ToString();
+        var objects = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [7 0 R] /DA (/F1 10 Tf 0 g) >> >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R " +
+            "/Annots [6 0 R 7 0 R] /Resources << /Font << /F1 5 0 R >> >> >>",
+            $"<< /Length {stream.Length} >>\nstream\n{stream}\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            // 6: ссылка поверх ячейки «Bolt»
+            "<< /Type /Annot /Subtype /Link /Rect [45 660 120 680] /Border [0 0 0] " +
+            "/A << /S /URI /URI (https://example.org/bolt) >> >>",
+            // 7: заполненное текстовое поле формы
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (Customer) /V (Acme Ltd) " +
+            "/Rect [40 600 300 620] /F 4 /DA (/F1 10 Tf 0 g) >>",
+        };
+
+        var buffer = new MemoryStream();
+        void WriteRaw(string s) => buffer.Write(Encoding.ASCII.GetBytes(s));
+
+        WriteRaw("%PDF-1.7\n");
+        buffer.Write(new byte[] { (byte)'%', 0xE2, 0xE3, 0xCF, 0xD3, (byte)'\n' });
+        var offsets = new long[objects.Count + 1];
+        for (var i = 0; i < objects.Count; i++)
+        {
+            offsets[i + 1] = buffer.Position;
+            WriteRaw($"{i + 1} 0 obj\n{objects[i]}\nendobj\n");
+        }
+        var xrefPosition = buffer.Position;
+        WriteRaw($"xref\n0 {objects.Count + 1}\n");
+        WriteRaw("0000000000 65535 f \n");
+        for (var i = 1; i <= objects.Count; i++)
+            WriteRaw($"{offsets[i]:0000000000} 00000 n \n");
+        WriteRaw($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xrefPosition}\n%%EOF\n");
+        return buffer.ToArray();
+    }
+
+    public static string WriteTableToTemp(string fileName)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, fileName);
+        File.WriteAllBytes(path, BuildWithTable());
+        return path;
+    }
+
     public static string WriteToTemp(string fileName, params PageSpec[] pages)
     {
         var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));

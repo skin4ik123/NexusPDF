@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\NexusPdf.Export\NexusPdf.Export.csproj" />
     <ProjectReference Include="..\NexusPdf.Office\NexusPdf.Office.csproj" />
     <ProjectReference Include="..\NexusPdf.Domain\NexusPdf.Domain.csproj" />
     <ProjectReference Include="..\NexusPdf.Printing\NexusPdf.Printing.csproj" />
