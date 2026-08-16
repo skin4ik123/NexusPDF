@@ -5,7 +5,13 @@ namespace NexusPdf.Infrastructure;
 
 public sealed class AppSettings
 {
-    public string Language { get; set; } = "ru";          // "ru" | "en"
+    /// <summary>
+    /// Язык интерфейса: "ru" | "en". По умолчанию английский — программа
+    /// рассчитана не только на русскоговорящих. Выбор пользователя пишется
+    /// сюда же и переживает перезапуск, поэтому переключившему на русский
+    /// умолчание больше не мешает.
+    /// </summary>
+    public string Language { get; set; } = "en";
     public string Theme { get; set; } = "system";          // "light" | "dark" | "system"
     public List<string> RecentFiles { get; set; } = new();
     public List<string> LastSessionFiles { get; set; } = new();
@@ -30,6 +36,16 @@ public sealed class AppSettings
     /// </summary>
     public List<string> QuickCommands { get; set; } = new();
 
+    /// <summary>
+    /// Какое поколение набора по умолчанию уже влито в <see cref="QuickCommands"/>.
+    ///
+    /// Нужно, чтобы новые кнопки доходили до тех, кто панель уже настраивал:
+    /// без этого сохранённый список навсегда остаётся таким, каким был, и
+    /// добавленная в программу команда просто не появляется. Влитое поколение
+    /// запоминается, поэтому убранную вручную кнопку обновление не вернёт.
+    /// </summary>
+    public int QuickCommandsGeneration { get; set; }
+
     /// <summary>Недавно использованные инструменты: верхний раздел панели.</summary>
     public List<string> RecentCommands { get; set; } = new();
 
@@ -50,6 +66,13 @@ public sealed class AppSettings
 
     /// <summary>Расположение инструментов в правой панели, заданное пользователем.</summary>
     public string? ToolsLayout { get; set; }
+
+    /// <summary>
+    /// Разделы правой панели, раскрытые пользователем, через «;». Пусто —
+    /// свёрнуто всё: восемь раскрытых списков подряд не помещаются на экран, и
+    /// панель превращается в длинную прокрутку вместо оглавления.
+    /// </summary>
+    public string? ToolsExpandedGroups { get; set; }
 
     public bool KeepBackupOnSave { get; set; }
     public double LastZoom { get; set; } = 1.0;

@@ -77,17 +77,82 @@ public sealed class LocalizationCoverageTests
             "Интерфейс просит строки, которых нет в словаре:\n" + string.Join("\n", missing));
     }
 
+    /// <summary>
+    /// Все словари обязаны содержать ОДНИ И ТЕ ЖЕ ключи.
+    ///
+    /// Проверяется каждый файл каталога, а не пара ru/en: неполный словарь не
+    /// падает, а молча подставляет русскую строку, и найти такую дыру можно
+    /// только глазами по всему интерфейсу. Добавили язык — он сразу под
+    /// проверкой, без правки этого теста.
+    /// </summary>
     [Fact]
-    public void Russian_And_English_Dictionaries_Have_The_Same_Keys()
+    public void All_Language_Packs_Have_The_Same_Keys()
     {
-        var root = RepoRoot();
-        var ru = ReadKeys(Path.Combine(root, "src", "NexusPdf.App.Desktop", "Resources", "i18n", "ru.json"));
-        var en = ReadKeys(Path.Combine(root, "src", "NexusPdf.App.Desktop", "Resources", "i18n", "en.json"));
+        var dir = Path.Combine(RepoRoot(), "src", "NexusPdf.App.Desktop", "Resources", "i18n");
+        var packs = Directory.GetFiles(dir, "*.json")
+            .ToDictionary(Path.GetFileNameWithoutExtension, ReadKeys, StringComparer.Ordinal);
 
-        var onlyRu = ru.Except(en, StringComparer.Ordinal).OrderBy(s => s, StringComparer.Ordinal).ToList();
-        var onlyEn = en.Except(ru, StringComparer.Ordinal).OrderBy(s => s, StringComparer.Ordinal).ToList();
+        Assert.True(packs.Count >= 2, "Словарей меньше двух — проверять нечего.");
+        var reference = packs["ru"];
 
-        Assert.True(onlyRu.Count == 0 && onlyEn.Count == 0,
-            $"Только в ru: {string.Join(", ", onlyRu)}\nТолько в en: {string.Join(", ", onlyEn)}");
+        var problems = new List<string>();
+        foreach (var (language, keys) in packs.OrderBy(p => p.Key, StringComparer.Ordinal))
+        {
+            if (language == "ru") continue;
+            var missing = reference.Except(keys, StringComparer.Ordinal)
+                .OrderBy(s => s, StringComparer.Ordinal).ToList();
+            var extra = keys.Except(reference, StringComparer.Ordinal)
+                .OrderBy(s => s, StringComparer.Ordinal).ToList();
+            if (missing.Count > 0)
+                problems.Add($"{language}: не хватает {missing.Count} — {string.Join(", ", missing.Take(15))}");
+            if (extra.Count > 0)
+                problems.Add($"{language}: лишние — {string.Join(", ", extra.Take(15))}");
+        }
+
+        Assert.True(problems.Count == 0, string.Join("\n", problems));
+    }
+
+    /// <summary>
+    /// Подстановки {0}, {1} обязаны совпадать во всех языках: строка с лишней
+    /// подстановкой роняет форматирование прямо в лицо пользователю.
+    /// </summary>
+    [Fact]
+    public void All_Language_Packs_Use_The_Same_Placeholders()
+    {
+        var dir = Path.Combine(RepoRoot(), "src", "NexusPdf.App.Desktop", "Resources", "i18n");
+        var reference = ReadValues(Path.Combine(dir, "ru.json"));
+        var problems = new List<string>();
+
+        foreach (var file in Directory.GetFiles(dir, "*.json"))
+        {
+            var language = Path.GetFileNameWithoutExtension(file);
+            if (language == "ru") continue;
+            foreach (var (key, value) in ReadValues(file))
+            {
+                if (!reference.TryGetValue(key, out var original)) continue;
+                var wanted = Placeholders(original);
+                var actual = Placeholders(value);
+                if (!wanted.SetEquals(actual))
+                    problems.Add($"{language}/{key}: ожидались {{{string.Join(",", wanted.Order())}}}, " +
+                                 $"а есть {{{string.Join(",", actual.Order())}}}");
+            }
+        }
+
+        Assert.True(problems.Count == 0, string.Join("\n", problems));
+    }
+
+    private static Dictionary<string, string> ReadValues(string path)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+        return document.RootElement.EnumerateObject()
+            .ToDictionary(p => p.Name, p => p.Value.GetString() ?? "", StringComparer.Ordinal);
+    }
+
+    private static HashSet<int> Placeholders(string value)
+    {
+        var found = new HashSet<int>();
+        foreach (Match match in Regex.Matches(value, @"\{(\d+)[^}]*\}"))
+            found.Add(int.Parse(match.Groups[1].Value));
+        return found;
     }
 }

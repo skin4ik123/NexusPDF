@@ -15,6 +15,14 @@ public static class AppPaths
     /// в итоговом файле, и папку можно чистить при следующем запуске.
     /// </summary>
     public static string DroppedFilesFolder => Path.Combine(Root, "Dropped");
+
+    /// <summary>
+    /// Обработанные копии документов — результат чистки, пересжатия и
+    /// оптимизации. Живут так же: пока на них ссылаются страницы открытой
+    /// вкладки. После сохранения содержимое уже в итоговом файле.
+    /// </summary>
+    public static string ProcessedFolder => Path.Combine(Root, "Processed");
+
     public static string CrashSentinelFile => Path.Combine(Root, "session.lock");
 
     public static void EnsureCreated()

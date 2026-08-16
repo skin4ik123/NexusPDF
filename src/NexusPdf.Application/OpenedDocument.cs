@@ -146,6 +146,15 @@ public sealed class OpenedDocument : IAsyncDisposable
         return Handles[page.SourceId].RenderPageContentOnlyAsync(page.SourcePageIndex, pixelWidth, pixelHeight, page.RotationOffset, ct);
     }
 
+    /// <summary>Растр страницы для печати с заданным составом содержимого.</summary>
+    public Task<RenderedPageImage> RenderLogicalPageForPrintAsync(
+        int logicalIndex, int pixelWidth, int pixelHeight, PrintContentOptions options, CancellationToken ct)
+    {
+        var page = Session.Model.Pages[logicalIndex];
+        return Handles[page.SourceId].RenderPageForPrintAsync(
+            page.SourcePageIndex, pixelWidth, pixelHeight, page.RotationOffset, options, ct);
+    }
+
     /// <summary>
     /// Композиция с ПРИМЕНЁННЫМИ вымарками: страницы с RedactionDraft заменены
     /// растровыми. Возвращённый объект держит временный источник — освобождать
@@ -403,6 +412,44 @@ public sealed class OpenedDocument : IAsyncDisposable
                     Session.Model.Sources.Remove(id);
                 }
                 await handle.DisposeAsync().ConfigureAwait(false);
+            }
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Переключить документ на ОБРАБОТАННЫЙ файл, никуда его не сохраняя.
+    ///
+    /// Так работают чистка сканов, пересжатие и оптимизация: результат ложится
+    /// во временный файл, тот становится источником вкладки, документ помечается
+    /// изменённым — и куда его положить, пользователь решает потом обычным
+    /// сохранением. Промежуточное «сохранить как» из середины работы исчезает.
+    ///
+    /// Прежние дескрипторы НЕ закрываются: на них держится «Отменить». Временный
+    /// файл живёт до закрытия документа — ровно как вставленные из Проводника.
+    /// </summary>
+    /// <returns>Сколько страниц стало в документе.</returns>
+    public async Task<int> SwitchToProcessedFileAsync(
+        IPdfRenderEngine engine, string processedPath, CancellationToken ct)
+    {
+        var (sourceId, opened) = await EnsureSourceAsync(engine, processedPath, null, ct)
+            .ConfigureAwait(false);
+        try
+        {
+            var pageCount = Handles[sourceId].Info.PageCount;
+            Session.Apply(new ReplacePagesWithSourceOperation(sourceId, pageCount));
+            // Испечённые страницы относились к прежним ссылкам: оставить их —
+            // значит показывать поиском текст документа, которого уже нет.
+            await DropBakedPagesAsync().ConfigureAwait(false);
+            return pageCount;
+        }
+        catch
+        {
+            if (opened != null)
+            {
+                Handles.Remove(sourceId);
+                Session.Model.Sources.Remove(sourceId);
+                await opened.DisposeAsync().ConfigureAwait(false);
             }
             throw;
         }

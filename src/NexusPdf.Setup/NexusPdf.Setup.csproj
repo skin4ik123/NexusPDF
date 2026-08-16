@@ -15,7 +15,7 @@
     <EmbeddedResource Include="$(MsiPath)" Condition="'$(MsiPath)' != ''"
                       LogicalName="NexusPdf.Setup.Payload.NexusPdf.msi"
                       Link="Payload\NexusPdf.msi"/>
-    <EmbeddedResource Include="..\..\installer\Assets\license.ru.txt"
+    <EmbeddedResource Include="..\..\installer\Assets\license.en.txt"
                       LogicalName="NexusPdf.Setup.Payload.license.txt"/>
   </ItemGroup>
 

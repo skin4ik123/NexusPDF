@@ -34,7 +34,9 @@ public sealed class InfrastructureTests : IDisposable
         var path = Path.Combine(_dir, "settings.json");
         File.WriteAllText(path, "{ мусор ");
         var loaded = new JsonSettingsStore(path).Load();
-        Assert.Equal("ru", loaded.Language);
+        // Умолчание языка — английский: программа рассчитана не только на
+        // русскоговорящих, а выбранный язык хранится в этом же файле.
+        Assert.Equal("en", loaded.Language);
     }
 
     [Fact]

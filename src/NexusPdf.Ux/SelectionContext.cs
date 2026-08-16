@@ -59,6 +59,9 @@ public sealed record SelectionContext
     public int CurrentPageNumber { get; init; }
     public int PageCount { get; init; }
 
+    /// <summary>Сколько документов открыто: переносить страницы некуда, если он один.</summary>
+    public int OpenDocumentCount { get; init; } = 1;
+
     public bool HasTextSelection { get; init; }
     public bool IsReadOnly { get; init; }
     public bool HasUnsavedChanges { get; init; }

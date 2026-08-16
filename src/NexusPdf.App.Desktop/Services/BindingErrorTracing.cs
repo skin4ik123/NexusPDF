@@ -37,7 +37,10 @@ public static class BindingErrorTracing
     public static void Attach()
     {
         var source = PresentationTraceSources.DataBindingSource;
-        source.Switch.Level = SourceLevels.Warning | SourceLevels.Error;
+        // Warning уже включает в себя Error, поэтому уровень задаётся одним
+        // значением — прежнее «Warning | Error» читалось как два условия,
+        // хотя вторая половина ничего не добавляла.
+        source.Switch.Level = SourceLevels.Warning;
         source.Listeners.Add(new SerilogTraceListener());
 
         // Без этого вызова WPF не создаёт источники трассировки в релизной сборке.

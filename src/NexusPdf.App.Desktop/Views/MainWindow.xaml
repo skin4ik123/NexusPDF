@@ -348,6 +348,14 @@
           </ItemsControl.ItemTemplate>
         </ItemsControl>
       </StackPanel>
+
+      <!-- Подпись автора. Внизу стартового экрана, а не в строке состояния:
+           там место занято номером страницы, масштабом и ходом долгих операций,
+           и постоянная надпись вытесняла бы их на узком окне.
+           Не переводится: это имя, а не текст интерфейса. -->
+      <TextBlock Text="Crafted by Artur Yurchuk" FontSize="11.5"
+                 HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,18"
+                 Foreground="{DynamicResource TextSecondary}" Opacity="0.75"/>
     </Grid>
 
     <!-- Документы -->

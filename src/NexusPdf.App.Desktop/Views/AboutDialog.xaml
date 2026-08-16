@@ -18,6 +18,9 @@
       <StackPanel>
         <TextBlock Text="NexusPDF" FontSize="30" FontWeight="SemiBold" Foreground="White"/>
         <TextBlock x:Name="VersionText" FontSize="13" Foreground="#CBD5F5" Margin="0,2,0,0"/>
+        <!-- Подпись автора. Не переводится: это имя, а не текст интерфейса. -->
+        <TextBlock Text="Crafted by Artur Yurchuk" FontSize="12" Foreground="#A5B4FC"
+                   Margin="0,10,0,0" Opacity="0.95"/>
       </StackPanel>
     </Border>
 
@@ -33,8 +36,15 @@
       <TextBlock Text="{l:Loc AboutPrivacy}" TextWrapping="Wrap" Margin="0,14,0,0" FontSize="12"
                  Foreground="{DynamicResource TextSecondary}"/>
 
+      <!-- Лицензия самой программы — отдельно от лицензий компонентов: это
+           разные вещи, и путать их в одной кнопке нельзя. -->
+      <TextBlock x:Name="LicenseText" TextWrapping="Wrap" Margin="0,10,0,0" FontSize="12"
+                 Foreground="{DynamicResource TextSecondary}"/>
+
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
-        <Button Content="{l:Loc AboutNotices}" Style="{StaticResource LinkButton}" Click="OnNotices"/>
+        <Button Content="{l:Loc SupportProject}" Style="{StaticResource LinkButton}" Click="OnSupport"/>
+        <Button Content="{l:Loc AboutNotices}" Style="{StaticResource LinkButton}" Click="OnNotices"
+                Margin="14,0,0,0"/>
         <Button Content="{l:Loc OK}" Style="{StaticResource PrimaryButton}" MinWidth="100"
                 Margin="8,0,0,0" IsDefault="True" IsCancel="True"/>
       </StackPanel>

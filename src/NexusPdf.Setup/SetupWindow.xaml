@@ -1,7 +1,7 @@
 <Window x:Class="NexusPdf.Setup.SetupWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Установка NexusPDF"
+        Title="Install NexusPDF"
         Width="820" Height="540"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None" ResizeMode="NoResize"
@@ -114,11 +114,11 @@
             </Border>
             <TextBlock Text="NexusPDF" FontSize="34" FontWeight="SemiBold" Foreground="White"
                        Margin="0,18,0,2"/>
-            <TextBlock x:Name="VersionText" Text="версия 0.2.0 (альфа)" FontSize="13"
+            <TextBlock x:Name="VersionText" Text="version 0.20.1" FontSize="13"
                        Foreground="#B9C4F2"/>
-            <TextBlock Text="Просмотр, страницы, порядок." FontSize="15" Foreground="#DDE4FB"
+            <TextBlock Text="View, organize, edit." FontSize="15" Foreground="#DDE4FB"
                        Margin="0,22,0,0" TextWrapping="Wrap"/>
-            <TextBlock Text="Ваши документы остаются на вашем компьютере."
+            <TextBlock Text="Your documents stay on your computer."
                        FontSize="12.5" Foreground="#93A3E8" Margin="0,10,0,0" TextWrapping="Wrap"/>
           </StackPanel>
         </Grid>
@@ -133,7 +133,7 @@
 
         <!-- Заголовок + закрыть -->
         <Grid Grid.Row="0">
-          <TextBlock x:Name="HeaderText" Text="Установка" FontSize="22" FontWeight="SemiBold"
+          <TextBlock x:Name="HeaderText" Text="Install" FontSize="22" FontWeight="SemiBold"
                      Foreground="{StaticResource Ink}" VerticalAlignment="Center"/>
           <Button x:Name="CloseButton" Content="✕" FontSize="14" Width="34" Height="30"
                   HorizontalAlignment="Right" VerticalAlignment="Top"
@@ -142,13 +142,13 @@
 
         <!-- Экран 1: параметры -->
         <StackPanel x:Name="OptionsPage" Grid.Row="1" Margin="0,18,0,0">
-          <TextBlock Text="Режим установки" FontSize="13" Foreground="{StaticResource InkSoft}"/>
+          <TextBlock Text="Installation mode" FontSize="13" Foreground="{StaticResource InkSoft}"/>
           <RadioButton x:Name="PerUserRadio" IsChecked="True" Checked="OnScopeChanged"
-                       Content="Только для меня — быстро, без прав администратора (рекомендуется)"/>
+                       Content="Just for me — fast, no administrator rights needed (recommended)"/>
           <RadioButton x:Name="PerMachineRadio" Checked="OnScopeChanged"
-                       Content="Для всех пользователей этого компьютера — потребуются права администратора"/>
+                       Content="For all users of this computer — administrator rights required"/>
 
-          <TextBlock Text="Папка установки" FontSize="13" Foreground="{StaticResource InkSoft}"
+          <TextBlock Text="Install folder" FontSize="13" Foreground="{StaticResource InkSoft}"
                      Margin="0,16,0,4"/>
           <Grid>
             <Grid.ColumnDefinitions>
@@ -157,7 +157,7 @@
             </Grid.ColumnDefinitions>
             <TextBox x:Name="PathBox" FontSize="13" Padding="8,7" BorderBrush="{StaticResource Line}"
                      Foreground="{StaticResource Ink}" TextChanged="OnPathEdited"/>
-            <Button Grid.Column="1" Content="Обзор…" Style="{StaticResource Ghost}" Margin="8,0,0,0"
+            <Button Grid.Column="1" Content="Browse…" Style="{StaticResource Ghost}" Margin="8,0,0,0"
                     Click="OnBrowse"/>
           </Grid>
           <TextBlock x:Name="PathError" Foreground="#DC2626" FontSize="12" Margin="0,4,0,0"
@@ -166,13 +166,13 @@
                      Margin="0,8,0,0" TextWrapping="Wrap" Visibility="Collapsed"/>
 
           <CheckBox x:Name="DesktopCheck" IsChecked="True" Margin="0,16,0,0"
-                    Content="Добавить ярлык на рабочий стол"/>
+                    Content="Add a desktop shortcut"/>
           <CheckBox x:Name="LaunchCheck" IsChecked="True"
-                    Content="Запустить NexusPDF после установки"/>
+                    Content="Launch NexusPDF after installation"/>
 
           <Expander Margin="0,14,0,0" Foreground="{StaticResource InkSoft}">
             <Expander.Header>
-              <TextBlock Text="Лицензионное соглашение" FontSize="13"/>
+              <TextBlock Text="Licence agreement" FontSize="13"/>
             </Expander.Header>
             <Border BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="6"
                     Margin="0,6,0,0" Padding="10" MaxHeight="140">
@@ -184,10 +184,10 @@
           </Expander>
 
           <Grid Margin="0,22,0,0">
-            <TextBlock Text="Нажимая «Установить», вы принимаете условия соглашения."
+            <TextBlock Text="By clicking Install you accept the terms of the agreement."
                        FontSize="11.5" Foreground="{StaticResource InkSoft}"
                        VerticalAlignment="Center"/>
-            <Button Content="Установить" Style="{StaticResource Primary}"
+            <Button Content="Install" Style="{StaticResource Primary}"
                     HorizontalAlignment="Right" Click="OnInstall"/>
           </Grid>
         </StackPanel>
@@ -195,12 +195,12 @@
         <!-- Экран 2: прогресс -->
         <StackPanel x:Name="ProgressPage" Grid.Row="1" Margin="0,0,0,0"
                     VerticalAlignment="Center" Visibility="Collapsed">
-          <TextBlock x:Name="ProgressStatus" Text="Подготовка…" FontSize="16"
+          <TextBlock x:Name="ProgressStatus" Text="Preparing…" FontSize="16"
                      Foreground="{StaticResource Ink}" HorizontalAlignment="Center"/>
           <ProgressBar x:Name="ProgressBar" IsIndeterminate="True" Height="6" Margin="20,22"
                        Foreground="{StaticResource AccentGrad}" BorderThickness="0"
                        Background="#EDEFF5"/>
-          <TextBlock Text="Обычно это занимает меньше минуты" FontSize="12.5"
+          <TextBlock Text="This usually takes less than a minute" FontSize="12.5"
                      Foreground="{StaticResource InkSoft}" HorizontalAlignment="Center"/>
         </StackPanel>
 
@@ -211,15 +211,15 @@
             <TextBlock Text="✓" FontSize="38" FontWeight="Bold" Foreground="#16A34A"
                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
-          <TextBlock Text="Готово!" FontSize="24" FontWeight="SemiBold"
+          <TextBlock Text="Done!" FontSize="24" FontWeight="SemiBold"
                      Foreground="{StaticResource Ink}" HorizontalAlignment="Center" Margin="0,16,0,4"/>
-          <TextBlock x:Name="DoneText" Text="NexusPDF установлен и готов к работе."
+          <TextBlock x:Name="DoneText" Text="NexusPDF is installed and ready to use."
                      FontSize="14" Foreground="{StaticResource InkSoft}" HorizontalAlignment="Center"
                      TextWrapping="Wrap" TextAlignment="Center"/>
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,24,0,0">
-            <Button x:Name="LaunchButton" Content="Запустить NexusPDF" Style="{StaticResource Primary}"
+            <Button x:Name="LaunchButton" Content="Launch NexusPDF" Style="{StaticResource Primary}"
                     Click="OnLaunch"/>
-            <Button Content="Закрыть" Style="{StaticResource Ghost}" Margin="10,0,0,0"
+            <Button Content="Close" Style="{StaticResource Ghost}" Margin="10,0,0,0"
                     Click="OnClose"/>
           </StackPanel>
         </StackPanel>
@@ -231,15 +231,15 @@
             <TextBlock Text="✕" FontSize="34" FontWeight="Bold" Foreground="#DC2626"
                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
-          <TextBlock Text="Установка не завершена" FontSize="20" FontWeight="SemiBold"
+          <TextBlock Text="Installation did not finish" FontSize="20" FontWeight="SemiBold"
                      Foreground="{StaticResource Ink}" HorizontalAlignment="Center" Margin="0,16,0,6"/>
           <TextBlock x:Name="ErrorText" FontSize="13" Foreground="{StaticResource InkSoft}"
                      HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
-            <Button Content="Скопировать отчёт" Style="{StaticResource Ghost}" Click="OnCopyReport"/>
-            <Button Content="Повторить" Style="{StaticResource Ghost}" Margin="10,0,0,0"
+            <Button Content="Copy report" Style="{StaticResource Ghost}" Click="OnCopyReport"/>
+            <Button Content="Retry" Style="{StaticResource Ghost}" Margin="10,0,0,0"
                     Click="OnRetry"/>
-            <Button Content="Закрыть" Style="{StaticResource Ghost}" Margin="10,0,0,0"
+            <Button Content="Close" Style="{StaticResource Ghost}" Margin="10,0,0,0"
                     Click="OnClose"/>
           </StackPanel>
         </StackPanel>

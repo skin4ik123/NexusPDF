@@ -119,6 +119,7 @@ internal static class PdfiumScanEnhancer
         var maxAngle = 0.0;
         var imagesCleaned = 0;
         var speckles = 0;
+        var edgesTrimmed = 0;
 
         for (var index = 0; index < pageCount; index++)
         {
@@ -145,11 +146,12 @@ internal static class PdfiumScanEnhancer
                     }
                 }
 
-                if (options.Despeckle || options.LevelBackground)
+                if (options.Despeckle || options.LevelBackground || options.TrimDarkEdges)
                 {
-                    var (cleaned, removed) = CleanPageImages(doc, page, options, ct);
+                    var (cleaned, removed, edges) = CleanPageImages(doc, page, options, ct);
                     imagesCleaned += cleaned;
                     speckles += removed;
+                    edgesTrimmed += edges;
                     changed |= cleaned > 0;
                 }
 
@@ -163,7 +165,7 @@ internal static class PdfiumScanEnhancer
             progress?.Report(index + 1);
         }
 
-        return new ScanEnhanceStats(processed, straightened, maxAngle, imagesCleaned, speckles);
+        return new ScanEnhanceStats(processed, straightened, maxAngle, imagesCleaned, speckles, edgesTrimmed);
     }
 
     /// <summary>Наклон страницы по её отрисовке — так видно и картинку, и текстовый слой.</summary>
@@ -236,15 +238,16 @@ internal static class PdfiumScanEnhancer
         }
     }
 
-    /// <summary>Чистка растров страницы; возвращает (сколько картинок, сколько пятен).</summary>
-    private static (int Cleaned, int Speckles) CleanPageImages(
+    /// <summary>Чистка растров страницы; возвращает (картинок, пятен, полос каймы).</summary>
+    private static (int Cleaned, int Speckles, int Edges) CleanPageImages(
         FpdfDocumentT doc, FpdfPageT page, ScanEnhanceOptions options, CancellationToken ct)
     {
         var pageArea = (double)fpdfview.FPDF_GetPageWidthF(page) * fpdfview.FPDF_GetPageHeightF(page);
-        if (pageArea <= 0) return (0, 0);
+        if (pageArea <= 0) return (0, 0, 0);
 
         var cleaned = 0;
         var speckles = 0;
+        var edges = 0;
         var count = fpdf_edit.FPDFPageCountObjects(page);
         for (var i = 0; i < count; i++)
         {
@@ -276,15 +279,22 @@ internal static class PdfiumScanEnhancer
             }
             if (bgra == null || width < 32 || height < 32) continue;
 
+            // Порядок обязателен. Кайма стирается ПЕРВОЙ: тёмная полоса по краю
+            // тянет вниз оценку фона в своих плитках. Фон выравнивается ВТОРЫМ:
+            // после него порог Оцу отделяет краску от бумаги честно, а не по
+            // тени. Мусор убирается ПОСЛЕДНИМ — по уже ровному листу.
+            if (options.TrimDarkEdges)
+                edges += ScanCleanup.TrimDarkEdges(bgra, width, height);
             if (options.LevelBackground)
-                ScanCleanup.LevelBackground(bgra, width, height);
+                ScanCleanup.LevelBackground(bgra, width, height,
+                    new ScanCleanup.BackgroundOptions(options.BackgroundStrength, options.NeutralizeTint));
             if (options.Despeckle)
                 speckles += ScanCleanup.Despeckle(bgra, width, height, options.MaxSpeckleArea);
 
             if (WriteBitmap(page, obj, bgra, width, height))
                 cleaned++;
         }
-        return (cleaned, speckles);
+        return (cleaned, speckles, edges);
     }
 
     private static byte[]? ToBgra(FpdfBitmapT bitmap, int width, int height)

@@ -15,6 +15,12 @@ public sealed partial class ToolGroup : ObservableObject
     public required string Title { get; init; }
     public required ObservableCollection<QuickPanelItem> Items { get; init; }
 
+    /// <summary>Кому сообщить, что раздел свернули или раскрыли.</summary>
+    public Action? ExpansionChanged { get; set; }
+
+    /// <summary>Сколько кнопок в разделе — видно и на свёрнутом заголовке.</summary>
+    public int Count => Items.Count;
+
     /// <summary>
     /// Видимый состав группы. При поиске отсеивает не подошедшие кнопки, но
     /// НЕ трогает <see cref="Items"/> — перетаскивание и сохранение раскладки
@@ -34,20 +40,61 @@ public sealed partial class ToolGroup : ObservableObject
     /// <summary>Пустая группа при поиске прячется целиком — заголовок без кнопок бесполезен.</summary>
     [ObservableProperty] private bool _isVisible = true;
 
-    /// <summary>Во время поиска разделы раскрыты: искать в свёрнутом бессмысленно.</summary>
-    [ObservableProperty] private bool _isExpanded = true;
+    /// <summary>
+    /// Раскрыт ли раздел. По умолчанию НЕТ: восемь раскрытых списков подряд —
+    /// это полсотни кнопок в узкой колонке, по которой надо прокручивать до
+    /// нужного. Свёрнутые заголовки видны целиком, и до раздела доходишь
+    /// одним взглядом.
+    /// </summary>
+    [ObservableProperty] private bool _isExpanded;
+
+    partial void OnIsExpandedChanged(bool value)
+    {
+        // Во время поиска раскрытие временное и запоминать его нельзя.
+        if (_filtering) return;
+        _userExpanded = value;
+        ExpansionChanged?.Invoke();
+    }
+
+    private bool _filtering;
+    private bool _userExpanded;
 
     public void ApplyFilter(string query)
     {
-        if (query.Length == 0)
+        _filtering = true;
+        try
         {
-            View.Filter = null;
-            IsVisible = true;
-            return;
+            if (query.Length == 0)
+            {
+                View.Filter = null;
+                IsVisible = true;
+                IsExpanded = _userExpanded; // возвращаем то, что выбрал человек
+                return;
+            }
+            View.Filter = o => o is QuickPanelItem item && item.Matches(query);
+            IsVisible = Items.Any(i => i.Matches(query));
+            // Искать в свёрнутом разделе бессмысленно: найденное надо показать.
+            if (IsVisible) IsExpanded = true;
         }
-        View.Filter = o => o is QuickPanelItem item && item.Matches(query);
-        IsVisible = Items.Any(i => i.Matches(query));
-        if (IsVisible) IsExpanded = true;
+        finally
+        {
+            _filtering = false;
+        }
+    }
+
+    /// <summary>Восстановление сохранённого состояния без записи его же обратно.</summary>
+    public void RestoreExpanded(bool expanded)
+    {
+        _filtering = true;
+        try
+        {
+            _userExpanded = expanded;
+            IsExpanded = expanded;
+        }
+        finally
+        {
+            _filtering = false;
+        }
     }
 }
 
@@ -69,30 +116,52 @@ public sealed partial class ToolsPanel : ObservableObject, IDropTarget
     private readonly UxCommandHub _hub;
     private readonly Action<string> _save;
     private readonly Action<IReadOnlyList<string>>? _saveRecent;
+    private readonly Action<string>? _saveExpanded;
     private IReadOnlyList<string> _recent = Array.Empty<string>();
+    private HashSet<string> _expanded = new(StringComparer.Ordinal);
 
     /// <summary>Раздел «Недавние» живёт отдельно от раскладки: его не переставляют руками.</summary>
     private ToolGroup? _recentGroup;
 
     public ToolsPanel(UxCommandHub hub, string? savedLayout, Action<string> save,
-        IReadOnlyList<string>? recent = null, Action<IReadOnlyList<string>>? saveRecent = null)
+        IReadOnlyList<string>? recent = null, Action<IReadOnlyList<string>>? saveRecent = null,
+        string? expandedGroups = null, Action<string>? saveExpanded = null)
     {
         _hub = hub;
         _save = save;
         _saveRecent = saveRecent;
+        _saveExpanded = saveExpanded;
         _recent = RecentCommands.Sanitize(recent, id => hub.Registry.Find(id) != null);
+        _expanded = new HashSet<string>(
+            (expandedGroups ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries),
+            StringComparer.Ordinal);
 
         var layout = ToolsLayout.Sanitize(
             ToolsLayout.FromSetting(savedLayout), id => hub.Registry.Find(id) != null);
 
-        Groups = new ObservableCollection<ToolGroup>(layout.Select(g => new ToolGroup
-        {
-            Key = g.TitleKey,
-            Title = Loc.Get(g.TitleKey),
-            Items = new ObservableCollection<QuickPanelItem>(
-                g.Commands.Select(id => new QuickPanelItem(hub, id))),
-        }));
+        Groups = new ObservableCollection<ToolGroup>(layout.Select(g => Build(g.TitleKey, g.Commands)));
         BuildRecentGroup();
+    }
+
+    private ToolGroup Build(string key, IEnumerable<string> commands)
+    {
+        var group = new ToolGroup
+        {
+            Key = key,
+            Title = Loc.Get(key),
+            Items = new ObservableCollection<QuickPanelItem>(
+                commands.Select(id => new QuickPanelItem(_hub, id))),
+        };
+        group.RestoreExpanded(_expanded.Contains(key));
+        group.ExpansionChanged = () => SaveExpanded(group);
+        return group;
+    }
+
+    private void SaveExpanded(ToolGroup group)
+    {
+        if (group.IsExpanded) _expanded.Add(group.Key);
+        else _expanded.Remove(group.Key);
+        _saveExpanded?.Invoke(string.Join(";", _expanded));
     }
 
     public ObservableCollection<ToolGroup> Groups { get; }
@@ -152,21 +221,14 @@ public sealed partial class ToolsPanel : ObservableObject, IDropTarget
             return;
         }
 
-        var items = new ObservableCollection<QuickPanelItem>(
-            _recent.Select(id => new QuickPanelItem(_hub, id)));
         if (_recentGroup == null)
         {
-            _recentGroup = new ToolGroup
-            {
-                Key = "PanelToolsRecent",
-                Title = Loc.Get("PanelToolsRecent"),
-                Items = items,
-            };
+            _recentGroup = Build("PanelToolsRecent", _recent);
             Groups.Insert(0, _recentGroup);
             return;
         }
         _recentGroup.Items.Clear();
-        foreach (var item in items) _recentGroup.Items.Add(item);
+        foreach (var id in _recent) _recentGroup.Items.Add(new QuickPanelItem(_hub, id));
     }
 
     /// <summary>Сброс к раскладке по умолчанию.</summary>
@@ -174,16 +236,10 @@ public sealed partial class ToolsPanel : ObservableObject, IDropTarget
     {
         var layout = ToolsLayout.Sanitize(null, id => _hub.Registry.Find(id) != null);
         Groups.Clear();
+        _recentGroup = null;
         foreach (var group in layout)
-        {
-            Groups.Add(new ToolGroup
-            {
-                Key = group.TitleKey,
-                Title = Loc.Get(group.TitleKey),
-                Items = new ObservableCollection<QuickPanelItem>(
-                    group.Commands.Select(id => new QuickPanelItem(_hub, id))),
-            });
-        }
+            Groups.Add(Build(group.TitleKey, group.Commands));
+        BuildRecentGroup();
         SaveLayout();
     }
 
@@ -192,17 +248,51 @@ public sealed partial class ToolsPanel : ObservableObject, IDropTarget
             .Select(g => new ToolsGroupLayout(g.Key, g.Items.Select(i => i.Id).ToList()))
             .ToList()));
 
+    /// <summary>
+    /// Перестановка самого РАЗДЕЛА. Порядок разделов — это порядок работы: у
+    /// кого-то каждый день сканы, у кого-то комментарии, и держать нужное внизу
+    /// списка неудобно одинаково для всех.
+    /// </summary>
+    public void MoveGroup(ToolGroup group, int insertIndex)
+    {
+        if (ReferenceEquals(group, _recentGroup)) return;
+
+        var from = Groups.IndexOf(group);
+        if (from < 0) return;
+        var index = Math.Clamp(insertIndex, 0, Groups.Count);
+        // «Недавнее» приколото сверху: выше него ничего не встаёт.
+        var floor = _recentGroup != null ? 1 : 0;
+        index = Math.Max(index, floor);
+        if (index > from) index--;
+        if (index == from) return;
+
+        Groups.Move(from, index);
+        SaveLayout();
+    }
+
     // ----- Перетаскивание -----
 
     void IDropTarget.DragOver(IDropInfo dropInfo)
     {
-        if (dropInfo.Data is not QuickPanelItem) return;
-        dropInfo.Effects = System.Windows.DragDropEffects.Move;
-        dropInfo.DropTargetAdorner = DropTargetAdorners.Insert;
+        switch (dropInfo.Data)
+        {
+            // «Недавнее» — зеркало последних действий, а не раздел раскладки:
+            // его место наверху, и переставлять его бессмысленно.
+            case ToolGroup group when !ReferenceEquals(group, _recentGroup):
+            case QuickPanelItem:
+                dropInfo.Effects = System.Windows.DragDropEffects.Move;
+                dropInfo.DropTargetAdorner = DropTargetAdorners.Insert;
+                break;
+        }
     }
 
     void IDropTarget.Drop(IDropInfo dropInfo)
     {
+        if (dropInfo.Data is ToolGroup dragged)
+        {
+            MoveGroup(dragged, dropInfo.InsertIndex);
+            return;
+        }
         if (dropInfo.Data is not QuickPanelItem item) return;
         if (dropInfo.TargetCollection is not ObservableCollection<QuickPanelItem> target) return;
 

@@ -97,6 +97,17 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     /// <summary>Рендер ТОЛЬКО содержимого страницы — без аннотаций и полей форм (растр для OCR).</summary>
     Task<RenderedPageImage> RenderPageContentOnlyAsync(int pageIndex, int pixelWidth, int pixelHeight, int extraQuarterTurns, CancellationToken ct);
 
+    /// <summary>
+    /// Рендер для ПЕЧАТИ: состав содержимого задаёт вызывающий.
+    ///
+    /// Отдельно от обычного рендера, потому что на бумаге правила другие:
+    /// комментарий, помеченный автором как экранный, туда не идёт, а пустой
+    /// бланк печатают без введённых значений.
+    /// </summary>
+    Task<RenderedPageImage> RenderPageForPrintAsync(
+        int pageIndex, int pixelWidth, int pixelHeight, int extraQuarterTurns,
+        PrintContentOptions options, CancellationToken ct);
+
     /// <summary>Извлекает весь текст страницы (UTF-16, в порядке текстовых объектов).</summary>
     Task<string> GetPageTextAsync(int pageIndex, CancellationToken ct);
 

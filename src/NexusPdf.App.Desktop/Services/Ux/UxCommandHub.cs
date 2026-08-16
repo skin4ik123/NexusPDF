@@ -79,6 +79,7 @@ public sealed class UxCommandHub
             return new SelectionContext
             {
                 HasDocument = false,
+                OpenDocumentCount = _main.Documents.Count,
                 HasQpdf = _main.HasPdfTools,
                 HasOcr = _main.HasOcr,
                 HasImageEditor = ExternalImageEditor.IsEditorAvailable(),
@@ -96,6 +97,7 @@ public sealed class UxCommandHub
             SelectedPageNumbers = selectedPages.Select(p => p.PageNumber).ToList(),
             CurrentPageNumber = doc.CurrentPageNumber,
             PageCount = doc.PageCount,
+            OpenDocumentCount = _main.Documents.Count,
             HasTextSelection = doc.HasSelection,
             HasSelectedObject = doc.HasObjectSelection,
             HasUnsavedChanges = doc.IsDirty,
@@ -234,6 +236,7 @@ public sealed class UxCommandHub
         [CommandIds.RotateLeft] = t => t.Document?.RotateSelectedLeftCommand.Execute(PagesOf(t)),
         [CommandIds.Rotate180] = t => t.Document?.RotateSelected180Command.Execute(PagesOf(t)),
         [CommandIds.DeletePages] = t => t.Document?.DeleteSelectedCommand.Execute(PagesOf(t)),
+        [CommandIds.SendPagesToDocument] = t => _main.SendPagesToDocumentCommand.Execute(PageIndicesOf(t)),
         [CommandIds.ExtractPages] = t => _main.ExtractSelectedCommand.Execute(PagesOf(t)),
         [CommandIds.PageProperties] = ShowPageProperties,
         [CommandIds.PrintSelectedPages] = t => PrintPages(t, PageIndicesOf(t)),
@@ -293,9 +296,7 @@ public sealed class UxCommandHub
         [CommandIds.BatchPrint] = _ => _main.ShowBatchPrintCommand.Execute(null),
 
         // Преобразование
-        [CommandIds.CompressPages] = _ => _main.CompressImagesCommand.Execute(null),
-        [CommandIds.EnhanceScans] = _ => _main.EnhanceScansCommand.Execute(null),
-        [CommandIds.OptimizeCopy] = _ => _main.OptimizeCopyCommand.Execute(null),
+        [CommandIds.OptimizeDocument] = _ => _main.OptimizeDocumentCommand.Execute(null),
         [CommandIds.ExportImages] = _ => _main.ExportImagesCommand.Execute(null),
         [CommandIds.ExportWord] = _ => _main.ExportWordCommand.Execute(null),
         [CommandIds.ExportExcel] = _ => _main.ExportExcelCommand.Execute(null),
@@ -316,6 +317,7 @@ public sealed class UxCommandHub
         [CommandIds.DetachTab] = t => _main.DetachTabCommand.Execute(t.Document),
         [CommandIds.CommandPalette] = _ => ShowPalette(),
         [CommandIds.About] = _ => _main.AboutCommand.Execute(null),
+        [CommandIds.Support] = _ => ProjectLinks.Open(ProjectLinks.Support),
     };
 
     // ----- Обработчики, у которых есть своя логика -----

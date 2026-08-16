@@ -168,6 +168,18 @@ public partial class MainWindow : Window
             .Select(p => p.LogicalIndex).ToList());
     }
 
+    /// <summary>Вкладка, над которой сейчас держат страницы, и отсчёт до её открытия.</summary>
+    private DocumentViewModel? _springTarget;
+    private System.Windows.Threading.DispatcherTimer? _springTimer;
+
+    /// <summary>
+    /// Задержка перед тем, как вкладка под курсором откроется.
+    ///
+    /// Мгновенное переключение мешало бы просто проносить страницы мимо чужих
+    /// вкладок, а слишком долгое заставляло бы ждать.
+    /// </summary>
+    private static readonly TimeSpan SpringDelay = TimeSpan.FromMilliseconds(600);
+
     private void OnTabDragOver(object sender, DragEventArgs e)
     {
         e.Handled = true;
@@ -175,16 +187,56 @@ public partial class MainWindow : Window
         if (sender is not FrameworkElement { DataContext: DocumentViewModel target }) return;
         if (DraggedPages(e.Data) is not { } dragged) return;
         // На свою же вкладку бросать нечего — этим занимается сам список.
-        if (ReferenceEquals(dragged.Source, target)) return;
+        if (ReferenceEquals(dragged.Source, target))
+        {
+            CancelSpring();
+            return;
+        }
+
         e.Effects = DragDropEffects.Copy;
+        StartSpring(target, dragged.Source);
+    }
+
+    /// <summary>
+    /// Задержаться над чужой вкладкой — значит открыть её, не отпуская
+    /// страницы. Дальше человек ставит их в нужное место обычным
+    /// перетаскиванием внутри организатора, а не «куда положат».
+    ///
+    /// Организатор у цели включается сам: ставить страницы в точное место,
+    /// глядя на сплошной текст, невозможно.
+    /// </summary>
+    private void StartSpring(DocumentViewModel target, DocumentViewModel source)
+    {
+        if (ReferenceEquals(_springTarget, target)) return;
+        CancelSpring();
+        _springTarget = target;
+        _springTimer = new System.Windows.Threading.DispatcherTimer { Interval = SpringDelay };
+        _springTimer.Tick += (_, _) =>
+        {
+            CancelSpring();
+            ViewModel.ActiveDocument = target;
+            if (source.IsOrganizeMode) target.IsOrganizeMode = true;
+        };
+        _springTimer.Start();
+    }
+
+    private void CancelSpring()
+    {
+        _springTimer?.Stop();
+        _springTimer = null;
+        _springTarget = null;
     }
 
     private void OnTabDrop(object sender, DragEventArgs e)
     {
         e.Handled = true;
+        CancelSpring();
         if (sender is not FrameworkElement { DataContext: DocumentViewModel target }) return;
         if (DraggedPages(e.Data) is not { } dragged) return;
         if (ReferenceEquals(dragged.Source, target)) return;
+        // Брошено на саму вкладку — место не указано, значит в конец. Чтобы
+        // поставить в нужное место, над вкладкой надо задержаться: она
+        // откроется, и страницы ставятся уже среди её карточек.
         _ = ViewModel.DropPagesOnDocumentAsync(target, dragged.Source, dragged.Indices);
     }
 

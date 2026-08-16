@@ -188,6 +188,38 @@ public sealed class AppCommandsTests
         Assert.Equal("UxCannotDeleteAllPages", result.ReasonKey);
     }
 
+    /// <summary>
+    /// «Отправить в другой документ» имеет смысл только когда этот другой
+    /// документ есть. Пункт не прячется, а объясняет, чего не хватает: иначе
+    /// человек ищет пропавшую команду, а не открывает вторую вкладку.
+    /// </summary>
+    [Fact]
+    public void Sending_Pages_Needs_A_Second_Open_Document()
+    {
+        var alone = Registry.Require(CommandIds.SendPagesToDocument).Evaluate(new SelectionContext
+        {
+            HasDocument = true, Kind = SelectionKind.Page, PageCount = 8, SelectedCount = 2,
+            OpenDocumentCount = 1,
+        });
+        Assert.False(alone.IsAvailable);
+        Assert.Equal("UxNeedsSecondDocument", alone.ReasonKey);
+
+        var withNeighbour = Registry.Require(CommandIds.SendPagesToDocument).Evaluate(new SelectionContext
+        {
+            HasDocument = true, Kind = SelectionKind.Page, PageCount = 8, SelectedCount = 2,
+            OpenDocumentCount = 2,
+        });
+        Assert.True(withNeighbour.IsAvailable);
+
+        // И команда должна быть там, где её ищут: в меню выделенных страниц.
+        var items = new ContextMenuComposer(Registry).Compose(new SelectionContext
+        {
+            HasDocument = true, Kind = SelectionKind.Page, SelectedCount = 3, PageCount = 20,
+            OpenDocumentCount = 2,
+        });
+        Assert.Contains(items, i => i.Command.Id == CommandIds.SendPagesToDocument);
+    }
+
     [Fact]
     public void Dialog_Commands_Are_Marked_So_The_Title_Gets_Its_Ellipsis()
     {
@@ -209,7 +241,7 @@ public sealed class AppCommandsTests
             ("пароль", CommandIds.ProtectWithPassword),
             ("склеить", CommandIds.MergePdfs),
             ("распознать", CommandIds.Ocr),
-            ("сжать", CommandIds.CompressPages),
+            ("сжать", CommandIds.OptimizeDocument),
         };
 
         foreach (var (query, id) in cases)

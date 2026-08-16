@@ -20,6 +20,69 @@ public sealed class QuickPanelLayoutTests
         Assert.Equal(QuickPanelLayout.Default, QuickPanelLayout.Sanitize(Array.Empty<string>(), Known));
     }
 
+    /// <summary>
+    /// Новая кнопка обязана дойти до того, кто панель уже настраивал: иначе
+    /// добавленная в программу команда для него просто не существует.
+    /// </summary>
+    [Fact]
+    public void A_Panel_Set_Up_Long_Ago_Gets_The_Buttons_Added_Since()
+    {
+        var saved = new[] { CommandIds.Open, CommandIds.Save, CommandIds.Print };
+
+        var (ids, generation) = QuickPanelLayout.Upgrade(saved, 0);
+
+        Assert.Equal(QuickPanelLayout.Generation, generation);
+        Assert.Contains(CommandIds.OptimizeDocument, ids);
+        Assert.Contains(CommandIds.ToggleOrganize, ids);
+        // Прежний порядок не тронут: новое дописано в конец.
+        Assert.Equal(saved, ids.Take(saved.Length));
+    }
+
+    /// <summary>
+    /// Убранная вручную кнопка не должна возвращаться на каждом запуске: как
+    /// только поколение дотянуто, доливать больше нечего.
+    /// </summary>
+    [Fact]
+    public void An_Up_To_Date_Panel_Is_Left_Exactly_As_It_Is()
+    {
+        var saved = new[] { CommandIds.Open, CommandIds.Save };
+
+        var (ids, generation) = QuickPanelLayout.Upgrade(saved, QuickPanelLayout.Generation);
+
+        Assert.Equal(saved, ids);
+        Assert.Equal(QuickPanelLayout.Generation, generation);
+    }
+
+    /// <summary>Кнопка, которая уже есть, вторым экземпляром не добавляется.</summary>
+    [Fact]
+    public void Already_Present_Buttons_Are_Not_Doubled()
+    {
+        var saved = new[] { CommandIds.Open, CommandIds.OptimizeDocument, CommandIds.ToggleOrganize };
+
+        var (ids, _) = QuickPanelLayout.Upgrade(saved, 0);
+
+        Assert.Equal(saved, ids);
+    }
+
+    /// <summary>Пустая настройка — это «умолчание», и доливать в неё нечего.</summary>
+    [Fact]
+    public void An_Untouched_Panel_Simply_Takes_The_Default()
+    {
+        var (ids, generation) = QuickPanelLayout.Upgrade(Array.Empty<string>(), 0);
+        Assert.Equal(QuickPanelLayout.Default, ids);
+        Assert.Equal(QuickPanelLayout.Generation, generation);
+    }
+
+    /// <summary>Систематизация и оптимизация — в панели по умолчанию.</summary>
+    [Fact]
+    public void The_Default_Panel_Offers_Organize_And_Optimize()
+    {
+        Assert.Contains(CommandIds.ToggleOrganize, QuickPanelLayout.Default);
+        Assert.Contains(CommandIds.OptimizeDocument, QuickPanelLayout.Default);
+        Assert.All(QuickPanelLayout.Default,
+            id => Assert.True(id == QuickPanelLayout.Separator || Known(id), id));
+    }
+
     [Fact]
     public void Command_Removed_From_The_Program_Disappears_From_The_Panel()
     {

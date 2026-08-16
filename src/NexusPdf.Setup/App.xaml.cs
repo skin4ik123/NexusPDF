@@ -10,13 +10,16 @@ public partial class App : System.Windows.Application
         if (options.Silent)
         {
             // Тихий режим: /S [/allusers] [/dir=путь] [/nodesktop]
+            // Без подключения к родительской консоли все сообщения ниже
+            // пропадали, и от установщика оставался только код возврата.
+            ParentConsole.AttachToParent();
             int exitCode;
             try
             {
                 if (!string.IsNullOrWhiteSpace(options.CustomDir) &&
                     !System.IO.Path.IsPathRooted(options.CustomDir))
                 {
-                    Console.Error.WriteLine("NexusPdfSetup: /dir= требует полный путь (код 87).");
+                    Console.Error.WriteLine("NexusPdfSetup: /dir= requires a full path (code 87).");
                     Shutdown(87);
                     return;
                 }
@@ -26,8 +29,8 @@ public partial class App : System.Windows.Application
                     installed == InstalledContext.PerMachine && !options.AllUsers)
                 {
                     Console.Error.WriteLine(
-                        "NexusPdfSetup: продукт уже установлен в другом режиме (per-user/per-machine). " +
-                        "Сначала удалите существующую копию (код 1638).");
+                        "NexusPdfSetup: the product is already installed in the other mode (per-user/per-machine). " +
+                        "Remove the existing copy first (code 1638).");
                     Shutdown(1638);
                     return;
                 }

@@ -48,6 +48,15 @@ public sealed class DocxExporter : IDisposable
 
     private readonly WordprocessingDocument _document;
     private readonly MainDocumentPart _main;
+
+    /// <summary>
+    /// Тот же документ, что лежит в <see cref="MainDocumentPart.Document"/>.
+    /// Держится отдельным полем, потому что у части это свойство объявлено
+    /// как допускающее null: мы его сами и присваиваем в конструкторе, а на
+    /// сохранении пришлось бы либо разыменовывать вслепую, либо проверять
+    /// на null то, чего не бывает.
+    /// </summary>
+    private readonly Document _mainDocument;
     private readonly Body _body;
     private readonly WordExportOptions _options;
     private readonly EncodeImage _encode;
@@ -75,7 +84,8 @@ public sealed class DocxExporter : IDisposable
         _document = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
         _main = _document.AddMainDocumentPart();
         _body = new Body();
-        _main.Document = new Document(_body);
+        _mainDocument = new Document(_body);
+        _main.Document = _mainDocument;
         AddStyles();
     }
 
@@ -173,7 +183,7 @@ public sealed class DocxExporter : IDisposable
     public void Finish()
     {
         _body.AppendChild(SectionProperties());
-        _main.Document.Save();
+        _mainDocument.Save();
         if (_comments != null) _comments.Save();
     }
 

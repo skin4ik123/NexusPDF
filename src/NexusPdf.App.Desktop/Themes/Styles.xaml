@@ -362,6 +362,8 @@
 
   <Style x:Key="DocTabItem" TargetType="TabItem">
     <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+    <!-- Иначе диктор читает имя типа модели представления вместо имени файла. -->
+    <Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="TabItem">
@@ -391,6 +393,7 @@
   <Style x:Key="OrganizeItem" TargetType="ListBoxItem">
     <Setter Property="Margin" Value="6"/>
     <Setter Property="Padding" Value="0"/>
+    <Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="ListBoxItem">
@@ -415,6 +418,7 @@
   <Style x:Key="ReadingPageItem" TargetType="ListBoxItem">
     <Setter Property="HorizontalAlignment" Value="Center"/>
     <Setter Property="Focusable" Value="False"/>
+    <Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="ListBoxItem">
@@ -426,6 +430,7 @@
 
   <Style x:Key="ThumbItem" TargetType="ListBoxItem">
     <Setter Property="HorizontalContentAlignment" Value="Center"/>
+    <Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="ListBoxItem">

@@ -47,6 +47,13 @@ public sealed class PrintPlanRenderer
         // бесполезна — по ней нечего резать.
         DrawMarks(composed, buffer, stride);
 
+        // Цветовой режим — предпоследним: он обязан захватить и содержимое, и
+        // метки, иначе на сером листе метки остались бы цветными.
+        ColorConversion.Apply(buffer, composed.Sheet.Color, composed.WidthPx);
+
+        // Направляющие — последними и в цвете: это разметка предпросмотра, а не
+        // содержимое листа, и обесцвечивать её вместе с ним нельзя — иначе на
+        // сером листе она сольётся с текстом.
         if (drawGuides)
             DrawGuides(composed, buffer, stride);
 
@@ -226,13 +233,29 @@ public sealed class PrintPlanRenderer
     private Task<RenderedPageImage> RenderWholeAsync(
         int logicalIndex, PlacedPage placed, int widthPx, int heightPx, CancellationToken ct)
     {
-        // Политика аннотаций решает, каким рендером брать страницу: обычный
-        // включает аннотации и поля форм, content-only не включает ничего.
-        // Флаг Print у отдельных аннотаций соблюдается движком при отрисовке.
-        return placed.Annotations == AnnotationPolicy.DocumentOnly ||
-               placed.Forms == FormPolicy.WithoutFields
-            ? _document.RenderLogicalPageContentOnlyAsync(logicalIndex, widthPx, heightPx, ct)
-            : _document.RenderLogicalPageAsync(logicalIndex, widthPx, heightPx, ct);
+        return _document.RenderLogicalPageForPrintAsync(
+            logicalIndex, widthPx, heightPx, ContentOptionsOf(placed), ct);
+    }
+
+    /// <summary>
+    /// Политики плана → состав растра.
+    ///
+    /// Аннотации и поля решаются РАЗДЕЛЬНО: поле формы — это тоже аннотация, но
+    /// «печатать без полей» не должно заодно убирать комментарии. Раньше обе
+    /// политики сводились к одному content-only рендеру, и снятая галочка полей
+    /// молча уносила с листа всю разметку.
+    /// </summary>
+    internal static PrintContentOptions ContentOptionsOf(PlacedPage placed)
+    {
+        if (placed.Annotations == AnnotationPolicy.DocumentOnly)
+            return PrintContentOptions.DocumentOnly;
+
+        return new PrintContentOptions(
+            IncludeAnnotations: true,
+            // «Все видимые» — это осознанный выбор напечатать и то, что автор
+            // пометил как экранное; по умолчанию соблюдается флаг Print.
+            OnlyPrintableAnnotations: placed.Annotations != AnnotationPolicy.AllVisibleAnnotations,
+            IncludeFormFields: placed.Forms == FormPolicy.WithValues);
     }
 
     private static RenderedPageImage Crop(RenderedPageImage source, int x, int y, int width, int height)

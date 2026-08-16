@@ -61,6 +61,7 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
 
         Recalculate();
         _ = LoadPermissionsAsync();
+        _ = LoadDocumentFactsAsync();
     }
 
     /// <summary>
@@ -220,6 +221,7 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
             Duplex = profile.Duplex;
             Color = profile.Color;
             Annotations = profile.Annotations;
+            Forms = profile.Forms;
             PrintAsImage = profile.PrintAsImage;
             MarkPreset = profile.Marks;
             BleedMm = Units.PointsToUnit(profile.BleedPt, LengthUnit.Millimeters);
@@ -243,7 +245,15 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
     /// <summary>Сохраняет текущие настройки под указанным именем.</summary>
     public void SaveProfile(string name)
     {
-        var profile = PrintProfile.FromSettings(name, BuildSettings(),
+        // Имя, набранное пользователем, сверяется с ПЕРЕВОДАМИ встроенных
+        // профилей. Иначе человек, сохранивший свой «Буклет» поверх встроенного
+        // «Буклета», получал бы в списке два одинаковых с виду пункта: хранение
+        // идёт по неизменяемому опознавателю, а на экране стоит перевод.
+        var storageName = BuiltInPrintProfiles.All.FirstOrDefault(p =>
+            string.Equals(Loc.Get(p.NameKey), name, StringComparison.CurrentCultureIgnoreCase))
+            ?.Name ?? name;
+
+        var profile = PrintProfile.FromSettings(storageName, BuildSettings(),
             SelectedPrinter?.PrinterName ?? "", SelectedPaper?.Name ?? "")
             with { Parity = Parity };
         _profileStore.Save(profile);
@@ -251,7 +261,7 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
         LoadProfiles();
         _applyingProfile = true;
         SelectedProfile = Profiles.FirstOrDefault(p =>
-            string.Equals(p.Name, name, StringComparison.CurrentCultureIgnoreCase));
+            string.Equals(p.Name, storageName, StringComparison.CurrentCultureIgnoreCase));
         _applyingProfile = false;
     }
 
@@ -447,7 +457,22 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
     partial void OnColorChanged(ColorMode value) => Recalculate();
 
     [ObservableProperty] private AnnotationPolicy _annotations = AnnotationPolicy.PrintableAnnotations;
-    partial void OnAnnotationsChanged(AnnotationPolicy value) => Recalculate();
+    partial void OnAnnotationsChanged(AnnotationPolicy value)
+    {
+        OnPropertyChanged(nameof(CanChooseForms));
+        Recalculate();
+    }
+
+    /// <summary>
+    /// Поля формы решаются ОТДЕЛЬНО от аннотаций: «печатать пустой бланк» —
+    /// частая задача, и раньше её нельзя было выразить, не убрав заодно все
+    /// комментарии с листа.
+    /// </summary>
+    [ObservableProperty] private FormPolicy _forms = FormPolicy.WithValues;
+    partial void OnFormsChanged(FormPolicy value) => Recalculate();
+
+    /// <summary>Выбор полей бессмысленен, когда аннотации не печатаются вовсе.</summary>
+    public bool CanChooseForms => Annotations != AnnotationPolicy.DocumentOnly;
 
     [ObservableProperty] private bool _printAsImage;
     partial void OnPrintAsImageChanged(bool value) => Recalculate();
@@ -531,7 +556,13 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
             Duplex = Duplex,
             CollationBy = caps.SupportsCollation ? CollationExecutor.Printer : CollationExecutor.Application,
         };
-        plan = plan with { Issues = Preflight.Analyze(plan, _permissions) };
+        // Две проверки, а не одна: план знает геометрию, но не знает документ.
+        // Находки по документу идут ПОСЛЕ плановых — те могут заблокировать
+        // печать, и читать их надо первыми.
+        var issues = Preflight.Analyze(plan, _permissions)
+            .Concat(DocumentPreflight.Analyze(_facts, Color, SelectedPrinter, Describe))
+            .ToList();
+        plan = plan with { Issues = issues };
         Plan = plan;
 
         Issues.Clear();
@@ -545,6 +576,51 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
         _ = RefreshPreviewAsync();
     }
 
+    /// <summary>Что известно о документе: читается один раз при открытии окна.</summary>
+    private PrintDocumentFacts _facts = PrintDocumentFacts.Unknown;
+
+    /// <summary>
+    /// Код находки → строка словаря. Проверка живёт в слое печати и о языках не
+    /// знает, поэтому текст ей даёт интерфейс.
+    /// </summary>
+    private static string Describe(string code, object[] args)
+    {
+        var key = code switch
+        {
+            DocumentPreflight.CodeScanLowDpi => "PfDocScanLowDpi",
+            DocumentPreflight.CodeNoContent => "PfDocNoContent",
+            DocumentPreflight.CodeGrayOnColorPrinter => "PfDocGrayOnColorPrinter",
+            DocumentPreflight.CodeLayers => "PfDocLayers",
+            _ => code,
+        };
+        return args.Length == 0 ? Loc.Get(key) : Loc.F(key, args);
+    }
+
+    /// <summary>
+    /// Разбор документа для проверки. Ошибка здесь не должна мешать печатать:
+    /// не удалось посмотреть — просто не будет подсказок.
+    /// </summary>
+    private async Task LoadDocumentFactsAsync()
+    {
+        try
+        {
+            var handle = _document.Document.PrimaryHandle;
+            var summary = await handle.GetImageSummaryAsync(12, CancellationToken.None);
+            var layers = _services.Layers.IsAvailable && handle.FilePath.Length > 0
+                ? (await _services.Layers.GetLayersAsync(
+                    handle.FilePath, _document.Document.Password, CancellationToken.None)).Count
+                : 0;
+            _facts = new PrintDocumentFacts(
+                _document.PageCount, summary.SampledPages, summary.Images,
+                summary.TextLength, summary.AverageImageDpi, layers > 0);
+            Recalculate();
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Не удалось разобрать документ для предварительной проверки печати");
+        }
+    }
+
     private LayoutSettings BuildSettings() => new()
     {
         Imposition = Imposition,
@@ -554,6 +630,7 @@ public sealed partial class PrintCenterViewModel : ObservableObject, IDisposable
         Duplex = Duplex,
         Color = Color,
         Annotations = Annotations,
+        Forms = Forms,
         PrintAsImage = PrintAsImage,
         NUp = new NUpSettings
         {

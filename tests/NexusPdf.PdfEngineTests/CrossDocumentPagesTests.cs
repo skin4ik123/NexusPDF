@@ -69,6 +69,68 @@ public sealed class CrossDocumentPagesTests : IAsyncLifetime
             v => string.Equals(v, sourcePath, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Страницы встают ИМЕННО туда, куда их поставили, а не в конец.
+    ///
+    /// Ради этого перенос между вкладками и делается: человек указывает место
+    /// между карточками, и порядок обязан совпасть с тем, что он видел.
+    /// </summary>
+    [Fact]
+    public async Task Pages_Land_Exactly_Where_They_Were_Dropped()
+    {
+        var dir = NewDir();
+        var targetPath = await MakeDocumentAsync(dir, "приёмник.pdf", 4, 40);
+        var sourcePath = await MakeDocumentAsync(dir, "источник.pdf", 3, 200);
+
+        await using var target = await OpenedDocument.OpenAsync(_pdfium, targetPath, null, CancellationToken.None);
+        await using var source = await OpenedDocument.OpenAsync(_pdfium, sourcePath, null, CancellationToken.None);
+
+        var own = target.Session.Model.Pages[0].SourceId;
+        await target.InsertPagesFromAsync(_pdfium, source, new[] { 0, 2 }, 2, CancellationToken.None);
+
+        var pages = target.Session.Model.Pages;
+        Assert.Equal(6, pages.Count);
+
+        // Свои первые две — на месте.
+        Assert.Equal(own, pages[0].SourceId);
+        Assert.Equal(0, pages[0].SourcePageIndex);
+        Assert.Equal(own, pages[1].SourceId);
+        Assert.Equal(1, pages[1].SourcePageIndex);
+
+        // Принесённые — ровно на третьей и четвёртой позиции и в своём порядке.
+        var foreign = pages[2].SourceId;
+        Assert.NotEqual(own, foreign);
+        Assert.Equal(0, pages[2].SourcePageIndex);
+        Assert.Equal(foreign, pages[3].SourceId);
+        Assert.Equal(2, pages[3].SourcePageIndex);
+
+        // Оставшиеся свои — сдвинулись за ними, а не потерялись.
+        Assert.Equal(own, pages[4].SourceId);
+        Assert.Equal(2, pages[4].SourcePageIndex);
+        Assert.Equal(own, pages[5].SourceId);
+        Assert.Equal(3, pages[5].SourcePageIndex);
+    }
+
+    /// <summary>Вставка в самое начало — тоже место, и оно должно работать.</summary>
+    [Fact]
+    public async Task Pages_Can_Land_At_The_Very_Beginning()
+    {
+        var dir = NewDir();
+        var targetPath = await MakeDocumentAsync(dir, "т.pdf", 2, 40);
+        var sourcePath = await MakeDocumentAsync(dir, "и.pdf", 2, 200);
+
+        await using var target = await OpenedDocument.OpenAsync(_pdfium, targetPath, null, CancellationToken.None);
+        await using var source = await OpenedDocument.OpenAsync(_pdfium, sourcePath, null, CancellationToken.None);
+
+        var own = target.Session.Model.Pages[0].SourceId;
+        await target.InsertPagesFromAsync(_pdfium, source, new[] { 1 }, 0, CancellationToken.None);
+
+        Assert.Equal(3, target.Session.Model.Pages.Count);
+        Assert.NotEqual(own, target.Session.Model.Pages[0].SourceId);
+        Assert.Equal(1, target.Session.Model.Pages[0].SourcePageIndex);
+        Assert.Equal(own, target.Session.Model.Pages[1].SourceId);
+    }
+
     [Fact]
     public async Task Rotation_Of_A_Moved_Page_Comes_Along()
     {

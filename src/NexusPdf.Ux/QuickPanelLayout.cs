@@ -13,15 +13,74 @@ public static class QuickPanelLayout
     /// <summary>Разделитель между группами кнопок.</summary>
     public const string Separator = "|";
 
-    /// <summary>Панель по умолчанию — то, чем пользуются в первый день.</summary>
+    /// <summary>
+    /// Панель по умолчанию — то, чем пользуются в первый день.
+    ///
+    /// Систематизация и оптимизация вынесены сюда наравне с сохранением и
+    /// печатью: это не редкие настройки, а то, ради чего документ открывают —
+    /// разобрать страницы и привести файл в порядок. Искать их в меню каждый
+    /// раз значит делать частую работу неудобной.
+    /// </summary>
     public static IReadOnlyList<string> Default { get; } = new[]
     {
         CommandIds.Open, CommandIds.Save, CommandIds.SaveAs, CommandIds.Print,
         Separator,
         CommandIds.Undo, CommandIds.Redo,
         Separator,
+        CommandIds.ToggleOrganize, CommandIds.OptimizeDocument,
+        Separator,
         CommandIds.Find,
     };
+
+    /// <summary>
+    /// Поколение набора по умолчанию. Растёт, когда в панель добавляются новые
+    /// кнопки, и по нему решается, доливать ли их в уже настроенный список.
+    /// </summary>
+    public const int Generation = 1;
+
+    /// <summary>
+    /// Что добавилось в каждом поколении. Только это и доливается в сохранённую
+    /// панель: остальной набор по умолчанию пользователь мог убрать намеренно, и
+    /// возвращать его обновлением нельзя.
+    /// </summary>
+    private static readonly Dictionary<int, string[]> AddedIn = new()
+    {
+        [1] = new[] { CommandIds.ToggleOrganize, CommandIds.OptimizeDocument },
+    };
+
+    /// <summary>
+    /// Доливает в сохранённую панель кнопки, появившиеся после того, как её
+    /// настраивали. Возвращает новый список и поколение, до которого он дотянут.
+    /// </summary>
+    public static (IReadOnlyList<string> Ids, int Generation) Upgrade(
+        IReadOnlyList<string>? saved, int savedGeneration)
+    {
+        // Пустая настройка означает «умолчание»: доливать в неё нечего, она и
+        // так всегда равна нынешнему набору.
+        if (saved == null || saved.Count == 0)
+            return (Default, Generation);
+        if (savedGeneration >= Generation)
+            return (saved, Generation);
+
+        var result = saved.ToList();
+        var present = new HashSet<string>(result, StringComparer.Ordinal);
+        var added = new List<string>();
+        for (var g = savedGeneration + 1; g <= Generation; g++)
+        {
+            if (!AddedIn.TryGetValue(g, out var ids)) continue;
+            foreach (var id in ids)
+                if (present.Add(id)) added.Add(id);
+        }
+
+        if (added.Count > 0)
+        {
+            // Новое ставится отдельной группой в конец: вклиниваться в порядок,
+            // который человек выстроил сам, обновление не должно.
+            result.Add(Separator);
+            result.AddRange(added);
+        }
+        return (result, Generation);
+    }
 
     /// <summary>
     /// Приводит сохранённый список к рабочему виду: убирает неизвестные

@@ -1,0 +1,43 @@
+<Window x:Class="NexusPdf.App.Desktop.Views.SendPagesDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:l="clr-namespace:NexusPdf.App.Desktop.Localization"
+        Title="{l:Loc SendPagesTitle}"
+        Width="460" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{DynamicResource PanelBg}">
+  <StackPanel Margin="20">
+    <TextBlock x:Name="IntroText" Foreground="{DynamicResource TextSecondary}"
+               FontSize="12" TextWrapping="Wrap"/>
+
+    <TextBlock Text="{l:Loc SendPagesTarget}" Foreground="{DynamicResource TextSecondary}" FontSize="12"
+               Margin="0,14,0,4"/>
+    <ComboBox x:Name="TargetCombo" SelectedIndex="0" DisplayMemberPath="Title"
+              SelectionChanged="OnTargetChanged"/>
+
+    <TextBlock Text="{l:Loc SendPagesWhere}" Foreground="{DynamicResource TextSecondary}" FontSize="12"
+               Margin="0,14,0,4"/>
+    <!-- Общая GroupName обязательна: третья кнопка лежит во вложенной панели,
+         а без имени группы WPF считает её отдельным переключателем — и на
+         экране оказались бы отмечены сразу два варианта. -->
+    <RadioButton x:Name="AtEnd" Content="{l:Loc SendPagesAtEnd}" IsChecked="True" GroupName="Where"
+                 Foreground="{DynamicResource TextBrush}"/>
+    <RadioButton x:Name="AtStart" Content="{l:Loc SendPagesAtStart}" Margin="0,6,0,0" GroupName="Where"
+                 Foreground="{DynamicResource TextBrush}"/>
+    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+      <RadioButton x:Name="BeforePage" Content="{l:Loc SendPagesBefore}" VerticalAlignment="Center"
+                   GroupName="Where" Foreground="{DynamicResource TextBrush}"/>
+      <TextBox x:Name="PageBox" Width="70" Margin="10,0,0,0" Text="1"
+               Style="{StaticResource ThemedTextBox}"
+               IsEnabled="{Binding IsChecked, ElementName=BeforePage}"/>
+      <TextBlock x:Name="RangeHint" VerticalAlignment="Center" Margin="10,0,0,0"
+                 Foreground="{DynamicResource TextSecondary}" FontSize="11"/>
+    </StackPanel>
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+      <Button Content="{l:Loc SendPagesAction}" Style="{StaticResource PrimaryButton}" MinWidth="130"
+              IsDefault="True" Click="OnSend"/>
+      <Button Content="{l:Loc Cancel}" Style="{StaticResource LinkButton}" Margin="8,0,0,0" IsCancel="True"/>
+    </StackPanel>
+  </StackPanel>
+</Window>

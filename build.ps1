@@ -17,6 +17,15 @@ $propsXml = [xml](Get-Content (Join-Path $root "Directory.Build.props"))
 $version = ($propsXml.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { $_ } | Select-Object -First 1)
 if (-not $version) { throw "Version not found in Directory.Build.props" }
 
+# The app manifest carries its own copy of the version and is edited by hand.
+# Nothing used to compare the two, so a version bump could ship a manifest still
+# claiming the previous release. Checked here rather than commented about.
+$manifestPath = Join-Path $root "src/NexusPdf.App.Desktop/app.manifest"
+$manifestVersion = ([xml](Get-Content $manifestPath)).assembly.assemblyIdentity.version
+if ($manifestVersion -ne "$version.0") {
+    throw "app.manifest says $manifestVersion but Directory.Build.props says $version (expected $version.0). Update $manifestPath."
+}
+
 # Fall back to per-user SDK install if no system-wide SDK is present
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue) -or -not (dotnet --list-sdks 2>$null)) {
     $userDotnet = Join-Path $env:USERPROFILE ".dotnet"
@@ -64,6 +73,11 @@ if (-not $SkipTests) {
     if ($LASTEXITCODE -ne 0) { exit 1 }
     dotnet test tests/NexusPdf.PdfEngineTests -c $Configuration --no-build
     if ($LASTEXITCODE -ne 0) { exit 1 }
+    # Печать проверялась только вручную: проект существовал и был в решении,
+    # но ни сборка, ни CI его не запускали, то есть целый набор тестов не
+    # относился к выпуску вообще.
+    dotnet test tests/NexusPdf.PrintingTests -c $Configuration --no-build
+    if ($LASTEXITCODE -ne 0) { exit 1 }
 }
 
 # Предкомпиляция в машинный код (ReadyToRun). Без неё первый запуск после
@@ -82,6 +96,18 @@ dotnet publish src/NexusPdf.Cli -c $Configuration -r win-x64 --self-contained tr
     -p:PublishReadyToRun=true -o $publishDir
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
+# Свои символы встроены в сборки (DebugType=embedded в Directory.Build.props),
+# но сторонние пакеты кладут рядом собственные .pdb. Самый крупный — 80 МБ
+# символов SkiaSharp: пятая часть всей загрузки ради отладки чужой библиотеки,
+# исходников которой здесь всё равно нет. Папка уезжает в MSI и в архив целиком,
+# поэтому чистить надо тут, до упаковки.
+$strayPdb = Get-ChildItem $publishDir -Recurse -Filter *.pdb
+if ($strayPdb) {
+    $mb = ($strayPdb | Measure-Object Length -Sum).Sum / 1MB
+    Write-Host ("== Strip {0} third-party .pdb ({1:N1} MB) ==" -f $strayPdb.Count, $mb)
+    $strayPdb | Remove-Item -Force
+}
+
 # Bundle qpdf + tessdata + notices + license with the app
 New-Item -ItemType Directory -Force (Join-Path $publishDir "tools/qpdf") | Out-Null
 Copy-Item "$root\tools\qpdf\*" (Join-Path $publishDir "tools/qpdf") -Force
@@ -93,19 +119,25 @@ New-Item -ItemType Directory -Force (Join-Path $publishDir "tools/ocrmodels") | 
 Copy-Item "$root\tools\ocrmodels\*" (Join-Path $publishDir "tools/ocrmodels") -Force
 Copy-Item "$root\tools\ocrmodels.lock.json" (Join-Path $publishDir "tools") -Force
 Copy-Item "$root\docs\THIRD_PARTY_NOTICES.md" $publishDir -Force
+Copy-Item "$root\installer\Assets\license.en.txt" (Join-Path $publishDir "LICENSE.txt") -Force
 Copy-Item "$root\installer\Assets\license.ru.txt" (Join-Path $publishDir "LICENSE.ru.txt") -Force
 
 $hashTargets = @()
 
 if ($Msi -or $All) {
-    Write-Host "== MSI (WiX 5, x64, ru-RU UI) =="
+    Write-Host "== MSI (WiX 5, x64, en-US UI, version $version) =="
     if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
         dotnet tool install --global wix --version 5.0.2
     }
     wix extension add --global WixToolset.UI.wixext/5.0.2 2>$null
     $msiPath = Join-Path $root "artifacts/NexusPdf.msi"
-    wix build installer/Msi/NexusPdf.wxs -arch x64 -culture ru-RU `
+    # -d Version: the MSI product version comes from Directory.Build.props, never
+    # from the .wxs. A hard-coded number there once went four releases stale, and
+    # because MajorUpgrade compares product versions, every install stayed a
+    # separate product and piled up its own entry in "Installed apps".
+    wix build installer/Msi/NexusPdf.wxs -arch x64 -culture en-US `
         -ext WixToolset.UI.wixext `
+        -d "Version=$version" `
         -bindpath "publish=$publishDir" `
         -bindpath "assets=$root\installer\Assets" `
         -o $msiPath

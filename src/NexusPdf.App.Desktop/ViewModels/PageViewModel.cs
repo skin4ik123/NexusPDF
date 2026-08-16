@@ -43,6 +43,13 @@ public sealed partial class PageViewModel : ObservableObject
     public int PageNumber => LogicalIndex + 1;
     public int RotationDegrees => PageRef.RotationOffset * 90;
 
+    /// <summary>
+    /// Что произносит экранный диктор о карточке страницы. Без него WPF читает
+    /// имя ТИПА — «NexusPdf.App.Desktop.ViewModels.PageViewModel»: номер лежит
+    /// в шаблоне, а не в тексте элемента списка.
+    /// </summary>
+    public string AccessibleName => Localization.Loc.F("A11yPageItem", PageNumber);
+
     public double WidthDiu => SizePt.WidthPoints * PtToDiu * _owner.Zoom;
     public double HeightDiu => SizePt.HeightPoints * PtToDiu * _owner.Zoom;
 

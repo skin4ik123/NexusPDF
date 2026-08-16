@@ -40,6 +40,7 @@ public static class AppMenuFactory
         menu.Items.Add(ViewMenu(main));
         menu.Items.Add(SettingsMenu(main));
         menu.Items.Add(new Separator());
+        menu.Items.Add(CommandItem(hub, hub.Registry.Require(CommandIds.Support), context));
         menu.Items.Add(CommandItem(hub, hub.Registry.Require(CommandIds.About), context));
         return menu;
     }
@@ -176,7 +177,9 @@ public static class AppMenuFactory
         settings.Items.Add(theme);
 
         var language = new MenuItem { Header = Loc.Get("Language") };
-        foreach (var (value, title) in new[] { ("ru", "Русский"), ("en", "English") })
+        // Название языка пишется НА НЁМ САМОМ: человек, попавший в чужой
+        // интерфейс, ищет знакомое слово, а не перевод названия своего языка.
+        foreach (var (value, title) in new[] { ("en", "English"), ("ru", "Русский"), ("uk", "Українська") })
         {
             var setting = value;
             language.Items.Add(new MenuItem
