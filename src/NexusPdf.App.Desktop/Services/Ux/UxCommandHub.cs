@@ -165,6 +165,9 @@ public sealed class UxCommandHub
         try
         {
             handler(target);
+            // «Недавнее» пополняется ЗДЕСЬ, а не в панели: тогда туда попадает
+            // и то, что вызвано горячей клавишей, меню или палитрой.
+            _main.NoteCommandUsed(commandId);
         }
         catch (Exception ex)
         {

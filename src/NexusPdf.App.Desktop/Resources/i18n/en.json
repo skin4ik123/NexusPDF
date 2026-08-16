@@ -773,6 +773,7 @@
   "ToolsSearchHint": "Find a tool",
   "ToolsSearchClear": "Clear search (Esc)",
   "ToolsSearchEmpty": "Nothing found. Try another word — the search knows synonyms too: \"crooked scan\", \"reduce size\", \"deskew\".",
+  "PanelToolsRecent": "Recent",
   "PanelTools": "Tools",
   "MenuPrint": "Print",
   "PanelToolsReset": "Tool layout restored to defaults.",

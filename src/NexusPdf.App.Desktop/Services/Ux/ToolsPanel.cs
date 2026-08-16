@@ -68,11 +68,19 @@ public sealed partial class ToolsPanel : ObservableObject, IDropTarget
 {
     private readonly UxCommandHub _hub;
     private readonly Action<string> _save;
+    private readonly Action<IReadOnlyList<string>>? _saveRecent;
+    private IReadOnlyList<string> _recent = Array.Empty<string>();
 
-    public ToolsPanel(UxCommandHub hub, string? savedLayout, Action<string> save)
+    /// <summary>Раздел «Недавние» живёт отдельно от раскладки: его не переставляют руками.</summary>
+    private ToolGroup? _recentGroup;
+
+    public ToolsPanel(UxCommandHub hub, string? savedLayout, Action<string> save,
+        IReadOnlyList<string>? recent = null, Action<IReadOnlyList<string>>? saveRecent = null)
     {
         _hub = hub;
         _save = save;
+        _saveRecent = saveRecent;
+        _recent = RecentCommands.Sanitize(recent, id => hub.Registry.Find(id) != null);
 
         var layout = ToolsLayout.Sanitize(
             ToolsLayout.FromSetting(savedLayout), id => hub.Registry.Find(id) != null);
@@ -84,6 +92,7 @@ public sealed partial class ToolsPanel : ObservableObject, IDropTarget
             Items = new ObservableCollection<QuickPanelItem>(
                 g.Commands.Select(id => new QuickPanelItem(hub, id))),
         }));
+        BuildRecentGroup();
     }
 
     public ObservableCollection<ToolGroup> Groups { get; }
@@ -116,6 +125,50 @@ public sealed partial class ToolsPanel : ObservableObject, IDropTarget
     /// <summary>Ничего не нашлось — сказать об этом прямо, а не показывать пустоту.</summary>
     public bool NothingFound => HasFilter && Groups.All(g => !g.IsVisible);
 
+    /// <summary>
+    /// Отметить использование инструмента. Зовётся из общей точки исполнения
+    /// команд, поэтому в «недавнее» попадает и то, что вызвано горячей
+    /// клавишей или из меню, а не только клик по панели.
+    /// </summary>
+    public void NoteUsed(string commandId)
+    {
+        if (_hub.Registry.Find(commandId) == null) return;
+        var updated = RecentCommands.Use(_recent, commandId);
+        if (updated.SequenceEqual(_recent)) return;
+        _recent = updated;
+        _saveRecent?.Invoke(_recent);
+        BuildRecentGroup();
+    }
+
+    private void BuildRecentGroup()
+    {
+        if (!RecentCommands.WorthShowing(_recent))
+        {
+            if (_recentGroup != null)
+            {
+                Groups.Remove(_recentGroup);
+                _recentGroup = null;
+            }
+            return;
+        }
+
+        var items = new ObservableCollection<QuickPanelItem>(
+            _recent.Select(id => new QuickPanelItem(_hub, id)));
+        if (_recentGroup == null)
+        {
+            _recentGroup = new ToolGroup
+            {
+                Key = "PanelToolsRecent",
+                Title = Loc.Get("PanelToolsRecent"),
+                Items = items,
+            };
+            Groups.Insert(0, _recentGroup);
+            return;
+        }
+        _recentGroup.Items.Clear();
+        foreach (var item in items) _recentGroup.Items.Add(item);
+    }
+
     /// <summary>Сброс к раскладке по умолчанию.</summary>
     public void Reset()
     {
@@ -135,7 +188,9 @@ public sealed partial class ToolsPanel : ObservableObject, IDropTarget
     }
 
     private void SaveLayout() => _save(ToolsLayout.ToSetting(
-        Groups.Select(g => new ToolsGroupLayout(g.Key, g.Items.Select(i => i.Id).ToList())).ToList()));
+        Groups.Where(g => !ReferenceEquals(g, _recentGroup))
+            .Select(g => new ToolsGroupLayout(g.Key, g.Items.Select(i => i.Id).ToList()))
+            .ToList()));
 
     // ----- Перетаскивание -----
 
@@ -151,8 +206,12 @@ public sealed partial class ToolsPanel : ObservableObject, IDropTarget
         if (dropInfo.Data is not QuickPanelItem item) return;
         if (dropInfo.TargetCollection is not ObservableCollection<QuickPanelItem> target) return;
 
-        var source = Groups.FirstOrDefault(g => g.Items.Contains(item))?.Items;
-        if (source == null) return;
+        var sourceGroup = Groups.FirstOrDefault(g => g.Items.Contains(item));
+        // «Недавнее» — зеркало, а не раскладка: тащить из него и в него нечего.
+        if (sourceGroup == null || ReferenceEquals(sourceGroup, _recentGroup) ||
+            ReferenceEquals(target, _recentGroup?.Items))
+            return;
+        var source = sourceGroup.Items;
 
         var index = Math.Clamp(dropInfo.InsertIndex, 0, target.Count);
         if (ReferenceEquals(source, target))
