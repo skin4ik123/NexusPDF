@@ -143,6 +143,19 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     Task<IReadOnlyList<PdfPageImage>> GetPageImagesAsync(int pageIndex, long maxPixels, CancellationToken ct);
 
     /// <summary>
+    /// Рамки картинок страницы без самих пикселей — по ним отличают скан от
+    /// пустой страницы, не декодируя многомегапиксельный растр.
+    /// </summary>
+    Task<IReadOnlyList<PdfTextRect>> GetPageImageBoundsAsync(int pageIndex, CancellationToken ct);
+
+    /// <summary>
+    /// Поворот страницы (/Rotate) в четвертях по часовой. Размер страницы
+    /// движок отдаёт уже повёрнутым, а координаты объектов — нет, поэтому
+    /// экспорту нужно знать поворот отдельно.
+    /// </summary>
+    Task<int> GetPageRotationAsync(int pageIndex, CancellationToken ct);
+
+    /// <summary>
     /// Индекс символа в точке (отображаемые пункты от левого верхнего угла)
     /// или -1, если в точке текста нет. Нужен для выделения текста мышью.
     /// </summary>

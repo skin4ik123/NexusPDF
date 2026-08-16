@@ -1855,6 +1855,20 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Что сказать про страницы без текстового слоя.
+    ///
+    /// Молчать нельзя: пустой лист в книге и пустая страница в документе
+    /// выглядят как «в PDF ничего не было», а на деле это непрочитанный скан.
+    /// </summary>
+    private static string ScanNote(int scanned, int recognized)
+    {
+        if (scanned == 0) return string.Empty;
+        return recognized > 0
+            ? " — " + Loc.F("ExportScansRecognized", recognized, scanned)
+            : " — " + Loc.F("ExportScansSkipped", scanned);
+    }
+
+    /// <summary>
     /// Документ → документ Word.
     ///
     /// Пользователю честно говорится, что разметка ВОССТАНОВЛЕНА: в PDF нет ни
@@ -1865,6 +1879,11 @@ public sealed partial class MainViewModel : ObservableObject
     private async Task ExportWord()
     {
         if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        var request = ExportDocumentDialog.Show(
+            OwnerWindow, forWord: true, doc.PageCount, doc.CurrentPageNumber - 1,
+            _services.Ocr.IsAvailable, _services.Ocr.UnavailableReason);
+        if (request == null) return;
+
         var dialog = new SaveFileDialog
         {
             Filter = Loc.Get("DocxFilter"),
@@ -1878,11 +1897,17 @@ public sealed partial class MainViewModel : ObservableObject
         {
             var token = doc.Busy.Start(Loc.Get("ExportWordTitle"), canCancel: true, determinate: true);
             var summary = await _services.Convert.ExportToWordAsync(
-                doc.Document, dialog.FileName, null,
+                doc.Document, dialog.FileName, request.Pages,
                 // Картинки жмутся кодеками Windows: фотография в PNG без
                 // потерь весила бы в десятки раз больше без всякой пользы.
-                new WordExportOptions(Encode: ImageEncoder.EncodeForDocument),
-                new PageAnalysisOptions(),
+                new WordExportOptions(
+                    KeepLinks: request.KeepLinks,
+                    KeepImages: request.KeepImages,
+                    KeepComments: request.KeepComments,
+                    Encode: ImageEncoder.EncodeForDocument),
+                new PageAnalysisOptions(
+                    DetectWhitespaceTables: request.DetectTables,
+                    RecognizeScans: request.RecognizeScans),
                 new Progress<(int Done, int Total)>(p =>
                 {
                     doc.Busy.Report(p.Total > 0 ? (double)p.Done / p.Total : 0,
@@ -1892,7 +1917,8 @@ public sealed partial class MainViewModel : ObservableObject
 
             doc.StatusText = Loc.F("ExportWordDone", summary.Pages, summary.Paragraphs,
                 summary.Tables, summary.Images, summary.Links, summary.Comments) +
-                " — " + Loc.Get("ExportWordHint");
+                " — " + Loc.Get("ExportWordHint") +
+                ScanNote(summary.ScannedPages, summary.RecognizedPages);
             Log.Information("Экспорт в Word: {File}, страниц {Pages}", dialog.FileName, summary.Pages);
         }
         catch (OperationCanceledException)
@@ -1923,6 +1949,11 @@ public sealed partial class MainViewModel : ObservableObject
     private async Task ExportExcel()
     {
         if (ActiveDocument is not { } doc || doc.IsBusy) return;
+        var request = ExportDocumentDialog.Show(
+            OwnerWindow, forWord: false, doc.PageCount, doc.CurrentPageNumber - 1,
+            _services.Ocr.IsAvailable, _services.Ocr.UnavailableReason);
+        if (request == null) return;
+
         var dialog = new SaveFileDialog
         {
             Filter = Loc.Get("XlsxFilter"),
@@ -1936,11 +1967,15 @@ public sealed partial class MainViewModel : ObservableObject
         {
             var token = doc.Busy.Start(Loc.Get("ExportExcelTitle"), canCancel: true, determinate: true);
             var summary = await _services.Convert.ExportToExcelAsync(
-                doc.Document, dialog.FileName, null,
+                doc.Document, dialog.FileName, request.Pages,
                 // Запятая как десятичный разделитель — по языку интерфейса:
                 // однозначно определить «1,234» из самой строки невозможно.
-                new ExcelExportOptions(DecimalIsComma: Loc.CurrentLanguage != "en"),
-                new PageAnalysisOptions(),
+                new ExcelExportOptions(
+                    DecimalIsComma: Loc.CurrentLanguage != "en",
+                    KeepLinks: request.KeepLinks),
+                new PageAnalysisOptions(
+                    DetectWhitespaceTables: request.DetectTables,
+                    RecognizeScans: request.RecognizeScans),
                 new Progress<(int Done, int Total)>(p =>
                 {
                     doc.Busy.Report(p.Total > 0 ? (double)p.Done / p.Total : 0,
@@ -1952,6 +1987,7 @@ public sealed partial class MainViewModel : ObservableObject
                 summary.RulingTables, summary.GuessedTables, summary.Links);
             if (summary.GuessedTables > 0)
                 doc.StatusText += " — " + Loc.F("ExportExcelGuessHint", summary.GuessedTables);
+            doc.StatusText += ScanNote(summary.ScannedPages, summary.RecognizedPages);
             Log.Information("Экспорт в Excel: {File}, таблиц {Tables}", dialog.FileName, summary.Tables);
         }
         catch (OperationCanceledException)

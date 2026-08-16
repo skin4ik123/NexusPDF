@@ -18,8 +18,11 @@ public sealed record ExcelExportOptions(
 public sealed record ExportPage(PageLayout Layout, IReadOnlyList<PdfPageLink> Links);
 
 /// <summary>Что получилось — для честного отчёта пользователю.</summary>
+/// <param name="ScannedPages">Страниц без текстового слоя — сканов.</param>
+/// <param name="RecognizedPages">Из них распознано на месте.</param>
 public sealed record ExcelExportSummary(
-    int Sheets, int Tables, int RulingTables, int GuessedTables, int Cells, int Links, int Numbers);
+    int Sheets, int Tables, int RulingTables, int GuessedTables, int Cells, int Links, int Numbers,
+    int ScannedPages = 0, int RecognizedPages = 0);
 
 /// <summary>
 /// Таблицы PDF → книга Excel.

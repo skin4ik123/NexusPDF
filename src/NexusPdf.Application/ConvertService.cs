@@ -18,8 +18,17 @@ public sealed class ConvertService
     private const int MaxExportSide = 8000;
 
     private readonly IPdfRenderEngine _engine;
+    private readonly OcrService? _ocr;
 
-    public ConvertService(IPdfRenderEngine engine) => _engine = engine;
+    /// <param name="ocr">
+    /// Распознавание для страниц-сканов при экспорте. Без него скан честно
+    /// считается сканом, но текста из него не будет.
+    /// </param>
+    public ConvertService(IPdfRenderEngine engine, OcrService? ocr = null)
+    {
+        _engine = engine;
+        _ocr = ocr;
+    }
 
     /// <summary>
     /// Рендерит перечисленные логические страницы (null — все) в растры
@@ -101,33 +110,104 @@ public sealed class ConvertService
             throw new InvalidOperationException("Нет страниц для экспорта.");
 
         var pages = new List<ExportPage>(targets.Count);
+        var scans = 0;
+        var recognized = 0;
         for (var i = 0; i < targets.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
-            var logical = targets[i];
-            var (handle, pageIndex) = await document.ResolveTextPageAsync(logical, ct).ConfigureAwait(false);
-            var descriptor = handle.Info.Pages[pageIndex];
+            var page = await ReadPageAsync(document, targets[i], analysis, options.KeepLinks,
+                withImages: false, withNotes: false, ct).ConfigureAwait(false);
+            if (page.WasScan) scans++;
+            if (page.Recognized) recognized++;
 
-            var layout = PageAnalyzer.Analyze(
-                logical,
-                descriptor.WidthPoints,
-                descriptor.HeightPoints,
-                await handle.GetTextWordsAsync(pageIndex, ct).ConfigureAwait(false),
-                await handle.GetRulingLinesAsync(pageIndex, ct).ConfigureAwait(false),
-                analysis.IncludeFormValues
-                    ? await handle.GetFormFieldValuesAsync(pageIndex, ct).ConfigureAwait(false)
-                    : Array.Empty<PdfFormFieldValue>(),
-                analysis);
-
-            var links = options.KeepLinks
-                ? await handle.GetPageLinksAsync(pageIndex, ct).ConfigureAwait(false)
-                : Array.Empty<PdfPageLink>();
-
-            pages.Add(new ExportPage(layout, links));
+            pages.Add(new ExportPage(page.Layout, page.Links));
             progress?.Report((i + 1, targets.Count));
         }
 
-        return XlsxExporter.Write(targetPath, pages, options);
+        return XlsxExporter.Write(targetPath, pages, options) with
+        {
+            ScannedPages = scans,
+            RecognizedPages = recognized,
+        };
+    }
+
+    /// <summary>Разобранная страница вместе со всем, что нужно писателям.</summary>
+    private sealed record ReadPage(
+        PageLayout Layout,
+        IReadOnlyList<PdfPageLink> Links,
+        IReadOnlyList<PdfAnnotationInfo> Notes,
+        IReadOnlyList<PdfPageImage> Images,
+        bool WasScan,
+        bool Recognized);
+
+    /// <summary>
+    /// Чтение одной страницы для экспорта: геометрия приводится к тому виду, в
+    /// каком страницу видит человек, а страница-скан при необходимости
+    /// распознаётся.
+    /// </summary>
+    private async Task<ReadPage> ReadPageAsync(
+        OpenedDocument document, int logical, PageAnalysisOptions analysis,
+        bool keepLinks, bool withImages, bool withNotes, CancellationToken ct)
+    {
+        var (handle, pageIndex) = await document.ResolveTextPageAsync(logical, ct).ConfigureAwait(false);
+        var descriptor = handle.Info.Pages[pageIndex];
+
+        // Размер движок отдаёт уже с учётом /Rotate, а координаты объектов —
+        // нет. Поэтому размер разворачивается обратно в «сырой», объекты
+        // поворачиваются вперёд, и всё сходится в одной системе координат.
+        var ownRotation = await handle.GetPageRotationAsync(pageIndex, ct).ConfigureAwait(false);
+        var baked = document.GetOverlaySignature(logical) != 0;
+        var extra = baked ? 0 : document.Session.Model.Pages[logical].RotationOffset;
+        var rotation = PageRotation.Normalize(ownRotation + extra);
+
+        var (rawWidth, rawHeight) = PageRotation.Size(
+            descriptor.WidthPoints, descriptor.HeightPoints, ownRotation);
+        var (width, height) = PageRotation.Size(rawWidth, rawHeight, rotation);
+
+        var words = (await handle.GetTextWordsAsync(pageIndex, ct).ConfigureAwait(false))
+            .Select(w => PageRotation.Word(w, rotation, rawWidth, rawHeight)).ToList();
+        var rulings = (await handle.GetRulingLinesAsync(pageIndex, ct).ConfigureAwait(false))
+            .Select(r => PageRotation.Ruling(r, rotation, rawWidth, rawHeight)).ToList();
+        var fields = analysis.IncludeFormValues
+            ? (await handle.GetFormFieldValuesAsync(pageIndex, ct).ConfigureAwait(false))
+                .Select(f => PageRotation.Field(f, rotation, rawWidth, rawHeight)).ToList()
+            : new List<PdfFormFieldValue>();
+        var links = keepLinks
+            ? (await handle.GetPageLinksAsync(pageIndex, ct).ConfigureAwait(false))
+                .Select(l => PageRotation.Link(l, rotation, rawWidth, rawHeight)).ToList()
+            : new List<PdfPageLink>();
+
+        var images = withImages
+            ? (await handle.GetPageImagesAsync(pageIndex, MaxImagePixelsPerPage, ct).ConfigureAwait(false))
+                .Select(i => PageRotation.Image(i, rotation, rawWidth, rawHeight)).ToList()
+            : new List<PdfPageImage>();
+        var notes = withNotes
+            ? (await handle.GetAnnotationsAsync(pageIndex, ct).ConfigureAwait(false))
+                .Select(n => PageRotation.Annotation(n, rotation, rawWidth, rawHeight)).ToList()
+            : new List<PdfAnnotationInfo>();
+
+        // Рамки картинок нужны всегда: по ним отличают скан от по-настоящему
+        // пустой страницы. Пиксели для этого не декодируются.
+        var bounds = withImages
+            ? images.Select(i => i.RectPt).ToList()
+            : (await handle.GetPageImageBoundsAsync(pageIndex, ct).ConfigureAwait(false))
+                .Select(r => PageRotation.Rect(r, rotation, rawWidth, rawHeight)).ToList();
+
+        var kind = ScannedPageDetector.Classify(words, bounds, width, height);
+        var recognized = false;
+        if (kind.IsScan && analysis.RecognizeScans && _ocr is { IsAvailable: true })
+        {
+            var boxes = await _ocr.RecognizePageWordsAsync(document, logical, ct).ConfigureAwait(false);
+            var fromScan = ScannedPageDetector.FromRecognized(boxes, height);
+            if (fromScan.Count > 0)
+            {
+                words = fromScan.ToList();
+                recognized = true;
+            }
+        }
+
+        var layout = PageAnalyzer.Analyze(logical, width, height, words, rulings, fields, analysis);
+        return new ReadPage(layout, links, notes, images, kind.IsScan, recognized);
     }
 
     /// <summary>
@@ -152,40 +232,22 @@ public sealed class ConvertService
             throw new InvalidOperationException("Нет страниц для экспорта.");
 
         using var writer = new DocxExporter(targetPath, options);
+        var scans = 0;
+        var recognized = 0;
         for (var i = 0; i < targets.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
-            var logical = targets[i];
-            var (handle, pageIndex) = await document.ResolveTextPageAsync(logical, ct).ConfigureAwait(false);
-            var descriptor = handle.Info.Pages[pageIndex];
+            var page = await ReadPageAsync(document, targets[i], analysis, options.KeepLinks,
+                options.KeepImages, options.KeepComments, ct).ConfigureAwait(false);
+            if (page.WasScan) scans++;
+            if (page.Recognized) recognized++;
 
-            var layout = PageAnalyzer.Analyze(
-                logical,
-                descriptor.WidthPoints,
-                descriptor.HeightPoints,
-                await handle.GetTextWordsAsync(pageIndex, ct).ConfigureAwait(false),
-                await handle.GetRulingLinesAsync(pageIndex, ct).ConfigureAwait(false),
-                analysis.IncludeFormValues
-                    ? await handle.GetFormFieldValuesAsync(pageIndex, ct).ConfigureAwait(false)
-                    : Array.Empty<PdfFormFieldValue>(),
-                analysis);
-
-            var links = options.KeepLinks
-                ? await handle.GetPageLinksAsync(pageIndex, ct).ConfigureAwait(false)
-                : Array.Empty<PdfPageLink>();
-            var notes = options.KeepComments
-                ? await handle.GetAnnotationsAsync(pageIndex, ct).ConfigureAwait(false)
-                : Array.Empty<PdfAnnotationInfo>();
-            var images = options.KeepImages
-                ? await handle.GetPageImagesAsync(pageIndex, MaxImagePixelsPerPage, ct).ConfigureAwait(false)
-                : Array.Empty<PdfPageImage>();
-
-            writer.AddPage(layout, links, notes, images, targets.Count);
+            writer.AddPage(page.Layout, page.Links, page.Notes, page.Images, targets.Count);
             progress?.Report((i + 1, targets.Count));
         }
 
         writer.Finish();
-        return writer.Summary;
+        return writer.Summary with { ScannedPages = scans, RecognizedPages = recognized };
     }
 
     /// <summary>

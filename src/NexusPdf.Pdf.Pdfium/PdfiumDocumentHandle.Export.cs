@@ -111,6 +111,81 @@ internal sealed partial class PdfiumDocumentHandle
     }
 
     /// <summary>
+    /// Поворот страницы в четвертях ПО часовой (/Rotate).
+    ///
+    /// Он нужен экспорту отдельно, потому что движок отдаёт размер страницы
+    /// уже повёрнутым, а координаты символов и объектов — нет. Без этого
+    /// повёрнутый скан выгружался бы в лист неправильной ориентации, и текст
+    /// в нём читался бы поперёк.
+    /// </summary>
+    public Task<int> GetPageRotationAsync(int pageIndex, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() =>
+            {
+                var page = fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
+                if (page == null || page.__Instance == IntPtr.Zero) return 0;
+                try
+                {
+                    var rotation = fpdf_edit.FPDFPageGetRotation(page);
+                    return ((rotation % 4) + 4) % 4;
+                }
+                finally
+                {
+                    fpdfview.FPDF_ClosePage(page);
+                }
+            }, ct);
+        }
+    }
+
+    /// <summary>
+    /// Только РАМКИ картинок, без пикселей.
+    ///
+    /// По ним отличают скан от пустой страницы. Декодировать ради этого
+    /// восьмимегапиксельный растр — впустую потраченные сто мегабайт памяти на
+    /// каждую страницу.
+    /// </summary>
+    public Task<IReadOnlyList<PdfTextRect>> GetPageImageBoundsAsync(int pageIndex, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync<IReadOnlyList<PdfTextRect>>(() =>
+            {
+                var page = fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
+                if (page == null || page.__Instance == IntPtr.Zero)
+                    return Array.Empty<PdfTextRect>();
+                try
+                {
+                    var bounds = new List<PdfTextRect>();
+                    var count = fpdf_edit.FPDFPageCountObjects(page);
+                    for (var i = 0; i < count; i++)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var obj = fpdf_edit.FPDFPageGetObject(page, i);
+                        if (obj == null || obj.__Instance == IntPtr.Zero) continue;
+                        if (fpdf_edit.FPDFPageObjGetType(obj) != PageObjectImage) continue;
+
+                        float left = 0, bottom = 0, right = 0, top = 0;
+                        if (fpdf_edit.FPDFPageObjGetBounds(obj, ref left, ref bottom, ref right, ref top) == 0)
+                            continue;
+                        bounds.Add(new PdfTextRect(
+                            Math.Min(left, right), Math.Max(top, bottom),
+                            Math.Max(left, right), Math.Min(top, bottom)));
+                    }
+                    return bounds;
+                }
+                finally
+                {
+                    fpdfview.FPDF_ClosePage(page);
+                }
+            }, ct);
+        }
+    }
+
+    /// <summary>
     /// Картинки страницы с их местом. Крошечные отбрасываются: линейки,
     /// маркеры и однопиксельные распорки в Word не нужны, а замусорить
     /// документ ими проще простого.

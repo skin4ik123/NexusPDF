@@ -22,8 +22,11 @@ public sealed record WordExportOptions(
     EncodeImage? Encode = null);
 
 /// <summary>Что получилось — для честного отчёта пользователю.</summary>
+/// <param name="ScannedPages">Страниц без текстового слоя — сканов.</param>
+/// <param name="RecognizedPages">Из них распознано на месте.</param>
 public sealed record WordExportSummary(
-    int Pages, int Paragraphs, int Tables, int Images, int Links, int Comments);
+    int Pages, int Paragraphs, int Tables, int Images, int Links, int Comments,
+    int ScannedPages = 0, int RecognizedPages = 0);
 
 /// <summary>
 /// Документ PDF → документ Word.

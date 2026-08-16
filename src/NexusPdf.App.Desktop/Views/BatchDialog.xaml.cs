@@ -7,16 +7,20 @@ using Microsoft.Win32;
 using NexusPdf.App.Desktop.Localization;
 using NexusPdf.App.Desktop.Services;
 using NexusPdf.Application;
+using NexusPdf.Export;
 using NexusPdf.Pdf.Abstractions;
 using Serilog;
 
 namespace NexusPdf.App.Desktop.Views;
 
 /// <summary>
-/// Пакетная обработка: одна операция (оптимизация/пароль/экспорт PNG) для
-/// набора PDF-файлов, результаты — в отдельную папку под теми же именами.
-/// Каждый файл получает свой статус; ошибки одного файла не прерывают
-/// остальные.
+/// Пакетная обработка: одна операция для набора PDF-файлов, результаты — в
+/// отдельную папку под теми же именами. Каждый файл получает свой статус;
+/// ошибки одного файла не прерывают остальные.
+///
+/// Операции те же, что и поодиночке: оптимизация, пароль, картинки, сжатие,
+/// улучшение сканов, распознавание, Word и Excel. Ради этого пакетная
+/// обработка и нужна — сорок счетов в Excel одним заходом, а не по одному.
 /// </summary>
 public partial class BatchDialog : Window
 {
@@ -98,6 +102,11 @@ public partial class BatchDialog : Window
         if (operation is 0 or 1 && !_services.Qpdf.IsAvailable)
         {
             SummaryLabel.Text = _services.Qpdf.UnavailableReason;
+            return;
+        }
+        if (operation == 5 && !_services.Ocr.IsAvailable)
+        {
+            SummaryLabel.Text = _services.Ocr.UnavailableReason ?? Loc.Get("OcrError");
             return;
         }
 
@@ -231,6 +240,81 @@ public partial class BatchDialog : Window
                         null, ct);
                 }
                 break;
+            }
+            default:
+                await ProcessDocumentAsync(sourcePath, outputDir, operation, name, takenNames, ct);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Операции, которым нужен открытый документ: сжатие, улучшение сканов,
+    /// распознавание и экспорт в Word и Excel.
+    ///
+    /// Распознавание меняет сам документ, поэтому результат сохраняется КОПИЕЙ
+    /// в папку результатов: пакетная обработка не имеет права переписывать
+    /// исходники.
+    /// </summary>
+    private async Task ProcessDocumentAsync(
+        string sourcePath, string outputDir, int operation, string name,
+        HashSet<string> takenNames, CancellationToken ct)
+    {
+        OpenedDocument document;
+        try
+        {
+            document = await OpenedDocument.OpenAsync(_services.Engine, sourcePath, null, ct);
+        }
+        catch (PdfPasswordRequiredException)
+        {
+            throw new PdfEngineException(Loc.Get("BatchProtectedInput"));
+        }
+
+        await using (document)
+        {
+            var stem = Path.GetFileNameWithoutExtension(name);
+            switch (operation)
+            {
+                case 3:
+                {
+                    // Умный режим сам решает по содержимому, скан перед ним
+                    // или вёрстка: у скана запас по разрешению больше.
+                    var summary = await document.PrimaryHandle.GetImageSummaryAsync(
+                        NexusPdf.Ux.DocumentImageProfile.SampleLimit, ct);
+                    var profile = new NexusPdf.Ux.DocumentImageProfile(
+                        document.PrimaryHandle.Info.PageCount, summary.Images,
+                        summary.TextLength, summary.SampledPages, summary.AverageImageDpi);
+                    var preset = NexusPdf.Ux.CompressionPresets.Resolve(
+                        NexusPdf.Ux.CompressionPresetKind.Smart, profile);
+                    await _services.Tools.CompressImagesCopyAsync(
+                        document, UniqueTarget(outputDir, name, takenNames),
+                        preset.Dpi, preset.Quality, ImageEncoder.EncodeChosen, ct,
+                        preset.StructureOnly);
+                    break;
+                }
+                case 4:
+                    await _services.Tools.EnhanceScansCopyAsync(
+                        document, UniqueTarget(outputDir, name, takenNames),
+                        new ScanEnhanceOptions(), null, ct);
+                    break;
+                case 5:
+                    await _services.Ocr.RecognizeAsync(document, null, null, ct);
+                    await _services.SaveService.SaveCopyAsync(
+                        document, UniqueTarget(outputDir, name, takenNames), ct);
+                    break;
+                case 6:
+                    await _services.Convert.ExportToWordAsync(
+                        document, UniqueTarget(outputDir, stem + ".docx", takenNames), null,
+                        new WordExportOptions(Encode: ImageEncoder.EncodeForDocument),
+                        new PageAnalysisOptions(RecognizeScans: _services.Ocr.IsAvailable),
+                        null, ct);
+                    break;
+                case 7:
+                    await _services.Convert.ExportToExcelAsync(
+                        document, UniqueTarget(outputDir, stem + ".xlsx", takenNames), null,
+                        new ExcelExportOptions(DecimalIsComma: Loc.CurrentLanguage != "en"),
+                        new PageAnalysisOptions(RecognizeScans: _services.Ocr.IsAvailable),
+                        null, ct);
+                    break;
             }
         }
     }

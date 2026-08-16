@@ -3,6 +3,7 @@ using System.Text;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using NexusPdf.Application;
+using NexusPdf.Export;
 using NexusPdf.Ocr;
 using NexusPdf.Pdf.Abstractions;
 using NexusPdf.Pdf.Pdfium;
@@ -123,6 +124,74 @@ public static class Program
                     var text = await new ConvertService(engine).ExtractTextAsync(document, ct);
                     await File.WriteAllTextAsync(positional[1], text, new UTF8Encoding(true), ct);
                     Console.WriteLine($"Готово: текст сохранён в {positional[1]}");
+                }
+                return 0;
+            }
+
+            case "word":
+            case "excel":
+            {
+                var toWord = verb == "word";
+                if (positional.Count != 2)
+                    throw new UsageException($"{verb}: нужны <вход.pdf> и <выход.{(toWord ? "docx" : "xlsx")}>.");
+                RequireNotExists(positional[1], options);
+
+                // Распознавание сканов по требованию: без него страница без
+                // текстового слоя выгрузится пустой, и лучше сказать об этом,
+                // чем молча отдать пустышку.
+                var wantOcr = options.ContainsKey("ocr");
+                ITextRecognizer? recognizer = null;
+                OcrService? ocr = null;
+                if (wantOcr)
+                {
+                    recognizer = CreateRecognizer(
+                        Get(options, "engine", "paddle"), Get(options, "lang", "cyrillic"));
+                    if (!recognizer.IsAvailable)
+                        throw new InvalidOperationException(recognizer.UnavailableReason);
+                    ocr = new OcrService(recognizer);
+                }
+
+                try
+                {
+                    var document = await OpenAsync(engine, positional[0], options, ct);
+                    await using (document)
+                    {
+                        var pages = ParsePages(
+                            options.TryGetValue("pages", out var range) ? range : null,
+                            document.Session.Model.Pages.Count);
+                        var analysis = new PageAnalysisOptions(
+                            DetectWhitespaceTables: !options.ContainsKey("no-guess-tables"),
+                            RecognizeScans: wantOcr);
+                        var convert = new ConvertService(engine, ocr);
+
+                        if (toWord)
+                        {
+                            var summary = await convert.ExportToWordAsync(
+                                document, positional[1], pages,
+                                new WordExportOptions(), analysis, null, ct);
+                            Console.WriteLine(
+                                $"Готово: страниц {summary.Pages}, абзацев {summary.Paragraphs}, " +
+                                $"таблиц {summary.Tables}, картинок {summary.Images}, " +
+                                $"ссылок {summary.Links} → {positional[1]}");
+                            ReportScans(summary.ScannedPages, summary.RecognizedPages);
+                        }
+                        else
+                        {
+                            var summary = await convert.ExportToExcelAsync(
+                                document, positional[1], pages,
+                                new ExcelExportOptions(DecimalIsComma: !options.ContainsKey("dot-decimal")),
+                                analysis, null, ct);
+                            Console.WriteLine(
+                                $"Готово: листов {summary.Sheets}, таблиц {summary.Tables} " +
+                                $"(по линиям {summary.RulingTables}, по расположению {summary.GuessedTables}), " +
+                                $"чисел {summary.Numbers} → {positional[1]}");
+                            ReportScans(summary.ScannedPages, summary.RecognizedPages);
+                        }
+                    }
+                }
+                finally
+                {
+                    recognizer?.Dispose();
                 }
                 return 0;
             }
@@ -435,7 +504,7 @@ public static class Program
             {
                 var name = args[i][2..];
                 // Флаги без значения; значение — следующий аргумент.
-                if (name is "force" or "text")
+                if (name is "force" or "text" or "ocr" or "no-guess-tables" or "dot-decimal")
                     options[name] = "1";
                 else if (i + 1 < args.Length)
                     options[name] = args[++i];
@@ -532,6 +601,31 @@ public static class Program
             pixels, converted.PixelWidth, converted.PixelHeight, widthPoints, heightPoints);
     }
 
+    /// <summary>Диапазон страниц из --pages или null (весь документ).</summary>
+    private static IReadOnlyList<int>? ParsePages(string? text, int pageCount)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var parsed = NexusPdf.Printing.PageRangeParser.Parse(text, pageCount);
+        if (parsed.Error != null)
+            throw new UsageException("--pages: " + parsed.Error);
+        return parsed.Indices;
+    }
+
+    /// <summary>
+    /// Сказать про страницы без текстового слоя. Пустые листы в результате
+    /// выглядят как «в PDF ничего не было» — а это непрочитанный скан.
+    /// </summary>
+    private static void ReportScans(int scanned, int recognized)
+    {
+        if (scanned == 0) return;
+        if (recognized > 0)
+            Console.WriteLine($"Распознано страниц-сканов: {recognized} из {scanned}.");
+        else
+            Console.Error.WriteLine(
+                $"Внимание: страниц без текстового слоя {scanned} — они пустые. " +
+                "Добавьте --ocr, чтобы распознать их.");
+    }
+
     private static void PrintUsage()
     {
         Console.WriteLine("""
@@ -542,6 +636,13 @@ NexusPdfCli — консольные операции NexusPDF (локально
       Экспорт каждой страницы в изображение.
   extract-text  <вход.pdf> <выход.txt> [--password X]
       Извлечение всего текста документа.
+  word          <вход.pdf> <выход.docx> [--pages 1-5] [--ocr] [--no-guess-tables]
+      Экспорт в Word: абзацы, таблицы, ссылки, примечания, картинки.
+      Разметка ВОССТАНАВЛИВАЕТСЯ по расположению текста — в PDF её нет.
+  excel         <вход.pdf> <выход.xlsx> [--pages 1-5] [--ocr] [--dot-decimal]
+      Экспорт таблиц в Excel: числа числами, ссылки живыми. Таблицы берутся
+      по нарисованным границам, а без них — по просветам между колонками.
+      --ocr распознаёт страницы-сканы, иначе они выгружаются пустыми.
   merge         <выход.pdf> <а.pdf> <б.pdf> [...]
       Объединение PDF-файлов в порядке перечисления.
   from-images   <выход.pdf> <img1> <img2> [...]

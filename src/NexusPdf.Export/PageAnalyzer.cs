@@ -9,9 +9,14 @@ namespace NexusPdf.Export;
 /// выключить.
 /// </param>
 /// <param name="IncludeFormValues">Переносить ли значения заполненных полей формы.</param>
+/// <param name="RecognizeScans">
+/// Распознавать ли страницы-сканы. Без этого страница без текстового слоя
+/// выгружается пустой — формально честно, по сути потеря.
+/// </param>
 public sealed record PageAnalysisOptions(
     bool DetectWhitespaceTables = true,
-    bool IncludeFormValues = true);
+    bool IncludeFormValues = true,
+    bool RecognizeScans = true);
 
 /// <summary>
 /// Сырьё страницы → структура: таблицы и строки текста вне таблиц.
