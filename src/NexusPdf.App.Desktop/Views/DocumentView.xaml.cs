@@ -221,6 +221,25 @@ public partial class DocumentView : UserControl
     private FrameworkElement? _dragElement;
     private Point _dragStartPt;
 
+    /// <summary>
+    /// Клик пришёлся на полосу прокрутки, а не на документ.
+    ///
+    /// Полосы — часть шаблона того же списка, и по ним <see cref="FindPageAt"/>
+    /// не находит страницы. Без этой проверки такой клик считался «полем вокруг
+    /// страницы», программа брала документ рукой и захватывала мышь — ползунки
+    /// переставали работать вовсе, а под курсором появлялась рука.
+    /// </summary>
+    private static bool IsOnScrollBar(object originalSource)
+    {
+        if (originalSource is not DependencyObject source) return false;
+        for (DependencyObject? node = source; node != null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is System.Windows.Controls.Primitives.ScrollBar) return true;
+            if (node is Border { DataContext: PageViewModel }) return false; // дошли до страницы
+        }
+        return false;
+    }
+
     private (PageViewModel Page, FrameworkElement Element)? FindPageAt(object originalSource)
     {
         if (originalSource is not DependencyObject source) return null;
@@ -419,6 +438,10 @@ public partial class DocumentView : UserControl
     private void OnPagesPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (_vm == null) return;
+
+        // Полосы прокрутки — не документ. Ни один наш обработчик их не касается,
+        // иначе мышь достанется руке, а не ползунку.
+        if (IsOnScrollBar(e.OriginalSource)) return;
 
         // Двойной клик обрабатывается ДО выделения текста: иначе второй щелчок
         // уходил бы в выделение слова и правка не начиналась бы никогда.
@@ -771,7 +794,14 @@ public partial class DocumentView : UserControl
         if (_vm != null && _dragPage == null)
         {
             Cursor wanted;
-            if (FindPageAt(e.OriginalSource) is { } hoverHit)
+            if (IsOnScrollBar(e.OriginalSource))
+            {
+                // Курсор задаётся всему списку и наследуется полосами прокрутки.
+                // Над ними он обязан быть обычным: рука там обещает то, чего
+                // не будет, — документ за полосу не тащится.
+                wanted = Cursors.Arrow;
+            }
+            else if (FindPageAt(e.OriginalSource) is { } hoverHit)
             {
                 var (hoverPage, hoverElement) = hoverHit;
                 _ = _vm.EnsureLinksAsync(hoverPage);
