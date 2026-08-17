@@ -278,10 +278,13 @@ public static class Program
                         Console.Error.WriteLine(
                             "Предупреждение: у документа есть формы AcroForm — в копии со слоем OCR они станут статикой.");
                     var service = new OcrService(ocrEngine);
+                    // --editable: тот же режим, что и в программе, — распознанное
+                    // становится настоящим правимым текстом вместо невидимого слоя.
+                    var editable = options.ContainsKey("editable");
                     var result = await service.RecognizeAsync(document, null,
                         new Progress<OcrProgress>(p =>
                             Console.WriteLine($"Страница {p.PagesDone}/{p.TotalPages}, слов: {p.WordsSoFar}")),
-                        ct);
+                        ct, editable);
                     if (result.Error != null)
                         throw new InvalidOperationException(result.Error);
                     if (result.PagesRecognized == 0)
@@ -512,7 +515,7 @@ public static class Program
             {
                 var name = args[i][2..];
                 // Флаги без значения; значение — следующий аргумент.
-                if (name is "force" or "text" or "ocr" or "no-guess-tables" or "dot-decimal")
+                if (name is "force" or "text" or "ocr" or "no-guess-tables" or "dot-decimal" or "editable")
                     options[name] = "1";
                 else if (i + 1 < args.Length)
                     options[name] = args[++i];
@@ -665,8 +668,11 @@ NexusPdfCli — консольные операции NexusPDF (локально
       Защищённая копия (AES-256). Пароль в командной строке виден другим
       процессам и попадает в историю — надёжнее задать его переменной
       окружения NEXUSPDF_PASSWORD и не указывать --password.
-  ocr           <вход.pdf> <выход.pdf> [--engine paddle|tesseract] [--lang ID] [--password X]
+  ocr           <вход.pdf> <выход.pdf> [--editable] [--engine paddle|tesseract] [--lang ID] [--password X]
       Распознавание сканов: невидимый текстовый слой.
+      --editable — распознанное становится настоящим правимым текстом:
+      гарнитура, насыщенность и цвет подбираются под оригинал, а фон под
+      строкой восстанавливается по бумаге вокруг неё.
       По умолчанию PaddleOCR, пакет cyrillic (кириллица+латиница+греческий);
       список пакетов покажет неверный --lang. --engine tesseract — rus+eng.
       Формы AcroForm в копии становятся статикой (выводится предупреждение).

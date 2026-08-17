@@ -114,6 +114,20 @@ public sealed class OverlayPreview
                     HeightPt = shape.HeightPt,
                 };
             }
+            case RegionEraseDraft erase:
+                // Стирание выглядит как чистая бумага: показывать рамку незачем,
+                // человек должен видеть будущий результат, а не служебный объект.
+                return new OverlayPreview
+                {
+                    IsRectShape = true,
+                    Stroke = MakeBrush(0x00000000),
+                    Fill = MakeBrush(erase.FillArgb),
+                    StrokeThickness = 0,
+                    XPt = erase.XPt,
+                    YPt = erase.YPt,
+                    WidthPt = erase.WidthPt,
+                    HeightPt = erase.HeightPt,
+                };
             case RedactionDraft redaction:
                 // Предпросмотр вымарки: чёрная заливка с красной рамкой —
                 // видно и «что скроется», и что это именно вымарка.

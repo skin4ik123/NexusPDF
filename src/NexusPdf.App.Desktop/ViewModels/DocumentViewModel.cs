@@ -380,6 +380,309 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         StatusText = Loc.Get("Ready");
     }
 
+    // ----- Правка текста прямо на странице -----
+
+    /// <summary>Просьба открыть правку на месте в указанной точке страницы.</summary>
+    /// <param name="Explicit">
+    /// true — человек нажал «Править текст». Тогда молчать в ответ на промах
+    /// нельзя: он попросил открыть правку и ждёт либо поля ввода, либо
+    /// объяснения. У двойного клика наоборот: промах — обычное дело.
+    /// </param>
+    public sealed record InlineEditRequest(PageViewModel Page, double XPt, double YPt, bool Explicit);
+
+    /// <summary>
+    /// Поле ввода живёт в представлении, поэтому открывает его оно. Команда и
+    /// контекстное меню шлют сюда просьбу — чтобы у правки текста был ОДИН
+    /// путь. Раньше кнопка «Править текст» ходила своей дорогой мимо этого
+    /// поиска и на добавленной надписи говорила, что текста нет.
+    /// </summary>
+    public event EventHandler<InlineEditRequest>? InlineEditRequested;
+
+    public void RequestInlineEdit(PageViewModel page, double xPt, double yPt, bool isExplicit) =>
+        InlineEditRequested?.Invoke(this, new InlineEditRequest(page, xPt, yPt, isExplicit));
+
+    /// <summary>
+    /// Что сказать, когда править в точке нечего. Ставит MainViewModel: там
+    /// живут диалоги и запуск распознавания.
+    /// </summary>
+    public Action<PageViewModel>? ExplainNothingToEdit { get; set; }
+
+    /// <summary>
+    /// Строка под курсором, готовая к правке на месте. Их три вида: надпись,
+    /// добавленная в этом сеансе, настоящий текстовый объект PDF и строка,
+    /// полученная распознаванием. Снаружи они выглядят одинаково —
+    /// пользователю всё равно, откуда взялись буквы.
+    /// </summary>
+    /// <param name="Text">Что написано сейчас.</param>
+    /// <param name="RectPt">Рамка в отображаемых пунктах: по ней рисуется поле ввода.</param>
+    /// <param name="FontSizePt">Кегль — чтобы поле ввода было того же размера, что и текст.</param>
+    /// <param name="ObjectPath">Адрес объекта страницы; пустой у распознанной строки.</param>
+    /// <param name="Layer">Слой распознавания; null у настоящего объекта PDF.</param>
+    /// <param name="LineIndex">Номер строки внутри слоя распознавания.</param>
+    /// <param name="Draft">
+    /// Надпись, добавленная в этом сеансе и ещё не запечённая в файл. Такую
+    /// строку движок не видит — она живёт в правках сессии, — поэтому правится
+    /// заменой самой правки.
+    /// </param>
+    public sealed record InlineTextTarget(
+        string Text, Rect RectPt, double FontSizePt,
+        IReadOnlyList<int> ObjectPath, OcrEditableTextOverlay? Layer, int LineIndex,
+        string FontName = "", uint ColorArgb = 0xFF000000, bool NeedsRasterErase = false,
+        TextOverlay? Draft = null);
+
+    /// <summary>
+    /// Ищет правимую строку в точке страницы. Порядок — сверху вниз по тому,
+    /// что человек видит: сначала собственные надписи этого сеанса, затем
+    /// распознанные строки (обе лежат в правках сессии, попадание считается на
+    /// месте), и лишь потом настоящий текст файла через движок.
+    /// </summary>
+    public async Task<InlineTextTarget?> FindInlineTextAsync(
+        PageViewModel page, double xPt, double yPt, CancellationToken ct)
+    {
+        var draft = FindAddedText(page, xPt, yPt);
+        if (draft != null)
+            return draft;
+
+        var recognized = FindRecognizedLine(page, xPt, yPt);
+        if (recognized != null)
+            return recognized;
+
+        var handle = Document.Handles[page.PageRef.SourceId];
+        var found = await handle.GetTextObjectAtAsync(
+            page.PageRef.SourcePageIndex, page.PageRef.RotationOffset, xPt, yPt, ct);
+        if (found == null)
+            return null;
+
+        // Текст внутри вложенного объекта правится ДРУГИМ путём: строка
+        // стирается растеризацией страницы, а новая пишется поверх настоящим
+        // текстом. Цена — страница становится изображением, поэтому решение
+        // за человеком; спрашивает представление.
+        if (!found.CanEdit)
+        {
+            return new InlineTextTarget(
+                found.Text,
+                new Rect(found.XPt, found.YPt, found.WidthPt, found.HeightPt),
+                found.FontSizePt, found.ObjectPath, null, -1,
+                found.FontName, found.ColorArgb, NeedsRasterErase: true);
+        }
+
+        return new InlineTextTarget(
+            found.Text,
+            new Rect(found.XPt, found.YPt, found.WidthPt, found.HeightPt),
+            found.FontSizePt, found.ObjectPath, null, -1,
+            found.FontName, found.ColorArgb);
+    }
+
+    /// <summary>
+    /// Надпись, добавленная в этом сеансе. Ищется по той же рамке, по которой
+    /// такой объект выделяется мышью, — иначе выделить его можно было бы там,
+    /// где правка не открывается. Движок эти надписи не видит вовсе: они
+    /// попадают в файл только при сохранении, а до того живут в правках.
+    /// </summary>
+    private InlineTextTarget? FindAddedText(PageViewModel page, double xPt, double yPt)
+    {
+        var overlays = page.PageRef.OverlayList;
+        for (var i = overlays.Count - 1; i >= 0; i--)
+        {
+            if (overlays[i] is not TextOverlay original)
+                continue;
+            if (ToDisplayFrame(overlays[i], page) is not TextOverlay shown)
+                continue;
+            if (OverlayGeometry.BoundsOf(shown) is not { } box)
+                continue;
+            if (!box.Inflated(NexusPdf.Ux.ObjectHandles.HandleToleranceDip / Math.Max(Zoom, 0.1))
+                    .Contains(xPt, yPt))
+                continue;
+
+            return new InlineTextTarget(
+                original.Text,
+                new Rect(box.XPt, box.YPt, box.WidthPt, box.HeightPt),
+                original.FontSizePt, Array.Empty<int>(), null, -1,
+                original.FontFamily, original.ColorArgb, Draft: original);
+        }
+        return null;
+    }
+
+    private InlineTextTarget? FindRecognizedLine(PageViewModel page, double xPt, double yPt)
+    {
+        var overlays = Document.Session.Model.Pages[page.LogicalIndex].OverlayList;
+        for (var i = overlays.Count - 1; i >= 0; i--)
+        {
+            if (overlays[i] is not OcrEditableTextOverlay layer)
+                continue;
+
+            var mapped = OverlayDisplayMapper.ToFrame(
+                layer, page.PageRef.RotationOffset,
+                page.SizePt.WidthPoints, page.SizePt.HeightPoints).Overlay as OcrEditableTextOverlay;
+            if (mapped == null)
+                continue;
+
+            for (var j = 0; j < mapped.Lines.Count; j++)
+            {
+                var line = mapped.Lines[j];
+                if (xPt < line.XPt || xPt > line.XPt + line.WidthPt ||
+                    yPt < line.YPt || yPt > line.YPt + line.HeightPt)
+                    continue;
+                return new InlineTextTarget(
+                    line.Text,
+                    new Rect(line.XPt, line.YPt, line.WidthPt, line.HeightPt),
+                    line.HeightPt, Array.Empty<int>(), layer, j,
+                    Loc.Get("OcrRecognizedLine"), line.InkArgb);
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Цвет бумаги рядом со строкой — с УЖЕ нарисованной страницы. Белый по
+    /// умолчанию: на цветной подложке заплатка иначе бросалась бы в глаза, а
+    /// угадывать цвет неоткуда, если картинки страницы ещё нет.
+    /// </summary>
+    private uint SampleLineBackground(PageViewModel page, Rect rectPt)
+    {
+        var source = page.Image;
+        if (source == null || page.SizePt.WidthPoints <= 0 || page.SizePt.HeightPoints <= 0)
+            return 0xFFFFFFFF;
+
+        var pxPerPtX = source.PixelWidth / page.SizePt.WidthPoints;
+        var pxPerPtY = source.PixelHeight / page.SizePt.HeightPoints;
+
+        // Точки берутся ВОКРУГ строки, а не внутри: внутри буквы.
+        var samples = new List<uint>();
+        void Take(double xPt, double yPt)
+        {
+            var x = (int)Math.Round(xPt * pxPerPtX);
+            var y = (int)Math.Round(yPt * pxPerPtY);
+            if (x < 0 || y < 0 || x >= source.PixelWidth || y >= source.PixelHeight)
+                return;
+            try
+            {
+                var pixel = new byte[4];
+                source.CopyPixels(new Int32Rect(x, y, 1, 1), pixel, 4, 0);
+                samples.Add(0xFF000000u | ((uint)pixel[2] << 16) | ((uint)pixel[1] << 8) | pixel[0]);
+            }
+            catch (ArgumentException)
+            {
+                // Картинка сменилась под рукой — цвет просто не учитываем.
+            }
+        }
+
+        var margin = Math.Max(2.0, rectPt.Height * 0.4);
+        for (var i = 0; i <= 6; i++)
+        {
+            var xPt = rectPt.X + rectPt.Width * i / 6.0;
+            Take(xPt, rectPt.Y - margin);
+            Take(xPt, rectPt.Y + rectPt.Height + margin);
+        }
+        if (samples.Count == 0)
+            return 0xFFFFFFFF;
+
+        // Медиана по яркости: одиночная тёмная точка (соседняя строка, линейка)
+        // не должна утянуть заплатку в серый.
+        samples.Sort((a, b) => Luma(a).CompareTo(Luma(b)));
+        return samples[samples.Count / 2];
+
+        static double Luma(uint argb) =>
+            0.2126 * ((argb >> 16) & 0xFF) + 0.7152 * ((argb >> 8) & 0xFF) + 0.0722 * (argb & 0xFF);
+    }
+
+    /// <summary>
+    /// Может ли шрифт строки нарисовать введённое. У встроенного подмножества
+    /// шрифта нужных букв может просто не быть, и узнать об этом надо ДО
+    /// правки, а не после сохранения. Распознанная строка пишется системным
+    /// шрифтом и рисует что угодно.
+    /// </summary>
+    public Task<bool> CanRenderInlineAsync(
+        PageViewModel page, InlineTextTarget target, string text, CancellationToken ct)
+    {
+        // Спрашивать имеет смысл ТОЛЬКО у встроенного шрифта настоящего объекта
+        // страницы: только он может не знать нужных букв. У распознанной строки
+        // и у собственной надписи рисует шрифт из каталога — он с кириллицей и
+        // латиницей справляется по определению. Раньше у них не было адреса
+        // объекта, вопрос уходил в пустоту, и ответ «этот шрифт не нарисует
+        // такие буквы» приходил на обычный русский текст в Segoe UI.
+        if (target.Layer != null || target.Draft != null || target.ObjectPath.Count == 0)
+            return Task.FromResult(true);
+        return Document.Handles[page.PageRef.SourceId].CanFontRenderTextAsync(
+            page.PageRef.SourcePageIndex, target.ObjectPath, text, ct);
+    }
+
+    /// <summary>
+    /// Применяет правку строки. Неизменившийся текст ничего не делает.
+    /// dpiScale приходит из представления: масштаб экрана знает окно, а не
+    /// модель, и перерисовать страницу надо именно в нём.
+    /// </summary>
+    public void ApplyInlineText(
+        PageViewModel page, InlineTextTarget target, string newText,
+        string fontFamily, bool bold, bool italic, double fontSizePt, uint colorArgb,
+        double dpiScale)
+    {
+        var styleChanged = fontFamily.Length > 0;
+        if (IsBusy || (newText == target.Text && !styleChanged))
+            return;
+
+        if (target.Draft is { } draft)
+        {
+            // Собственная надпись этого сеанса: она ещё не в файле, поэтому
+            // меняется сама правка, а не содержимое страницы. Незаданные
+            // свойства остаются прежними — правили только текст.
+            var updated = draft with
+            {
+                Text = newText,
+                FontSizePt = fontSizePt > 0 ? fontSizePt : draft.FontSizePt,
+                ColorArgb = colorArgb != 0 ? colorArgb : draft.ColorArgb,
+                FontFamily = fontFamily.Length > 0 ? fontFamily : draft.FontFamily,
+                Bold = fontFamily.Length > 0 ? bold : draft.Bold,
+                Italic = fontFamily.Length > 0 ? italic : draft.Italic,
+            };
+            Document.Session.Apply(new ReplaceOverlayOperation(page.LogicalIndex, draft, updated));
+            // Выделение держало ПРЕЖНИЙ объект: без обновления рамка осталась
+            // бы от старого текста, а «Удалить» убрало бы не то.
+            ClearObjectSelection();
+        }
+        else if (target.Layer is { } layer)
+        {
+            // У распознанной строки своё представление: цвет чернил и высота
+            // строки живут в самом слое, гарнитура у него всегда системная.
+            var lines = layer.Lines.ToList();
+            var line = lines[target.LineIndex] with { Text = newText };
+            if (styleChanged && colorArgb != 0)
+                line = line with { InkArgb = colorArgb };
+            lines[target.LineIndex] = line;
+            Document.Session.Apply(new ReplaceOverlayOperation(
+                page.LogicalIndex, layer, layer with { Lines = lines }));
+        }
+        else if (target.NeedsRasterErase)
+        {
+            // Строку внутри вложенного объекта иначе не изменить: старые буквы
+            // стираются вместе со страницей (растеризацией при сохранении), а
+            // новые ложатся обычным текстовым объектом поверх.
+            var fill = SampleLineBackground(page, target.RectPt);
+            Document.Session.Apply(new AddOverlayOperation(page.LogicalIndex,
+                new RegionEraseDraft(
+                    target.RectPt.X, target.RectPt.Y,
+                    target.RectPt.Width, target.RectPt.Height, fill)));
+
+            var size = fontSizePt > 0 ? fontSizePt : target.FontSizePt;
+            Document.Session.Apply(new AddOverlayOperation(page.LogicalIndex,
+                new TextOverlay(
+                    newText, target.RectPt.X, target.RectPt.Y, size,
+                    colorArgb != 0 ? colorArgb : target.ColorArgb, 0,
+                    fontFamily.Length > 0 ? fontFamily : PdfFontCatalog.DefaultFamily,
+                    bold, italic)));
+            page.ForceRefresh(dpiScale);
+        }
+        else
+        {
+            Document.Session.Apply(new AddOverlayOperation(page.LogicalIndex,
+                new TextObjectReplacement(
+                    target.ObjectPath, newText,
+                    fontFamily, bold, italic, fontSizePt, colorArgb)));
+            page.ForceRefresh(dpiScale);
+        }
+        StatusText = Loc.Get("TextEditDone");
+    }
+
     public void PlacePendingOverlay(PageViewModel page, double xPt, double yPt)
     {
         if (PendingOverlay is not { PointFactory: { } factory }) return;

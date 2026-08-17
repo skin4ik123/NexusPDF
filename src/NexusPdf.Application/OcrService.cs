@@ -35,6 +35,14 @@ public sealed class OcrService
     // Слова с уверенностью ниже порога — почти всегда шум сканирования.
     private const float MinWordConfidence = 35f;
 
+    // Для РЕДАКТИРУЕМОГО текста порог выше, и это не придирчивость. Невидимый
+    // слой поиска ничего не портит: неверно распознанное слово просто не
+    // найдётся. А редактируемый текст ЗАКРЫВАЕТ оригинал — и строка, угаданная
+    // наполовину, встаёт вместо того, что под ней было. Выше не поднимаем:
+    // на обычном сканe уверенность держится около 70–90, и слишком строгий
+    // порог оставил бы страницу почти нетронутой.
+    private const float MinEditableConfidence = 60f;
+
     private readonly ITextRecognizer _ocr;
 
     public OcrService(ITextRecognizer ocr) => _ocr = ocr;
@@ -135,7 +143,8 @@ public sealed class OcrService
                 // Пиксели растра → отображаемые пункты текущей рамки страницы.
                 var ptPerPxX = size.WidthPoints / pixelWidth;
                 var ptPerPxY = size.HeightPoints / pixelHeight;
-                var kept = result.Words.Where(w => w.Confidence >= MinWordConfidence).ToList();
+                var minConfidence = editableText ? MinEditableConfidence : MinWordConfidence;
+                var kept = result.Words.Where(w => w.Confidence >= minConfidence).ToList();
                 var words = kept
                     .Select(w => new OcrWordBox(
                         w.Text,
@@ -154,18 +163,42 @@ public sealed class OcrService
                     PageOverlay layer;
                     if (editableText)
                     {
-                        // Слова собираются в строки, а цвета берутся с самого
-                        // скана: заплатка должна совпасть с бумагой, а буквы —
-                        // с чернилами оригинала.
-                        var lines = OcrLineBuilder.BuildLines(words)
+                        // Слова собираются в строки, а всё остальное строка
+                        // берёт с самого скана: цвет бумаги и чернил, гарнитуру
+                        // под начертание оригинала и кусочек фона, которым
+                        // закроется прежний текст.
+                        var pxPerPtX = pixelWidth / size.WidthPoints;
+                        var pxPerPtY = pixelHeight / size.HeightPoints;
+                        var lines = OcrLineBuilder.BuildLines(words, _ocr.ReturnsWholeLines)
                             .Select(line =>
                             {
                                 var background = OcrLineBuilder.SampleBackground(
-                                    image, pixelWidth / size.WidthPoints, pixelHeight / size.HeightPoints, line);
+                                    image, pxPerPtX, pxPerPtY, line);
                                 var ink = OcrLineBuilder.SampleInk(
-                                    image, pixelWidth / size.WidthPoints, pixelHeight / size.HeightPoints,
-                                    line, background);
-                                return line with { BackgroundArgb = background, InkArgb = ink };
+                                    image, pxPerPtX, pxPerPtY, line, background);
+                                var measured = line with { BackgroundArgb = background, InkArgb = ink };
+
+                                // Заплатка строится первой: попутно она находит
+                                // фактическую полосу букв, и уже по ней (а не по
+                                // завышенной рамке) определяется начертание.
+                                var patch = OcrLinePatchBuilder.Build(image, pxPerPtX, pxPerPtY, measured);
+                                var guess = OcrFontGuesser.Of(
+                                    image, pxPerPtX, pxPerPtY, measured, patch?.YPt, patch?.HeightPt);
+
+                                // Рамка от распознавания по вертикали смещена и
+                                // завышена, а найденная полоса букв — это ровно
+                                // то место, где текст стоял. По ней и ставим
+                                // замену: иначе строка садится ниже прежней и
+                                // набирается не своим кеглем.
+                                if (patch != null)
+                                    measured = measured with { YPt = patch.YPt, HeightPt = patch.HeightPt };
+
+                                return measured with
+                                {
+                                    FontFamily = guess.Family,
+                                    Bold = guess.Bold,
+                                    Patch = patch,
+                                };
                             })
                             .ToList();
                         layer = new OcrEditableTextOverlay(lines);

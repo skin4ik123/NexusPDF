@@ -24,14 +24,22 @@ public abstract record PageOverlay
     public int PlacedRotation { get; init; }
 }
 
-/// <summary>Новый текстовый блок. Позиция — верхний левый угол первой строки; поворот — против часовой, в отображаемых координатах.</summary>
+/// <summary>
+/// Новый текстовый блок. Позиция — верхний левый угол первой строки; поворот —
+/// против часовой, в отображаемых координатах. Гарнитура и начертание
+/// необязательны: пустая гарнитура означает шрифт по умолчанию, поэтому
+/// прежние вызовы продолжают работать как раньше.
+/// </summary>
 public sealed record TextOverlay(
     string Text,
     double XPt,
     double YPt,
     double FontSizePt,
     uint ColorArgb,
-    double RotationDegrees) : PageOverlay;
+    double RotationDegrees,
+    string FontFamily = "",
+    bool Bold = false,
+    bool Italic = false) : PageOverlay;
 
 /// <summary>Новое изображение (BGRA32, построчно сверху вниз), вписанное в прямоугольник отображаемой страницы.</summary>
 public sealed record ImageOverlay(
@@ -84,8 +92,21 @@ public sealed record InkAnnotationDraft(
 /// показать пользователю перед правкой. IsEmbeddedFont важен: у встроенного
 /// подмножества шрифта может просто не быть нужных букв.
 /// </summary>
+/// <param name="ObjectPath">
+/// Адрес объекта на странице: [3] — четвёртый объект страницы, [3, 1] — второй
+/// объект внутри него. Путь, а не номер, потому что текст часто лежит внутри
+/// Form XObject — вложенного потока рисования, и плоским номером такой объект
+/// не адресуется.
+/// </param>
+/// <remarks>
+/// CanEdit важнее, чем кажется. Текст внутри Form XObject НАЙТИ можно, а
+/// сохранить правку — нельзя: PDFium при сохранении перегенерирует поток
+/// страницы и не трогает поток формы, поэтому изменение молча пропадает.
+/// Честнее сказать «эту строку править нельзя», чем дать её поправить и
+/// потерять работу при сохранении.
+/// </remarks>
 public sealed record PdfTextObject(
-    int ObjectIndex,
+    IReadOnlyList<int> ObjectPath,
     string Text,
     double FontSizePt,
     uint ColorArgb,
@@ -94,14 +115,42 @@ public sealed record PdfTextObject(
     double XPt,
     double YPt,
     double WidthPt,
-    double HeightPt);
+    double HeightPt)
+{
+    /// <summary>
+    /// Можно ли сохранить правку этой строки. Ложь для текста внутри
+    /// Form XObject: найти его получается, а записать изменение обратно в
+    /// файл — нет, поэтому предлагать правку нечестно.
+    /// </summary>
+    public bool CanEdit => ObjectPath.Count == 1;
+}
 
 /// <summary>
 /// Замена содержимого СУЩЕСТВУЮЩЕГО текстового объекта. Шрифт, размер, цвет
 /// и матрица объекта остаются его собственными, поэтому правленый текст
 /// выглядит как исходный, а не как наклейка поверх.
 /// </summary>
-public sealed record TextObjectReplacement(int ObjectIndex, string Text) : PageOverlay;
+/// <param name="FontFamily">
+/// Новая гарнитура. Пустая строка — оставить шрифт объекта как есть: тогда
+/// правленая строка выглядит ровно как исходная, и это самый безопасный путь.
+/// Заданная гарнитура означает, что объект будет ЗАМЕНЁН новым на том же месте:
+/// установить шрифт существующему текстовому объекту PDFium не позволяет.
+/// </param>
+/// <param name="FontSizePt">Новый кегль; 0 — оставить прежний.</param>
+/// <param name="ColorArgb">Новый цвет; 0 — оставить прежний (прозрачный цвет никто не выбирает).</param>
+public sealed record TextObjectReplacement(
+    IReadOnlyList<int> ObjectPath,
+    string Text,
+    string FontFamily = "",
+    bool Bold = false,
+    bool Italic = false,
+    double FontSizePt = 0,
+    uint ColorArgb = 0) : PageOverlay
+{
+    /// <summary>Меняется ли оформление, а не только буквы.</summary>
+    public bool ChangesStyle =>
+        !string.IsNullOrWhiteSpace(FontFamily) || FontSizePt > 0 || ColorArgb != 0;
+}
 
 /// <summary>Найденное на странице растровое изображение: индекс объекта, его растр и рамка в отображаемых пунктах.</summary>
 /// <summary>
@@ -161,6 +210,25 @@ public sealed record RedactionDraft(
     double WidthPt,
     double HeightPt) : PageOverlay;
 
+/// <summary>
+/// СТИРАНИЕ области: содержимое под прямоугольником исчезает, а само место
+/// закрашивается цветом бумаги. Как и вымарывание, применяется растеризацией
+/// страницы — только цветом фона, а не чёрным.
+///
+/// Нужно там, где текст лежит внутри Form XObject: изменить такой текст на
+/// месте нельзя (PDFium перегенерирует поток страницы, но не формы), а
+/// закрасить его сверху и написать поверх новый — значит оставить в файле
+/// старые буквы, которые найдёт поиск и вытащит копирование. Растеризация
+/// убирает их из документа по-настоящему.
+/// </summary>
+/// <param name="FillArgb">Цвет бумаги, взятый с самой страницы рядом со строкой.</param>
+public sealed record RegionEraseDraft(
+    double XPt,
+    double YPt,
+    double WidthPt,
+    double HeightPt,
+    uint FillArgb) : PageOverlay;
+
 /// <summary>Вид разметки выделенного текста.</summary>
 public enum TextMarkupKind
 {
@@ -201,7 +269,34 @@ public sealed record OcrWordBox(
     double WidthPt,
     double HeightPt);
 
-/// <summary>Строка распознанного текста: рамка в отображаемых пунктах и цвета для замены.</summary>
+/// <summary>
+/// Заплатка под строкой: тот же кусок скана, но без букв, вместе со своим
+/// местом на странице в отображаемых пунктах.
+///
+/// Своё место, а не рамка строки: рамка от распознавания заметно выше самих
+/// букв, и заплатка по ней затирала соседние строки. Здесь прямоугольник
+/// обрезан по фактической полосе чернил.
+/// </summary>
+public sealed record OcrLinePatch(
+    byte[] Bgra,
+    int PixelWidth,
+    int PixelHeight,
+    double XPt,
+    double YPt,
+    double WidthPt,
+    double HeightPt);
+
+/// <summary>
+/// Строка распознанного текста: рамка в отображаемых пунктах, цвета для
+/// замены, подобранная под оригинал гарнитура и заплатка фона.
+/// </summary>
+/// <param name="FontFamily">
+/// Гарнитура, подобранная по начертанию оригинала (пусто — шрифт по умолчанию).
+/// </param>
+/// <param name="Patch">
+/// Кусочек скана без букв, которым закрывается оригинал. null — построить не
+/// удалось, закрашивается <see cref="BackgroundArgb"/>.
+/// </param>
 public sealed record OcrTextLine(
     string Text,
     double XPt,
@@ -209,13 +304,28 @@ public sealed record OcrTextLine(
     double WidthPt,
     double HeightPt,
     uint BackgroundArgb = 0xFFFFFFFF,
-    uint InkArgb = 0xFF000000);
+    uint InkArgb = 0xFF000000,
+    string FontFamily = "",
+    bool Bold = false,
+    OcrLinePatch? Patch = null)
+{
+    /// <summary>
+    /// Запас вокруг рамки строки. Рамка распознавания охватывает видимые
+    /// глифы, а выносные элементы («р», «б», запятая) вылезают за неё —
+    /// без запаса от них остаются хвосты поверх нового текста. Общий для
+    /// заплатки и для того, кто её строит: разъедься эти два числа, заплатка
+    /// встала бы не по месту.
+    /// </summary>
+    public double PadPt => HeightPt * 0.18;
+}
 
 /// <summary>
-/// РЕДАКТИРУЕМЫЙ текст вместо скана: под каждой строкой закрашивается
-/// прямоугольник цветом бумаги, а поверх ставится НАСТОЯЩИЙ видимый текст.
-/// В отличие от невидимого слоя такой текст можно править как обычный —
-/// ценой того, что начертание оригинала заменяется системным шрифтом.
+/// РЕДАКТИРУЕМЫЙ текст вместо скана: место каждой строки затягивается
+/// заплаткой фона, а поверх ставится НАСТОЯЩИЙ видимый текст. В отличие от
+/// невидимого слоя такой текст можно править как обычный. Цвет чернил,
+/// гарнитура и насыщенность берутся с самого скана, поэтому строка встаёт
+/// похожей на прежнюю; точное воспроизведение оригинального шрифта по
+/// растру невозможно.
 /// </summary>
 public sealed record OcrEditableTextOverlay(IReadOnlyList<OcrTextLine> Lines) : PageOverlay;
 

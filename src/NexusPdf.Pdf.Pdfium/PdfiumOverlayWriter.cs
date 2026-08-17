@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using NexusPdf.Pdf.Abstractions;
 using PDFiumCore;
 
@@ -17,30 +17,14 @@ internal static class PdfiumOverlayWriter
     private const int FpdfFontTrueType = 2;
     private const int FpdfBitmapBgra = 4;
 
-    /// <summary>Загружает системный TTF в документ. null — если ни один кандидат не найден.</summary>
-    public static unsafe FpdfFontT? LoadOverlayFont(FpdfDocumentT document)
-    {
-        var fontsDir = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
-        foreach (var candidate in new[] { "segoeui.ttf", "arial.ttf", "tahoma.ttf", "calibri.ttf" })
-        {
-            var path = Path.Combine(fontsDir, candidate);
-            if (!File.Exists(path))
-                continue;
-            var bytes = File.ReadAllBytes(path);
-            fixed (byte* data = bytes)
-            {
-                var font = fpdf_edit.FPDFTextLoadFont(document, data, (uint)bytes.Length, FpdfFontTrueType, 1);
-                if (font != null && font.__Instance != IntPtr.Zero)
-                    return font;
-            }
-        }
-        return null;
-    }
-
     public static void ApplyOverlays(
-        FpdfDocumentT document, FpdfPageT page, FpdfFontT? font,
+        FpdfDocumentT document, FpdfPageT page, OverlayFontCache fonts,
         IReadOnlyList<PageOverlay> overlays, int extraQuarterTurns)
     {
+        // Шрифт по умолчанию нужен слоям распознавания: у них своей гарнитуры
+        // нет, они пишут системной. Надписи выбирают шрифт сами, ниже.
+        var font = fonts.Default;
+
         var rotation = ((fpdf_edit.FPDFPageGetRotation(page) % 4) + 4) % 4;
 
         // Экран (клик, предпросмотр, рендер) живёт в рамке CropBox∩MediaBox —
@@ -109,7 +93,9 @@ internal static class PdfiumOverlayWriter
             switch (overlay)
             {
                 case TextOverlay text:
-                    ApplyText(document, page, font, text,
+                    // Гарнитура и начертание — свойства самой надписи, поэтому
+                    // шрифт берётся под неё, а не общий на всю страницу.
+                    ApplyText(document, page, fonts.For(text.FontFamily, text.Bold, text.Italic), text,
                         rotation, left, bottom, contentWidth, contentHeight);
                     contentAdded = true;
                     break;
@@ -136,8 +122,17 @@ internal static class PdfiumOverlayWriter
                     break;
                 case PageRasterReplacement:
                     break; // уже применена выше
+                case RegionEraseDraft erase:
+                    // Заплатка цветом бумаги. Настоящее стирание делает
+                    // растеризация при сохранении; здесь — чтобы предпросмотр
+                    // и промежуточные проходы показывали будущий результат.
+                    InsertFilledRect(page,
+                        erase.XPt, erase.YPt, erase.WidthPt, erase.HeightPt,
+                        erase.FillArgb, rotation, left, bottom, contentWidth, contentHeight);
+                    contentAdded = true;
+                    break;
                 case TextObjectReplacement textReplacement:
-                    ApplyTextObjectReplacement(page, textReplacement);
+                    ApplyTextObjectReplacement(document, page, fonts, textReplacement);
                     contentAdded = true;
                     break;
                 case ImageObjectReplacement imageReplacement:
@@ -150,7 +145,9 @@ internal static class PdfiumOverlayWriter
                     contentAdded = true;
                     break;
                 case OcrEditableTextOverlay editable:
-                    ApplyOcrEditableLayer(document, page, font, editable, extraAngle,
+                    // Кэш шрифтов целиком, а не один шрифт: гарнитура у каждой
+                    // строки своя — подобранная под начертание оригинала.
+                    ApplyOcrEditableLayer(document, page, fonts, editable, extraAngle,
                         rotation, left, bottom, contentWidth, contentHeight);
                     contentAdded = true;
                     break;
@@ -585,20 +582,16 @@ internal static class PdfiumOverlayWriter
     }
 
     /// <summary>
-    /// РЕДАКТИРУЕМЫЙ текст вместо скана: под строкой закрашивается
-    /// прямоугольник цветом бумаги, а поверх ставится обычный видимый текст.
-    /// Закраска обязательна — иначе поверх букв скана легли бы вторые буквы и
-    /// строка двоилась бы.
+    /// РЕДАКТИРУЕМЫЙ текст вместо скана: место строки затягивается заплаткой
+    /// фона, а поверх ставится обычный видимый текст. Закрытие оригинала
+    /// обязательно — иначе поверх букв скана легли бы вторые буквы и строка
+    /// двоилась бы.
     /// </summary>
     private static void ApplyOcrEditableLayer(
-        FpdfDocumentT document, FpdfPageT page, FpdfFontT? font, OcrEditableTextOverlay layer,
+        FpdfDocumentT document, FpdfPageT page, OverlayFontCache fonts, OcrEditableTextOverlay layer,
         double extraAngleDeg, int rotation, double offsetX, double offsetY,
         double contentWidth, double contentHeight)
     {
-        if (font == null)
-            throw new PdfEngineException(
-                "Для редактируемого текста нужен системный шрифт TTF (Segoe UI/Arial), но он не найден.");
-
         var angle = (extraAngleDeg + 90.0 * rotation) * Math.PI / 180.0;
         var cos = Math.Cos(angle);
         var sin = Math.Sin(angle);
@@ -610,17 +603,18 @@ internal static class PdfiumOverlayWriter
                 !(line.WidthPt > 0) || !(line.HeightPt > 0))
                 continue;
 
-            // 1. Заплатка цветом бумаги с небольшим запасом: у букв есть
-            //    выносные элементы, вылезающие за рамку строки.
-            //    Именно ОБЪЕКТ СТРАНИЦЫ, а не аннотация: аннотации рисуются
-            //    поверх всего содержимого и закрыли бы собственный текст.
-            var pad = line.HeightPt * 0.18;
-            InsertFilledRect(page,
-                line.XPt - pad, line.YPt - pad,
-                line.WidthPt + pad * 2, line.HeightPt + pad * 2,
-                line.BackgroundArgb, rotation, offsetX, offsetY, contentWidth, contentHeight);
+            // Гарнитура подобрана под начертание оригинала при распознавании;
+            // неизвестная в системе откатится на шрифт по умолчанию.
+            var font = fonts.For(line.FontFamily, line.Bold, false);
+            if (font == null)
+                throw new PdfEngineException(
+                    "Для редактируемого текста нужен системный шрифт TTF (Segoe UI/Arial), но он не найден.");
 
-            // 2. Настоящий видимый текст в той же рамке.
+            // 1. СНАЧАЛА текст, и только если он получился — заплатка.
+            //    Порядок здесь не косметика: раньше заплатка ставилась первой,
+            //    и строка, для которой текст создать не удалось, оставляла на
+            //    скане закрашенный прямоугольник без единой буквы. На
+            //    фотографии документа это выглядит как дыра в изображении.
             var obj = fpdf_edit.FPDFPageObjCreateTextObj(document, font, (float)line.HeightPt);
             if (obj == null || obj.__Instance == IntPtr.Zero)
                 throw new PdfEngineException("Не удалось создать редактируемый текстовый объект.");
@@ -630,8 +624,33 @@ internal static class PdfiumOverlayWriter
                 buffer[i] = line.Text[i];
             if (fpdf_edit.FPDFTextSetText(obj, ref buffer[0]) == 0)
             {
+                // Оригинал под этой строкой остаётся нетронутым: испортить
+                // изображение хуже, чем не заменить одну строку.
                 fpdf_edit.FPDFPageObjDestroy(obj);
                 continue;
+            }
+
+            // 2. Закрытие оригинала — ОБЪЕКТОМ СТРАНИЦЫ, а не аннотацией:
+            //    аннотации рисуются поверх всего содержимого и закрыли бы
+            //    собственный текст. Если при распознавании удалось снять
+            //    кусочек фона, кладём его — бумага скана неоднородна, и
+            //    ровный прямоугольник виден на ней как дыра. Заливка одним
+            //    цветом остаётся запасным вариантом.
+            if (line.Patch is { PixelWidth: > 0, PixelHeight: > 0 } patch &&
+                patch.Bgra.Length >= patch.PixelWidth * patch.PixelHeight * 4)
+            {
+                ApplyImage(document, page,
+                    new ImageOverlay(patch.Bgra, patch.PixelWidth, patch.PixelHeight,
+                        patch.XPt, patch.YPt, patch.WidthPt, patch.HeightPt),
+                    extraAngleDeg, rotation, offsetX, offsetY, contentWidth, contentHeight);
+            }
+            else
+            {
+                var pad = line.PadPt;
+                InsertFilledRect(page,
+                    line.XPt - pad, line.YPt - pad,
+                    line.WidthPt + pad * 2, line.HeightPt + pad * 2,
+                    line.BackgroundArgb, rotation, offsetX, offsetY, contentWidth, contentHeight);
             }
 
             fpdf_edit.FPDFPageObjSetFillColor(obj,
@@ -645,10 +664,24 @@ internal static class PdfiumOverlayWriter
                 var measuredH = bt - bb;
                 if (measuredW > 0.01 && measuredH > 0.01)
                 {
-                    var sx = Math.Clamp(line.WidthPt / measuredW, 0.05, 20.0);
-                    var sy = Math.Clamp(line.HeightPt / measuredH, 0.05, 20.0);
+                    // Масштаб считается ТОЛЬКО по ширине и применяется к обеим
+                    // осям сразу. Ширина рамки — это честная ширина набранной
+                    // строки, а высота зависит от того, попались ли в ней
+                    // заглавные и хвосты вниз: у строки вроде «оно все» глифы
+                    // низкие, и подгонка по высоте раздувала её на всю рамку —
+                    // отсюда и «иногда текст становится огромным». Единый
+                    // масштаб заодно не даёт буквам сплющиваться по одной оси.
+                    var scale = Math.Clamp(line.WidthPt / measuredW, 0.05, 20.0);
+
+                    // Страховка от завышенной рамки: строка не должна вылезти
+                    // за собственную высоту больше чем на четверть, иначе одна
+                    // кривая рамка от распознавания наедет на соседние строки.
+                    var maxScale = line.HeightPt * 1.25 / measuredH;
+                    if (maxScale > 0.0 && scale > maxScale)
+                        scale = maxScale;
+
                     fpdf_edit.FPDFPageObjTransform(obj, 1, 0, 0, 1, -bl, -bb);
-                    fpdf_edit.FPDFPageObjTransform(obj, sx, 0, 0, sy, 0, 0);
+                    fpdf_edit.FPDFPageObjTransform(obj, scale, 0, 0, scale, 0, 0);
                 }
             }
 
@@ -664,25 +697,108 @@ internal static class PdfiumOverlayWriter
     /// цвет и матрица принадлежат самому объекту и не трогаются, поэтому
     /// правленая строка встаёт на место прежней в том же оформлении.
     /// </summary>
-    private static void ApplyTextObjectReplacement(FpdfPageT page, TextObjectReplacement replacement)
+    private static void ApplyTextObjectReplacement(
+        FpdfDocumentT document, FpdfPageT page, OverlayFontCache fonts, TextObjectReplacement replacement)
     {
         const int pageObjectText = 1; // FPDF_PAGEOBJ_TEXT
-        var count = fpdf_edit.FPDFPageCountObjects(page);
-        if (replacement.ObjectIndex < 0 || replacement.ObjectIndex >= count)
+
+        // Вложенный объект найти можно, а сохранить правку — нет: PDFium
+        // перегенерирует поток страницы и не трогает поток формы, поэтому
+        // запись молча пропала бы при сохранении. Падаем вслух.
+        if (replacement.ObjectPath.Count > 1)
+            throw new PdfEngineException(
+                "Эта строка лежит внутри вложенного объекта документа, и сохранить её правку нельзя.");
+
+        // Путь, а не номер: адрес объекта — цепочка индексов, а не одно число.
+        var obj = PdfObjectTree.Resolve(page, replacement.ObjectPath);
+        if (obj == null || obj.__Instance == IntPtr.Zero)
             throw new PdfEngineException(
                 "Текст для замены не найден: содержимое страницы изменилось.");
-
-        var obj = fpdf_edit.FPDFPageGetObject(page, replacement.ObjectIndex);
-        if (obj == null || obj.__Instance == IntPtr.Zero ||
-            fpdf_edit.FPDFPageObjGetType(obj) != pageObjectText)
+        if (fpdf_edit.FPDFPageObjGetType(obj) != pageObjectText)
             throw new PdfEngineException(
-                "Объект по указанному номеру больше не является текстом.");
+                "Объект по указанному адресу больше не является текстом.");
+
+        if (replacement.ChangesStyle)
+        {
+            RestyleTextObject(document, page, fonts, replacement, obj);
+            return;
+        }
 
         var buffer = new ushort[replacement.Text.Length + 1];
         for (var i = 0; i < replacement.Text.Length; i++)
             buffer[i] = replacement.Text[i];
         if (fpdf_edit.FPDFTextSetText(obj, ref buffer[0]) == 0)
             throw new PdfEngineException("Не удалось записать новый текст в объект страницы.");
+    }
+
+    /// <summary>
+    /// Замена строки С ДРУГИМ ОФОРМЛЕНИЕМ: гарнитурой, кеглем или цветом.
+    ///
+    /// Установить шрифт существующему текстовому объекту PDFium не даёт — есть
+    /// только чтение. Поэтому старый объект убирается со страницы, а на его
+    /// место, с его же матрицей и на ту же позицию в порядке рисования, встаёт
+    /// новый. Матрица переносится целиком: в ней сидит и положение строки, и
+    /// её наклон, и масштаб, поэтому текст не уезжает.
+    /// </summary>
+    private static void RestyleTextObject(
+        FpdfDocumentT document, FpdfPageT page, OverlayFontCache fonts,
+        TextObjectReplacement replacement, FpdfPageobjectT original)
+    {
+        var matrix = new FS_MATRIX_();
+        var hasMatrix = fpdf_edit.FPDFPageObjGetMatrix(original, matrix) != 0;
+
+        float originalSize = 0;
+        fpdf_edit.FPDFTextObjGetFontSize(original, ref originalSize);
+        var size = replacement.FontSizePt > 0 ? replacement.FontSizePt : originalSize;
+        if (!(size > 0))
+            size = 12; // у объекта без кегля хоть что-то читаемое
+
+        uint r0 = 0, g0 = 0, b0 = 0, a0 = 255;
+        fpdf_edit.FPDFPageObjGetFillColor(original, ref r0, ref g0, ref b0, ref a0);
+        var color = replacement.ColorArgb != 0
+            ? replacement.ColorArgb
+            : (a0 << 24) | (r0 << 16) | (g0 << 8) | b0;
+
+        var font = fonts.For(replacement.FontFamily, replacement.Bold, replacement.Italic);
+        if (font == null)
+            throw new PdfEngineException(
+                "Для смены шрифта нужен системный TTF (Segoe UI/Arial), но он не найден.");
+
+        var created = fpdf_edit.FPDFPageObjCreateTextObj(document, font, (float)size);
+        if (created == null || created.__Instance == IntPtr.Zero)
+            throw new PdfEngineException("Не удалось создать текстовый объект с новым шрифтом.");
+
+        var buffer = new ushort[replacement.Text.Length + 1];
+        for (var i = 0; i < replacement.Text.Length; i++)
+            buffer[i] = replacement.Text[i];
+        if (fpdf_edit.FPDFTextSetText(created, ref buffer[0]) == 0)
+        {
+            fpdf_edit.FPDFPageObjDestroy(created);
+            throw new PdfEngineException("Не удалось записать текст в новый объект.");
+        }
+
+        fpdf_edit.FPDFPageObjSetFillColor(created,
+            (byte)(color >> 16), (byte)(color >> 8), (byte)color, (byte)(color >> 24));
+
+        if (hasMatrix)
+            fpdf_edit.FPDFPageObjSetMatrix(created, matrix);
+
+        // Порядок рисования сохраняется: строка, которая была под картинкой,
+        // не должна после правки оказаться поверх неё.
+        var index = replacement.ObjectPath[0];
+        if (fpdf_edit.FPDFPageRemoveObject(page, original) == 0)
+        {
+            fpdf_edit.FPDFPageObjDestroy(created);
+            throw new PdfEngineException("Не удалось убрать прежнюю строку со страницы.");
+        }
+        fpdf_edit.FPDFPageObjDestroy(original); // после снятия объект принадлежит нам
+
+        if (fpdf_edit.FPDFPageInsertObjectAtIndex(page, created, (ulong)index) == 0)
+        {
+            // Не встало на своё место — кладём хотя бы поверх: потерять строку
+            // хуже, чем нарушить порядок рисования.
+            fpdf_edit.FPDFPageInsertObject(page, created);
+        }
     }
 
     /// <summary>

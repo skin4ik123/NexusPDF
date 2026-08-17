@@ -150,9 +150,9 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
                     throw new PdfEngineException("Не удалось открыть страницу для запекания.");
                 try
                 {
-                    var font = PdfiumOverlayWriter.LoadOverlayFont(newDoc);
                     PdfiumOverlayWriter.ApplyOverlays(
-                        newDoc, page, font, overlays, ((extraQuarterTurns % 4) + 4) % 4);
+                        newDoc, page, new OverlayFontCache(newDoc), overlays,
+                        ((extraQuarterTurns % 4) + 4) % 4);
                 }
                 finally
                 {
@@ -197,8 +197,8 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
             {
                 if (overlays.Count > 0)
                 {
-                    var font = PdfiumOverlayWriter.LoadOverlayFont(newDoc);
-                    PdfiumOverlayWriter.ApplyOverlays(newDoc, page, font, overlays, rotation);
+                    PdfiumOverlayWriter.ApplyOverlays(
+                        newDoc, page, new OverlayFontCache(newDoc), overlays, rotation);
                 }
             }
             finally
@@ -379,7 +379,9 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
             // Наложенный контент (новый текст, изображения) запекается после
             // установки поворотов: координаты оверлеев заданы в итоговой
             // отображаемой ориентации.
-            FpdfFontT? overlayFont = null;
+            // Один кэш на документ: гарнитура, использованная на пяти
+            // страницах, обязана встроиться в файл один раз, а не пять.
+            var overlayFonts = new OverlayFontCache(newDoc);
             try
             {
                 for (var k = 0; k < pages.Count; k++)
@@ -387,17 +389,12 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
                     var overlays = pages[k].Overlays;
                     if (overlays == null || overlays.Count == 0) continue;
 
-                    if (overlayFont == null && overlays.Any(o => o is TextOverlay or OcrTextLayerOverlay))
-                    {
-                        overlayFont = PdfiumOverlayWriter.LoadOverlayFont(newDoc);
-                    }
-
                     var page = fpdfview.FPDF_LoadPage(newDoc, k);
                     if (page == null || page.__Instance == IntPtr.Zero)
                         throw new PdfEngineException($"Не удалось открыть страницу {k + 1} нового документа.");
                     try
                     {
-                        PdfiumOverlayWriter.ApplyOverlays(newDoc, page, overlayFont, overlays,
+                        PdfiumOverlayWriter.ApplyOverlays(newDoc, page, overlayFonts, overlays,
                             ((pages[k].ExtraQuarterTurns % 4) + 4) % 4);
                     }
                     finally
@@ -410,8 +407,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
             }
             finally
             {
-                if (overlayFont != null)
-                    fpdf_edit.FPDFFontClose(overlayFont);
+                overlayFonts.CloseAll();
             }
         }
         finally
@@ -473,8 +469,10 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
                     var overlay = new ImageOverlay(
                         spec.Bgra, spec.PixelWidth, spec.PixelHeight,
                         0, 0, spec.WidthPoints, spec.HeightPoints);
+                    // Здесь оверлей только растровый, шрифт не понадобится, но
+                    // кэш всё равно передаётся: пустой он ничего не грузит.
                     PdfiumOverlayWriter.ApplyOverlays(
-                        newDoc, page, null, new PageOverlay[] { overlay }, 0);
+                        newDoc, page, new OverlayFontCache(newDoc), new PageOverlay[] { overlay }, 0);
                 }
                 finally
                 {

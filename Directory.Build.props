@@ -11,10 +11,10 @@
          однажды оказался закодирован дважды, и в свойствах exe годами стояло
          «В© 2026 NexusPDF». Так это не повторится ни при какой перекодировке. -->
     <Copyright>Copyright &#169; 2026 Artur Yurchuk</Copyright>
-    <Version>0.20.2</Version>
-    <AssemblyVersion>0.20.2.0</AssemblyVersion>
-    <FileVersion>0.20.2.0</FileVersion>
-    <InformationalVersion>0.20.2</InformationalVersion>
+    <Version>0.21.0</Version>
+    <AssemblyVersion>0.21.0.0</AssemblyVersion>
+    <FileVersion>0.21.0.0</FileVersion>
+    <InformationalVersion>0.21.0</InformationalVersion>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest</AnalysisLevel>
     <NeutralLanguage>en</NeutralLanguage>

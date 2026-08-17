@@ -558,6 +558,52 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
         }
     }
 
+    public Task SaveWithOverlaysAsync(
+        IReadOnlyDictionary<int, IReadOnlyList<PageOverlay>> overlaysByPage,
+        string targetPath, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() =>
+            {
+                _forms?.KillFocus();
+
+                // Шрифты закрываются ТОЛЬКО после записи файла: до этого
+                // момента текстовые объекты страниц на них ссылаются.
+                var fonts = new OverlayFontCache(NativeDoc);
+                try
+                {
+                    foreach (var (pageIndex, overlays) in overlaysByPage)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        if (overlays.Count == 0)
+                            continue;
+                        var page = fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
+                        if (page == null || page.__Instance == IntPtr.Zero)
+                            throw new PdfEngineException(
+                                $"Не удалось открыть страницу {pageIndex + 1} для наложения правок.");
+                        try
+                        {
+                            // Поворота здесь не бывает: этот путь берётся только
+                            // когда страницы стоят на своих местах без доворотов.
+                            PdfiumOverlayWriter.ApplyOverlays(NativeDoc, page, fonts, overlays, 0);
+                        }
+                        finally
+                        {
+                            fpdfview.FPDF_ClosePage(page);
+                        }
+                    }
+                    PdfiumRenderEngine.SaveDocument(NativeDoc, targetPath);
+                }
+                finally
+                {
+                    fonts.CloseAll();
+                }
+            }, ct);
+        }
+    }
+
     public Task<PdfImageSummary> GetImageSummaryAsync(int maxPages, CancellationToken ct)
     {
         lock (_admissionGate)
@@ -934,34 +980,34 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
                 try
                 {
                     var (px, py) = DisplayedToPage(page, pageIndex, extraQuarterTurns, xPt, yPt);
-                    var count = fpdf_edit.FPDFPageCountObjects(page);
-                    for (var i = count - 1; i >= 0; i--)
+
+                    // Обход со спуском в формы. Список идёт в порядке рисования,
+                    // поэтому идём с конца: под курсором побеждает тот, кто
+                    // нарисован последним — он и виден сверху.
+                    var nodes = PdfObjectTree.TextObjects(page);
+                    for (var i = nodes.Count - 1; i >= 0; i--)
                     {
-                        var obj = fpdf_edit.FPDFPageGetObject(page, i);
-                        if (obj == null || obj.__Instance == IntPtr.Zero ||
-                            fpdf_edit.FPDFPageObjGetType(obj) != PageObjectText)
+                        var node = nodes[i];
+                        if (!PdfObjectTree.TryGetPageBounds(
+                                node.Object, node.ToPage,
+                                out var left, out var bottom, out var right, out var top))
+                            continue;
+                        if (px < left || px > right || py < bottom || py > top)
                             continue;
 
-                        float left = 0, bottom = 0, right = 0, top = 0;
-                        if (fpdf_edit.FPDFPageObjGetBounds(obj, ref left, ref bottom, ref right, ref top) == 0)
-                            continue;
-                        if (px < Math.Min(left, right) || px > Math.Max(left, right) ||
-                            py < Math.Min(bottom, top) || py > Math.Max(bottom, top))
-                            continue;
-
-                        var text = ReadTextObjectText(obj, textPage);
+                        var text = ReadTextObjectText(node.Object, textPage);
                         if (text.Length == 0)
                             continue; // пустой объект править нечего
 
                         float size = 0;
-                        fpdf_edit.FPDFTextObjGetFontSize(obj, ref size);
+                        fpdf_edit.FPDFTextObjGetFontSize(node.Object, ref size);
 
                         uint r = 0, g = 0, b = 0, a = 255;
-                        fpdf_edit.FPDFPageObjGetFillColor(obj, ref r, ref g, ref b, ref a);
+                        fpdf_edit.FPDFPageObjGetFillColor(node.Object, ref r, ref g, ref b, ref a);
 
                         var fontName = "";
                         var embedded = false;
-                        var font = fpdf_edit.FPDFTextObjGetFont(obj);
+                        var font = fpdf_edit.FPDFTextObjGetFont(node.Object);
                         if (font != null && font.__Instance != IntPtr.Zero)
                         {
                             fontName = ReadFontName(font);
@@ -969,8 +1015,9 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
                         }
 
                         var (x, y, w, h) = ContentRectToDisplayed(
-                            page, pageIndex, extraQuarterTurns, left, bottom, right, top);
-                        return new PdfTextObject(i, text, size,
+                            page, pageIndex, extraQuarterTurns,
+                            (float)left, (float)bottom, (float)right, (float)top);
+                        return new PdfTextObject(node.Path, text, size,
                             (a << 24) | (r << 16) | (g << 8) | b,
                             fontName, embedded, x, y, w, h);
                     }
@@ -987,7 +1034,7 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
     }
 
     public Task<bool> CanFontRenderTextAsync(
-        int pageIndex, int objectIndex, string text, CancellationToken ct)
+        int pageIndex, IReadOnlyList<int> objectPath, string text, CancellationToken ct)
     {
         lock (_admissionGate)
         {
@@ -1003,7 +1050,7 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
                     return false;
                 try
                 {
-                    var source = fpdf_edit.FPDFPageGetObject(page, objectIndex);
+                    var source = PdfObjectTree.Resolve(page, objectPath);
                     if (source == null || source.__Instance == IntPtr.Zero ||
                         fpdf_edit.FPDFPageObjGetType(source) != PageObjectText)
                         return false;

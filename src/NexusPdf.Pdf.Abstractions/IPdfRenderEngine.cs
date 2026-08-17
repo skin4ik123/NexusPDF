@@ -200,7 +200,8 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     /// шрифтом: у встроенного подмножества нужных букв может не оказаться, и
     /// тогда правка молча дала бы пустое место.
     /// </summary>
-    Task<bool> CanFontRenderTextAsync(int pageIndex, int objectIndex, string text, CancellationToken ct);
+    Task<bool> CanFontRenderTextAsync(
+        int pageIndex, IReadOnlyList<int> objectPath, string text, CancellationToken ct);
 
     /// <summary>
     /// Все ссылки страницы с рамками в координатах страницы PDF. Читаются один
@@ -264,4 +265,24 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     /// всю неизменённую структуру) без перекомпоновки страниц.
     /// </summary>
     Task SaveCurrentAsync(string targetPath, CancellationToken ct);
+
+    /// <summary>
+    /// То же прямое сохранение, но с наложением правок на страницы ЭТОГО
+    /// документа.
+    ///
+    /// Зачем отдельный путь: перекомпоновка собирает новый файл из импортов
+    /// страниц и не переносит то, что живёт в каталоге документа, — форму
+    /// AcroForm, оглавление, вложения. Стоило добавить на бланк одну надпись,
+    /// и заполняемая форма превращалась в картинку с мёртвыми полями. Здесь
+    /// правки ложатся на страницы уже открытого документа, и всё остальное
+    /// остаётся нетронутым.
+    ///
+    /// ВАЖНО: документ в памяти после этого ИЗМЕНЁН. Вызывающий обязан либо
+    /// переоткрыть его из сохранённого файла, либо вернуть к исходному —
+    /// иначе повторное сохранение наложит те же правки второй раз.
+    /// </summary>
+    /// <param name="overlaysByPage">Правки по номеру страницы; страницы без правок можно не перечислять.</param>
+    Task SaveWithOverlaysAsync(
+        IReadOnlyDictionary<int, IReadOnlyList<PageOverlay>> overlaysByPage,
+        string targetPath, CancellationToken ct);
 }

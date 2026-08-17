@@ -75,6 +75,20 @@ public static class OverlayDisplayMapper
                     YPt = center.Y - NoteIconSizePt / 2,
                 }, 0);
             }
+            case RegionEraseDraft erase:
+            {
+                var e1 = RemapPoint(erase.XPt, erase.YPt, delta, finalWidth, finalHeight);
+                var e2 = RemapPoint(
+                    erase.XPt + erase.WidthPt, erase.YPt + erase.HeightPt,
+                    delta, finalWidth, finalHeight);
+                return (erase with
+                {
+                    XPt = Math.Min(e1.X, e2.X),
+                    YPt = Math.Min(e1.Y, e2.Y),
+                    WidthPt = Math.Abs(e2.X - e1.X),
+                    HeightPt = Math.Abs(e2.Y - e1.Y),
+                }, 0);
+            }
             case RedactionDraft redaction:
             {
                 var p1 = RemapPoint(redaction.XPt, redaction.YPt, delta, finalWidth, finalHeight);
@@ -143,7 +157,21 @@ public static class OverlayDisplayMapper
                 {
                     var anchor = RemapPoint(
                         line.XPt, line.YPt + line.HeightPt, delta, finalWidth, finalHeight);
-                    lines.Add(line with { XPt = anchor.X, YPt = anchor.Y - line.HeightPt });
+                    // Заплатка живёт по своему прямоугольнику (он обрезан по
+                    // буквам), поэтому переносится отдельно от рамки строки.
+                    var patch = line.Patch;
+                    if (patch != null)
+                    {
+                        var corner = RemapPoint(
+                            patch.XPt, patch.YPt + patch.HeightPt, delta, finalWidth, finalHeight);
+                        patch = patch with { XPt = corner.X, YPt = corner.Y - patch.HeightPt };
+                    }
+                    lines.Add(line with
+                    {
+                        XPt = anchor.X,
+                        YPt = anchor.Y - line.HeightPt,
+                        Patch = patch,
+                    });
                 }
                 return (editable with { Lines = lines }, -90.0 * delta);
             }

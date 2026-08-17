@@ -57,12 +57,24 @@
 
     <!-- Панель инструментов -->
     <Border Grid.Row="0" Grid.ColumnSpan="2" Background="{DynamicResource ToolbarBg}"
-            BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,0,1"
-            Visibility="{Binding ShowQuickPanel, Converter={StaticResource BoolToVis}}">
+            BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,0,1">
+      <!-- Две колонки, а НЕ слой поверх слоя. Раньше кнопки справа висели
+           отдельным блоком поверх строки и на узком окне закрывали собой то,
+           что под ними оказалось, — обычно как раз поиск. Теперь они занимают
+           собственное место, а быстрая панель при нехватке ширины уезжает
+           под прокрутку колесом вместо того, чтобы прятаться под кнопками. -->
       <Grid Margin="8,4">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+
         <!-- Быстрая панель собирается из реестра команд по списку из настроек:
              названия, значки, подсказки и доступность у неё те же, что у
              одноимённых пунктов меню, а состав пользователь меняет сам. -->
+        <ScrollViewer Grid.Column="0" HorizontalScrollBarVisibility="Hidden"
+                      VerticalScrollBarVisibility="Disabled" Focusable="False"
+                      Visibility="{Binding ShowQuickPanel, Converter={StaticResource BoolToVis}}">
         <ItemsControl ItemsSource="{Binding QuickPanel.Items}">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
@@ -91,6 +103,20 @@
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
+        </ScrollViewer>
+
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="8,0,0,0">
+          <Button Style="{StaticResource ToolButton}" Command="{Binding NewWindowCommand}"
+                  ToolTip="{l:Loc NewWindow}">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE78B;"/>
+          </Button>
+          <!-- Меню собирается из реестра команд разделами: плоский список из
+               двух десятков пунктов подряд — это не меню, а простыня -->
+          <Button x:Name="MenuToggle" Style="{StaticResource ToolButton}" ToolTip="{l:Loc Menu}"
+                  Click="OnMenuButtonClick">
+            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE712;"/>
+          </Button>
+        </StackPanel>
       </Grid>
     </Border>
 
@@ -274,24 +300,6 @@
                      FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
         </StackPanel>
       </Grid>
-    </Border>
-
-    <!-- Правый край файловой строки: отдельный слой, чтобы кнопки не наезжали
-         на левую группу при узком окне -->
-    <Border Grid.Row="0" Grid.ColumnSpan="2" Background="Transparent"
-            HorizontalAlignment="Right" Margin="0,4,8,0">
-      <StackPanel Orientation="Horizontal">
-          <Button Style="{StaticResource ToolButton}" Command="{Binding NewWindowCommand}"
-                  ToolTip="{l:Loc NewWindow}">
-            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE78B;"/>
-          </Button>
-          <!-- Меню собирается из реестра команд разделами: плоский список из
-               двух десятков пунктов подряд — это не меню, а простыня -->
-          <Button x:Name="MenuToggle" Style="{StaticResource ToolButton}" ToolTip="{l:Loc Menu}"
-                  Click="OnMenuButtonClick">
-            <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE712;"/>
-          </Button>
-      </StackPanel>
     </Border>
 
     <!-- Пока документ открывается, вместо приглашения открыть файл видно, что

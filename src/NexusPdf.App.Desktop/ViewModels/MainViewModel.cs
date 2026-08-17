@@ -545,6 +545,9 @@ public sealed partial class MainViewModel : ObservableObject
                 // карточками: место указано человеком, туда и ставим.
                 vm.PagesDroppedFromOtherDocument += (_, drop) =>
                     _ = DropPagesOnDocumentAsync(vm, drop.Source, drop.Indices, drop.InsertIndex);
+                // Диалоги и запуск распознавания живут здесь, а промах по тексту
+                // ловит представление — отдаём ему объяснение как обработчик.
+                vm.ExplainNothingToEdit = page => ExplainNothingToEdit(vm, page);
                 Documents.Add(vm);
                 ActiveDocument = vm;
                 OnPropertyChanged(nameof(HasDocuments));
@@ -674,7 +677,11 @@ public sealed partial class MainViewModel : ObservableObject
         doc.StatusText = Loc.Get("SavingStatus");
         try
         {
-            var savedDirect = SaveService.CanSaveDirect(doc.Document);
+            // Форма переживает и прямое сохранение, и наложение правок на месте.
+            // Теряется она только при перекомпоновке — когда менялся состав или
+            // порядок страниц.
+            var savedDirect = SaveService.CanSaveDirect(doc.Document) ||
+                              SaveService.CanSaveDirectWithOverlays(doc.Document);
             var hadRedactions = doc.Document.Session.Model.Pages
                 .Any(p => p.OverlayList.Any(o => o is NexusPdf.Pdf.Abstractions.RedactionDraft));
             await _services.SaveService.SaveAsAsync(
@@ -772,7 +779,8 @@ public sealed partial class MainViewModel : ObservableObject
         if (result == null) return;
         doc.BeginPlacement((_, xPt, yPt) =>
             new NexusPdf.Pdf.Abstractions.TextOverlay(
-                result.Text, xPt, yPt, result.FontSizePt, result.ColorArgb, 0));
+                result.Text, xPt, yPt, result.FontSizePt, result.ColorArgb, 0,
+                result.FontFamily, result.Bold, result.Italic));
     }
 
     [RelayCommand]
@@ -1301,113 +1309,73 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>Правка существующей строки: клик по тексту открывает его в диалоге.</summary>
+    /// <summary>
+    /// Правка текста по кнопке и из контекстного меню. Открывает ровно то же
+    /// поле ввода на месте, что и двойной клик: раньше здесь была вторая,
+    /// отдельная реализация — она искала строку только в файле и на надписи,
+    /// добавленной в этом же сеансе, отвечала «текста нет».
+    /// </summary>
     [RelayCommand]
     private void EditExistingText()
     {
         if (ActiveDocument is not { } doc || doc.IsBusy || doc.PageCount == 0) return;
+
+        // Объект уже выбран (правая кнопка по надписи) — просить попасть в него
+        // мышью ещё раз незачем, открываем сразу.
+        if (doc.SelectedObject is { Overlay: NexusPdf.Pdf.Abstractions.TextOverlay } selection)
+        {
+            doc.RequestInlineEdit(selection.Page,
+                selection.Box.XPt + selection.Box.WidthPt / 2,
+                selection.Box.YPt + selection.Box.HeightPt / 2,
+                isExplicit: true);
+            return;
+        }
+
         doc.BeginPlacement((page, x, y) =>
         {
-            _ = EditExistingTextCoreAsync(doc, page, x, y);
+            doc.RequestInlineEdit(page, x, y, isExplicit: true);
             return null;
         });
         doc.StatusText = Loc.Get("TextEditHint");
     }
 
-    private async Task EditExistingTextCoreAsync(
-        DocumentViewModel doc, PageViewModel page, double xPt, double yPt)
+    /// <summary>
+    /// Править в точке нечего. Страницу могли распознать в поисковом режиме:
+    /// текст там есть, но он невидимый слой поверх скана. Сказать «текста нет»
+    /// было бы прямой неправдой — текст как раз есть, он просто другого рода.
+    /// </summary>
+    private void ExplainNothingToEdit(DocumentViewModel doc, PageViewModel page)
     {
-        try
+        if (HasSearchOnlyOcrLayer(doc, page))
         {
-            // Сначала — распознанные строки: они лежат в правках страницы,
-            // попадание считается на месте, без обращения к движку. Иначе
-            // «редактируемый текст» пришлось бы сперва сохранять.
-            if (TryEditRecognizedLine(doc, page, xPt, yPt))
-                return;
-
-            var handle = doc.Document.Handles[page.PageRef.SourceId];
-            var target = await handle.GetTextObjectAtAsync(
-                page.PageRef.SourcePageIndex, page.PageRef.RotationOffset, xPt, yPt,
-                CancellationToken.None);
-            if (target == null)
+            if (ConfirmDialog.Ask(OwnerWindow, Loc.Get("TextEditTitle"),
+                    Loc.Get("TextEditOcrSearchOnly"),
+                    Loc.Get("TextEditOcrSearchOnlyHint"),
+                    Loc.Get("TextEditOcrRecognizeAgain")))
             {
-                doc.StatusText = Loc.Get("TextEditNotFound");
-                return;
+                OcrDialog.Run(OwnerWindow, _services, doc, preferEditable: true);
             }
-
-            var edited = TextEditDialog.Edit(OwnerWindow, target.Text, target.FontName,
-                target.IsEmbeddedFont, target.FontSizePt,
-                text => handle.CanFontRenderTextAsync(
-                    page.PageRef.SourcePageIndex, target.ObjectIndex, text, CancellationToken.None));
-            if (edited == null || edited == target.Text)
+            else
             {
                 doc.StatusText = Loc.Get("Ready");
-                return;
             }
-
-            doc.Document.Session.Apply(new NexusPdf.Domain.AddOverlayOperation(page.LogicalIndex,
-                new NexusPdf.Pdf.Abstractions.TextObjectReplacement(target.ObjectIndex, edited)));
-            var dpiScale = OwnerWindow != null
-                ? System.Windows.Media.VisualTreeHelper.GetDpi(OwnerWindow).DpiScaleX
-                : 1.0;
-            page.ForceRefresh(dpiScale);
-            doc.StatusText = Loc.Get("TextEditDone");
-            Log.Information("Текст объекта {Index} на странице {Page} изменён",
-                target.ObjectIndex, page.LogicalIndex + 1);
+            return;
         }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Ошибка правки текста страницы");
-            ErrorDialog.Show(OwnerWindow, Loc.Get("TextEditTitle"), ex.Message, ex.ToString());
-            doc.StatusText = Loc.Get("Ready");
-        }
+        doc.StatusText = Loc.Get("TextEditNotFound");
     }
 
     /// <summary>
-    /// Правка строки, полученной распознаванием в режиме редактируемого текста.
-    /// Возвращает true, если строка под курсором нашлась и была обработана.
+    /// Страница распознана «для поиска»: невидимый текстовый слой поверх скана.
+    /// Такой текст ищется и копируется, но править в нём нечего — настоящих
+    /// текстовых объектов на странице нет.
     /// </summary>
-    private bool TryEditRecognizedLine(
-        DocumentViewModel doc, PageViewModel page, double xPt, double yPt)
+    private static bool HasSearchOnlyOcrLayer(DocumentViewModel doc, PageViewModel page)
     {
         var overlays = doc.Document.Session.Model.Pages[page.LogicalIndex].OverlayList;
-        for (var i = overlays.Count - 1; i >= 0; i--)
+        foreach (var overlay in overlays)
         {
-            if (overlays[i] is not NexusPdf.Pdf.Abstractions.OcrEditableTextOverlay layer)
-                continue;
-
-            var mapped = NexusPdf.Pdf.Abstractions.OverlayDisplayMapper.ToFrame(
-                layer, page.PageRef.RotationOffset,
-                page.SizePt.WidthPoints, page.SizePt.HeightPoints).Overlay
-                as NexusPdf.Pdf.Abstractions.OcrEditableTextOverlay;
-            if (mapped == null)
-                continue;
-
-            for (var j = 0; j < mapped.Lines.Count; j++)
-            {
-                var line = mapped.Lines[j];
-                if (xPt < line.XPt || xPt > line.XPt + line.WidthPt ||
-                    yPt < line.YPt || yPt > line.YPt + line.HeightPt)
-                    continue;
-
-                var edited = TextEditDialog.Edit(OwnerWindow, line.Text,
-                    Loc.Get("OcrRecognizedLine"), false, line.HeightPt,
-                    _ => Task.FromResult(true)); // системный шрифт рисует всё, что введут
-                if (edited == null || edited == line.Text)
-                {
-                    doc.StatusText = Loc.Get("Ready");
-                    return true;
-                }
-
-                var lines = layer.Lines.ToList();
-                lines[j] = lines[j] with { Text = edited };
-                doc.Document.Session.Apply(new NexusPdf.Domain.ReplaceOverlayOperation(
-                    page.LogicalIndex, layer, layer with { Lines = lines }));
-                doc.StatusText = Loc.Get("TextEditDone");
-                Log.Information("Изменена распознанная строка {Line} на странице {Page}",
-                    j + 1, page.LogicalIndex + 1);
+            if (overlay is NexusPdf.Pdf.Abstractions.OcrTextLayerOverlay)
                 return true;
-            }
         }
         return false;
     }

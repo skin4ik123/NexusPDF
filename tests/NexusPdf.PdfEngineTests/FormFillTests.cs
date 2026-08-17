@@ -84,4 +84,72 @@ public sealed class FormFillTests : IAsyncLifetime
             await reopened.GetAnnotationsAsync(0, CancellationToken.None), a => a.Subtype == 20);
         Assert.Equal("abc", widget.Value);
     }
+
+    /// <summary>
+    /// Надпись на бланке НЕ должна убивать форму. Перекомпоновка собирает файл
+    /// из импортов страниц и не переносит AcroForm из каталога: поля оставались
+    /// на своих местах, но заполнить их было уже нельзя. Стоило это одной
+    /// добавленной строки текста.
+    /// </summary>
+    [Fact]
+    public async Task Adding_Text_To_A_Form_Keeps_The_Form_Fillable()
+    {
+        var path = PdfFixture.WriteTextFieldToTemp("stamped.pdf", "name1");
+        var document = await OpenedDocument.OpenAsync(_engine, path, null, CancellationToken.None);
+        var target = Path.Combine(Path.GetDirectoryName(path)!, "stamped-out.pdf");
+        await using (document)
+        {
+            document.Session.Apply(new NexusPdf.Domain.AddOverlayOperation(0,
+                new NexusPdf.Pdf.Abstractions.TextOverlay("Проверено", 50, 50, 12, 0xFF000000, 0)));
+
+            // Прямой путь недоступен (правка есть), но структура страниц цела —
+            // значит правка ложится на страницу, а не пересобирает документ.
+            Assert.False(SaveService.CanSaveDirect(document));
+            Assert.True(SaveService.CanSaveDirectWithOverlays(document));
+
+            await new SaveService(_engine).SaveAsAsync(
+                document, target, keepBackup: false, CancellationToken.None);
+        }
+
+        await using var reopened = await _engine.OpenAsync(target, null, CancellationToken.None);
+        Assert.Equal(1, await reopened.GetFormTypeAsync(CancellationToken.None));
+        Assert.True(await reopened.InitFormsAsync(CancellationToken.None));
+
+        // И сама надпись на месте — путь не должен «сохранять форму» ценой
+        // потери того, ради чего сохраняли.
+        var text = await reopened.GetPageTextAsync(0, CancellationToken.None);
+        Assert.Contains("Проверено", text);
+    }
+
+    /// <summary>
+    /// Поле, заполненное в этом же сеансе, переживает добавление надписи:
+    /// значения живут в документе в памяти, и сохранять надо ЕГО, а не копию
+    /// с диска.
+    /// </summary>
+    [Fact]
+    public async Task Filled_Value_Survives_Adding_Text()
+    {
+        var path = PdfFixture.WriteTextFieldToTemp("filled-stamp.pdf", "name1");
+        var document = await OpenedDocument.OpenAsync(_engine, path, null, CancellationToken.None);
+        var target = Path.Combine(Path.GetDirectoryName(path)!, "filled-stamp-out.pdf");
+        await using (document)
+        {
+            var handle = document.PrimaryHandle;
+            Assert.True(await handle.InitFormsAsync(CancellationToken.None));
+            await handle.FormClickAsync(0, 0, 250, 172, CancellationToken.None);
+            foreach (var c in "Ivan")
+                await handle.FormCharAsync(c, CancellationToken.None);
+
+            document.Session.Apply(new NexusPdf.Domain.AddOverlayOperation(0,
+                new NexusPdf.Pdf.Abstractions.TextOverlay("Проверено", 50, 50, 12, 0xFF000000, 0)));
+
+            await new SaveService(_engine).SaveAsAsync(
+                document, target, keepBackup: false, CancellationToken.None);
+        }
+
+        await using var reopened = await _engine.OpenAsync(target, null, CancellationToken.None);
+        var widget = Assert.Single(
+            await reopened.GetAnnotationsAsync(0, CancellationToken.None), a => a.Subtype == 20);
+        Assert.Equal("Ivan", widget.Value);
+    }
 }

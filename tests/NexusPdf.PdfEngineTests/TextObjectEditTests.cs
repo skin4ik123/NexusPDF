@@ -69,7 +69,7 @@ public sealed class TextObjectEditTests : IAsyncLifetime
                 0, 0, 110, 703, CancellationToken.None))!;
 
             document.Session.Apply(new AddOverlayOperation(0,
-                new TextObjectReplacement(before.ObjectIndex, "REPLACEDWORD")));
+                new TextObjectReplacement(before.ObjectPath, "REPLACEDWORD")));
 
             var saved = Path.Combine(dir, "edited.pdf");
             await new SaveService(_pdfium).SaveCopyAsync(document, saved, CancellationToken.None);
@@ -104,11 +104,11 @@ public sealed class TextObjectEditTests : IAsyncLifetime
 
         // Латиница у Helvetica есть.
         Assert.True(await doc.CanFontRenderTextAsync(
-            0, found!.ObjectIndex, "NEW TEXT", CancellationToken.None));
+            0, found!.ObjectPath, "NEW TEXT", CancellationToken.None));
 
         // Пробелы рисует любой шрифт.
         Assert.True(await doc.CanFontRenderTextAsync(
-            0, found.ObjectIndex, "   ", CancellationToken.None));
+            0, found.ObjectPath, "   ", CancellationToken.None));
     }
 
     [Fact]
@@ -120,7 +120,7 @@ public sealed class TextObjectEditTests : IAsyncLifetime
         await using (document)
         {
             document.Session.Apply(new AddOverlayOperation(0,
-                new TextObjectReplacement(9999, "НЕВАЖНО")));
+                new TextObjectReplacement([9999], "НЕВАЖНО")));
 
             var saved = Path.Combine(dir, "broken.pdf");
             var error = await Assert.ThrowsAsync<PdfEngineException>(() =>

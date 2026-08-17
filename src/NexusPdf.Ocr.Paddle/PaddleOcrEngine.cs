@@ -56,6 +56,9 @@ public sealed class PaddleOcrEngine : ITextRecognizer
             ? "Модели OCR не найдены. Запустите tools/fetch-ocrmodels.ps1 или переустановите приложение."
             : _initError ?? "Языковой пакет распознавания не установлен.";
 
+    /// <summary>Детектор PaddleOCR выделяет строки целиком — каждый блок и есть строка.</summary>
+    public bool ReturnsWholeLines => true;
+
     /// <summary>Поиск tools\ocrmodels рядом с приложением и до шести уровней вверх — как у qpdf.</summary>
     private static string? ResolveModelsDir(string baseDirectory)
     {

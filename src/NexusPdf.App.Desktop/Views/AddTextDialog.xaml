@@ -3,12 +3,43 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:l="clr-namespace:NexusPdf.App.Desktop.Localization"
         Title="{l:Loc AtTitle}"
-        Width="420" SizeToContent="Height" ResizeMode="NoResize"
+        Width="460" SizeToContent="Height" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{DynamicResource PanelBg}">
   <StackPanel Margin="20">
     <TextBlock Text="{l:Loc AtText}" Foreground="{DynamicResource TextSecondary}" FontSize="12"/>
     <TextBox x:Name="TextBox1" Style="{StaticResource ThemedTextBox}" Margin="0,4,0,0"/>
+
+    <!-- Гарнитура и начертание. Список закрытый: в него входят только шрифты,
+         которые есть в самой Windows и умеют кириллицу, — иначе документ у
+         получателя открылся бы пустыми квадратами. Каждая строка списка
+         нарисована своей же гарнитурой, чтобы выбирать глазами, а не по имени. -->
+    <TextBlock Text="{l:Loc FontFamilyLabel}" Margin="0,12,0,0"
+               Foreground="{DynamicResource TextSecondary}" FontSize="12"/>
+    <Grid Margin="0,4,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="8"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <ComboBox x:Name="FontBox" Grid.Column="0" SelectedIndex="0">
+        <ComboBox.ItemTemplate>
+          <DataTemplate>
+            <TextBlock Text="{Binding}" FontFamily="{Binding}" FontSize="14"/>
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+      <StackPanel Grid.Column="2" Orientation="Horizontal">
+        <ToggleButton x:Name="BoldToggle" Width="34" Height="30" ToolTip="{l:Loc FontBold}"
+                      AutomationProperties.Name="{l:Loc FontBold}">
+          <TextBlock Text="Ж" FontWeight="Bold" FontSize="14"/>
+        </ToggleButton>
+        <ToggleButton x:Name="ItalicToggle" Width="34" Height="30" Margin="6,0,0,0"
+                      ToolTip="{l:Loc FontItalic}" AutomationProperties.Name="{l:Loc FontItalic}">
+          <TextBlock Text="К" FontStyle="Italic" FontSize="14"/>
+        </ToggleButton>
+      </StackPanel>
+    </Grid>
 
     <Grid Margin="0,12,0,0">
       <Grid.ColumnDefinitions>

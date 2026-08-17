@@ -175,7 +175,7 @@ public sealed class ObjectSelectionTests
     public void Whole_Page_Edits_Are_Not_Selectable_Objects()
     {
         Assert.False(OverlayGeometry.AbilitiesOf(new PageRasterReplacement(new byte[4], 1, 1)).CanSelect);
-        Assert.False(OverlayGeometry.AbilitiesOf(new TextObjectReplacement(0, "текст")).CanSelect);
+        Assert.False(OverlayGeometry.AbilitiesOf(new TextObjectReplacement([0], "текст")).CanSelect);
     }
 
     // ----- Рамки -----

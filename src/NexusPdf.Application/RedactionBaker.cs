@@ -38,8 +38,12 @@ public static class RedactionBaker
         }
     }
 
+    /// <summary>Требует ли страница растеризации: вымарывание или стирание области.</summary>
+    private static bool NeedsRaster(PageOverlay overlay) =>
+        overlay is RedactionDraft or RegionEraseDraft;
+
     public static bool HasRedactions(IReadOnlyList<ComposedPage> composition) =>
-        composition.Any(p => p.Overlays?.Any(o => o is RedactionDraft) == true);
+        composition.Any(p => p.Overlays?.Any(NeedsRaster) == true);
 
     /// <summary>
     /// Возвращает композицию, где страницы с вымарками заменены растровыми.
@@ -53,7 +57,7 @@ public static class RedactionBaker
         var redactedIndices = new List<int>();
         for (var i = 0; i < composition.Count; i++)
         {
-            if (composition[i].Overlays?.Any(o => o is RedactionDraft) == true)
+            if (composition[i].Overlays?.Any(NeedsRaster) == true)
                 redactedIndices.Add(i);
         }
         if (redactedIndices.Count == 0)
@@ -91,6 +95,12 @@ public static class RedactionBaker
                     foreach (var rect in RedactionRects(page, size))
                     {
                         FillBlack(bgra, width, height, image.Stride, scale, rect);
+                    }
+                    foreach (var erase in EraseRects(page, size))
+                    {
+                        // Стирание — тем же цветом, что и бумага вокруг: место
+                        // строки должно стать пустым, а не чёрным.
+                        FillColor(bgra, width, height, image.Stride, scale, erase);
                     }
                     specs.Add(new ImagePageSpec(bgra, width, height, size.WidthPoints, size.HeightPoints));
                 }
@@ -155,6 +165,21 @@ public static class RedactionBaker
         return rects;
     }
 
+    /// <summary>Стирания страницы в НЕповёрнутой рамке (растр рендерится без добавочного поворота).</summary>
+    private static List<RegionEraseDraft> EraseRects(ComposedPage page, PdfPageDescriptor size)
+    {
+        var rects = new List<RegionEraseDraft>();
+        foreach (var overlay in page.Overlays!)
+        {
+            if (overlay is not RegionEraseDraft draft)
+                continue;
+            var (mapped, _) = OverlayDisplayMapper.ToFrame(
+                draft, 0, size.WidthPoints, size.HeightPoints);
+            rects.Add((RegionEraseDraft)mapped);
+        }
+        return rects;
+    }
+
     /// <summary>
     /// Оверлеи, переносимые на растровую замену: вымарки потребляются здесь;
     /// из OCR-слоя отбрасываются слова, пересекающие вымарку — иначе
@@ -169,7 +194,8 @@ public static class RedactionBaker
             switch (overlay)
             {
                 case RedactionDraft:
-                    break; // применена растром
+                case RegionEraseDraft:
+                    break; // применены растром
                 case OcrTextLayerOverlay ocr:
                 {
                     // Слова и вымарки приводятся к одной (неповёрнутой) рамке.
@@ -233,6 +259,35 @@ public static class RedactionBaker
                 bgra[offset] = 0;
                 bgra[offset + 1] = 0;
                 bgra[offset + 2] = 0;
+                bgra[offset + 3] = 0xFF;
+                offset += 4;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Закраска области цветом бумаги. Запас в пиксель по краям — тот же, что
+    /// у вымарывания: у букв есть выносные элементы, вылезающие за рамку строки.
+    /// </summary>
+    private static void FillColor(
+        byte[] bgra, int width, int height, int stride, double scale, RegionEraseDraft rect)
+    {
+        var x0 = Math.Clamp((int)Math.Floor(rect.XPt * scale) - 1, 0, width);
+        var y0 = Math.Clamp((int)Math.Floor(rect.YPt * scale) - 1, 0, height);
+        var x1 = Math.Clamp((int)Math.Ceiling((rect.XPt + rect.WidthPt) * scale) + 1, 0, width);
+        var y1 = Math.Clamp((int)Math.Ceiling((rect.YPt + rect.HeightPt) * scale) + 1, 0, height);
+
+        var b = (byte)rect.FillArgb;
+        var g = (byte)(rect.FillArgb >> 8);
+        var r = (byte)(rect.FillArgb >> 16);
+        for (var row = y0; row < y1; row++)
+        {
+            var offset = row * stride + x0 * 4;
+            for (var col = x0; col < x1; col++)
+            {
+                bgra[offset] = b;
+                bgra[offset + 1] = g;
+                bgra[offset + 2] = r;
                 bgra[offset + 3] = 0xFF;
                 offset += 4;
             }

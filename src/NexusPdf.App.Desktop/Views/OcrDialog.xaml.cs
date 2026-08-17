@@ -32,11 +32,19 @@ public partial class OcrDialog : Window
         FillEngineChoices();
     }
 
-    public static void Run(Window? owner, Services.AppServices services, DocumentViewModel document)
+    /// <param name="preferEditable">
+    /// Заранее выбрать режим редактируемого текста. Нужен, когда сюда пришли
+    /// из правки текста: человек уже сказал, что хочет править, и подсовывать
+    /// ему поисковый режим по умолчанию значило бы завести его на второй круг.
+    /// </param>
+    public static void Run(Window? owner, Services.AppServices services, DocumentViewModel document,
+        bool preferEditable = false)
     {
         var dialog = new OcrDialog(services, document);
         if (owner is { IsLoaded: true })
             dialog.Owner = owner;
+        if (preferEditable)
+            dialog.ModeEditable.IsChecked = true;
         dialog.ShowDialog();
     }
 

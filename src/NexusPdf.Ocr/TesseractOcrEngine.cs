@@ -40,6 +40,9 @@ public sealed class TesseractOcrEngine : ITextRecognizer
             ? "Языковые модели OCR не найдены. Запустите tools/fetch-tessdata.ps1 или переустановите приложение."
             : "Движок Tesseract не инициализировался (подробности в журнале).";
 
+    /// <summary>Обход идёт по <see cref="PageIteratorLevel.Word"/> — на выходе отдельные слова.</summary>
+    public bool ReturnsWholeLines => false;
+
     /// <summary>Поиск tools\tessdata с rus+eng рядом с приложением и до шести уровней вверх (запуск из bin/Debug).</summary>
     private static string? ResolveTessdataPath(string baseDirectory)
     {

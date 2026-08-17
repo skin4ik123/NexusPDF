@@ -18,8 +18,22 @@ public partial class DocumentView : UserControl
     public DocumentView()
     {
         InitializeComponent();
-        Loaded += (_, _) => HookScroller();
+        Loaded += (_, _) =>
+        {
+            HookScroller();
+            // Открылось модальное окно (или ушли в другую программу) — правку
+            // на месте надо завершить. Само поле этого не заметит: оно живёт
+            // отдельным окном поверх страницы и продолжало бы висеть поверх
+            // того, что открылось.
+            if (Window.GetWindow(this) is { } window)
+            {
+                window.Deactivated -= OnOwnerDeactivated;
+                window.Deactivated += OnOwnerDeactivated;
+            }
+        };
     }
+
+    private void OnOwnerDeactivated(object? sender, EventArgs e) => CloseInlineEditor();
 
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
@@ -29,6 +43,7 @@ public partial class DocumentView : UserControl
             _vm.PropertyChanged -= OnVmPropertyChanged;
             _vm.FormComboRequested -= OnFormComboRequested;
             _vm.ExternalLinkRequested -= OnExternalLinkRequested;
+            _vm.InlineEditRequested -= OnInlineEditRequested;
         }
         CloseComboPopup();
         _vm = e.NewValue as DocumentViewModel;
@@ -38,6 +53,7 @@ public partial class DocumentView : UserControl
             _vm.PropertyChanged += OnVmPropertyChanged;
             _vm.FormComboRequested += OnFormComboRequested;
             _vm.ExternalLinkRequested += OnExternalLinkRequested;
+            _vm.InlineEditRequested += OnInlineEditRequested;
             UpdatePlacementCursor();
             // Оглавление читается сразу: без него не видно, есть ли у документа
             // вкладка «Оглавление» вообще.
@@ -144,6 +160,18 @@ public partial class DocumentView : UserControl
 
     private void OnVmPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        // Поле правки на месте — отдельное окно поверх страницы, само оно не
+        // закроется. Начали другое дело — правку надо завершить, иначе поле
+        // висит поверх интерфейса и накрывает собой то, что открылось.
+        if (e.PropertyName is nameof(DocumentViewModel.PendingOverlay)
+            or nameof(DocumentViewModel.IsDrawing)
+            or nameof(DocumentViewModel.IsFormMode)
+            or nameof(DocumentViewModel.IsOrganizeMode)
+            or nameof(DocumentViewModel.IsBusy))
+        {
+            CloseInlineEditor();
+        }
+
         if (e.PropertyName == nameof(DocumentViewModel.PendingOverlay))
         {
             UpdatePlacementCursor();
@@ -206,9 +234,199 @@ public partial class DocumentView : UserControl
         return null;
     }
 
+    // ----- Правка текста прямо на странице -----
+
+    private InlineTextEditor? _inlineEditor;
+
+    /// <summary>
+    /// Двойной клик по тексту открывает его на месте. Это основной путь правки:
+    /// отдельный инструмент и модальное окно остались, но нужны теперь только
+    /// когда в строку не попасть мышью.
+    /// </summary>
+    private bool TryBeginInlineEdit(MouseButtonEventArgs e)
+    {
+        if (_vm == null || _vm.IsBusy || _vm.IsFormMode || _vm.IsDrawing) return false;
+        if (_vm.PendingOverlay != null) return false;
+
+        var hit = FindPageAt(e.OriginalSource);
+        if (hit == null) return false;
+        var (page, element) = hit.Value;
+        var scale = page.DisplayScale;
+        if (scale <= 0) return false;
+
+        var position = e.GetPosition(element);
+        Serilog.Log.Debug("Правка на месте: страница {Page}, точка {X:0.#};{Y:0.#} пт, масштаб {Scale:0.###}",
+            page.LogicalIndex + 1, position.X / scale, position.Y / scale, scale);
+        _ = BeginInlineEditAsync(page, element, position.X / scale, position.Y / scale, scale);
+        return true;
+    }
+
+    /// <summary>
+    /// Просьба открыть правку от команды или контекстного меню — без мыши.
+    /// Путь дальше тот же, что у двойного клика: одна правка текста, одна
+    /// реализация.
+    /// </summary>
+    private void OnInlineEditRequested(object? sender, DocumentViewModel.InlineEditRequest request)
+    {
+        var element = FindPageElement(request.Page);
+        if (element == null)
+        {
+            Serilog.Log.Warning("Правка на месте: страница {Page} не найдена на экране",
+                request.Page.LogicalIndex + 1);
+            return;
+        }
+        var scale = request.Page.DisplayScale;
+        if (scale <= 0) return;
+        _ = BeginInlineEditAsync(request.Page, element, request.XPt, request.YPt, scale, request.Explicit);
+    }
+
+    /// <summary>
+    /// Рамка страницы на экране. Страница может быть за пределами видимой
+    /// части списка — тогда её контейнера ещё нет, и его надо создать
+    /// прокруткой, иначе поле ввода открывать не над чем.
+    /// </summary>
+    private FrameworkElement? FindPageElement(PageViewModel page)
+    {
+        var container = PagesList.ItemContainerGenerator.ContainerFromItem(page) as FrameworkElement;
+        if (container == null)
+        {
+            PagesList.ScrollIntoView(page);
+            PagesList.UpdateLayout();
+            container = PagesList.ItemContainerGenerator.ContainerFromItem(page) as FrameworkElement;
+        }
+        return container == null ? null : FindPageBorder(container, page);
+    }
+
+    private static FrameworkElement? FindPageBorder(DependencyObject node, PageViewModel page)
+    {
+        if (node is Border { DataContext: PageViewModel found } border && ReferenceEquals(found, page))
+            return border;
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+        {
+            if (FindPageBorder(VisualTreeHelper.GetChild(node, i), page) is { } hit)
+                return hit;
+        }
+        return null;
+    }
+
+    private async Task BeginInlineEditAsync(
+        PageViewModel page, FrameworkElement element, double xPt, double yPt, double scale,
+        bool explicitRequest = false)
+    {
+        if (_vm == null) return;
+        CloseInlineEditor();
+
+        DocumentViewModel.InlineTextTarget? target;
+        try
+        {
+            target = await _vm.FindInlineTextAsync(page, xPt, yPt, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex, "Поиск текста для правки на месте");
+            return;
+        }
+        if (target == null)
+        {
+            Serilog.Log.Debug("Правка на месте: в точке {X:0.#};{Y:0.#} пт текста нет", xPt, yPt);
+            // Двойной клик по пустому месту — обычное дело, ругаться не за что
+            // (выделение слова при этом уже отработало). А вот когда правку
+            // попросили кнопкой, промолчать нельзя: человек ждёт либо поля
+            // ввода, либо объяснения, почему его нет.
+            if (explicitRequest)
+                _vm.ExplainNothingToEdit?.Invoke(page);
+            return;
+        }
+        Serilog.Log.Debug("Правка на месте: найдено «{Text}», рамка {R}", target.Text, target.RectPt);
+
+        // Строку внутри вложенного объекта иначе не изменить, и цена у такой
+        // правки заметная — страница станет изображением. Решает человек, и
+        // спросить надо ДО того, как он наберёт текст, а не после.
+        if (target.NeedsRasterErase &&
+            !ConfirmDialog.Ask(Window.GetWindow(this), Loc.Get("TextEditTitle"),
+                Loc.Get("TextEditRasterNeeded"), Loc.Get("TextEditRasterNeededHint"),
+                Loc.Get("TextEditRasterAccept")))
+        {
+            return;
+        }
+
+        // Рамка строки — в пунктах; на экране она в единицах WPF и масштабе страницы.
+        var rect = new Rect(
+            target.RectPt.X * scale, target.RectPt.Y * scale,
+            target.RectPt.Width * scale, target.RectPt.Height * scale);
+
+        var editor = InlineTextEditor.Open(
+            element, rect, target.Text, target.FontName, target.FontSizePt, target.ColorArgb, scale);
+        if (editor == null) return;
+        _inlineEditor = editor;
+
+        var captured = target;
+        editor.Finished += async (_, result) =>
+        {
+            _inlineEditor = null;
+            if (result == null) return;
+            if (result.Text == captured.Text && !result.StyleChanged) return;
+
+            // Проверять исходный шрифт нужно, только если его оставляют. Когда
+            // гарнитуру меняют, буквы будет рисовать НОВЫЙ шрифт из каталога —
+            // он с кириллицей и латиницей справляется по определению, и старая
+            // проверка запрещала бы ровно тот случай, ради которого шрифт и
+            // меняют: во встроенном подмножестве нужных букв нет.
+            // Строка внутри вложенного объекта пишется заново шрифтом из
+            // каталога, а не шрифтом исходного объекта, — спрашивать старый
+            // шрифт, умеет ли он новые буквы, здесь бессмысленно: рисовать
+            // будет не он. Раньше эта проверка запрещала как раз то, ради чего
+            // такая правка и делается.
+            if (!result.StyleChanged && !captured.NeedsRasterErase)
+            {
+                bool canRender;
+                try
+                {
+                    canRender = await _vm.CanRenderInlineAsync(
+                        page, captured, result.Text, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    Serilog.Log.Error(ex, "Проверка шрифта при правке на месте");
+                    return;
+                }
+                if (!canRender)
+                {
+                    InfoDialog.Show(Window.GetWindow(this), Loc.Get("TextEditTitle"),
+                        Loc.Get("TextEditFontMissingGlyphs"));
+                    return;
+                }
+            }
+
+            _vm.ApplyInlineText(page, captured, result.Text,
+                result.FontFamily, result.Bold, result.Italic, result.FontSizePt, result.ColorArgb,
+                VisualTreeHelper.GetDpi(this).DpiScaleX);
+        };
+    }
+
+    /// <summary>
+    /// Клик мимо строки ПРИМЕНЯЕТ правку, а не выбрасывает её: так ведут себя
+    /// все поля правки на месте, и терять набранное из-за случайного клика
+    /// человек не обязан. Отказаться можно клавишей Esc.
+    /// </summary>
+    private void CloseInlineEditor()
+    {
+        var editor = _inlineEditor;
+        _inlineEditor = null;
+        editor?.CommitFromOutside();
+    }
+
     private void OnPagesPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (_vm == null) return;
+
+        // Двойной клик обрабатывается ДО выделения текста: иначе второй щелчок
+        // уходил бы в выделение слова и правка не начиналась бы никогда.
+        if (e.ChangedButton == MouseButton.Left && e.ClickCount == 2 && TryBeginInlineEdit(e))
+        {
+            e.Handled = true;
+            return;
+        }
 
         // Режим заполнения формы: клик уходит в поле PDF.
         if (_vm.IsFormMode && _vm.PendingOverlay == null)
