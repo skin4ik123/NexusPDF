@@ -119,6 +119,16 @@ New-Item -ItemType Directory -Force (Join-Path $publishDir "tools/ocrmodels") | 
 Copy-Item "$root\tools\ocrmodels\*" (Join-Path $publishDir "tools/ocrmodels") -Force
 Copy-Item "$root\tools\ocrmodels.lock.json" (Join-Path $publishDir "tools") -Force
 Copy-Item "$root\docs\THIRD_PARTY_NOTICES.md" $publishDir -Force
+
+# Обработчик эскизов PDF для Проводника. Отдельный нативный проект, поэтому
+# собирается своим скриптом и кладётся рядом с pdfium.dll — библиотеку он ищет
+# именно возле себя.
+Write-Host "== Shell thumbnail handler (C++) =="
+& "$root\src\NexusPdf.ShellThumbnail\build.ps1" -Configuration $Configuration
+if ($LASTEXITCODE -ne 0) { exit 1 }
+$thumbDll = Join-Path $root "src\NexusPdf.ShellThumbnail\bin\NexusPdfThumbnail.dll"
+if (-not (Test-Path $thumbDll)) { Write-Error "Не собран обработчик эскизов: $thumbDll"; exit 1 }
+Copy-Item $thumbDll $publishDir -Force
 # Полный текст AGPL-3.0, а не краткая заметка: лицензия обязывает поставлять
 # её саму вместе с программой.
 Copy-Item "$root\LICENSE" (Join-Path $publishDir "LICENSE.txt") -Force

@@ -30,7 +30,7 @@ public partial class SetupWindow : Window
         InitializeComponent();
         LicenseText.Text = SetupEngine.LoadLicenseText();
         VersionText.Text = $"version {SetupEngine.ProductVersion}";
-        PathBox.Text = SetupOptions.DefaultInstallDir(allUsers: false);
+        PathBox.Text = SetupOptions.DefaultInstallDir(allUsers: true);
         _pathEditedByUser = false;
 
         // Windows Installer не выполняет обновление через границу контекстов:
@@ -40,7 +40,7 @@ public partial class SetupWindow : Window
         {
             PerUserRadio.IsChecked = true;
             PerMachineRadio.IsEnabled = false;
-            ContextNote.Text = "An existing per-user installation was found — it will be upgraded in the same mode. To change the mode, remove the current copy first.";
+            ContextNote.Text = "An existing per-user installation was found — it will be upgraded in the same mode, so PDF previews in Explorer stay off. To turn them on, remove the current copy and install for all users.";
             ContextNote.Visibility = Visibility.Visible;
         }
         else if (installed == InstalledContext.PerMachine)

@@ -184,6 +184,8 @@ public static class SetupEngine
             using var process = Process.Start(psi)
                 ?? throw new InvalidOperationException("Could not start msiexec.");
             await process.WaitForExitAsync();
+            if (process.ExitCode is 0 or 3010)
+                NotifyShellAssociationsChanged();
             return new InstallResult(process.ExitCode, logPath);
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
@@ -196,6 +198,23 @@ public static class SetupEngine
             Console.Error.WriteLine($"NexusPdfSetup: could not start msiexec: {ex.Message}");
             return new InstallResult(1603, logPath);
         }
+    }
+
+    [DllImport("shell32.dll")]
+    private static extern void SHChangeNotify(int eventId, uint flags, IntPtr item1, IntPtr item2);
+
+    /// <summary>
+    /// Оболочка держит разбор ассоциаций в памяти, поэтому свежезарегистрированный
+    /// обработчик эскизов она бы заметила только после перезапуска Проводника.
+    /// Одно оповещение SHCNE_ASSOCCHANGED снимает вопрос: эскизы PDF появляются
+    /// сразу после установки.
+    /// </summary>
+    private static void NotifyShellAssociationsChanged()
+    {
+        const int SHCNE_ASSOCCHANGED = 0x08000000;
+        const uint SHCNF_IDLIST = 0x0000;
+        try { SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, IntPtr.Zero, IntPtr.Zero); }
+        catch { /* оповещение необязательно: без него эскизы появятся позже */ }
     }
 
     public static void LaunchInstalledApp(SetupOptions options)

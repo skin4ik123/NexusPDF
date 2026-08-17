@@ -121,10 +121,46 @@
       </Component>
     </ComponentGroup>
 
+    <!--
+      Эскизы PDF в Проводнике.
+
+      Только машинная ветка и только при установке для всех: эскизы Windows
+      строит в отдельном процессе dllhost.exe, а тот видит лишь HKLM. Проверено
+      на живой системе — с пользовательской регистрацией активация падает с
+      REGDB_E_CLASSNOTREG, и Проводник молча рисует значок.
+
+      Пара AppID + DllSurrogate обязательна: без неё изолированная активация не
+      находит класс. Пустая строка DllSurrogate означает «размести в стандартном
+      dllhost.exe», то есть чужой PDF разбирается вне explorer.exe.
+    -->
+    <ComponentGroup Id="ShellThumbnail" Directory="INSTALLFOLDER">
+      <Component Id="ThumbnailHandler" Condition="NOT MSIINSTALLPERUSER">
+        <RegistryValue Root="HKLM" Key="Software\Classes\CLSID\{BA3A32DD-59A9-44FF-B7F2-FCF184469E12}"
+                       Value="NexusPDF Thumbnail Handler" Type="string" KeyPath="yes"/>
+        <RegistryValue Root="HKLM" Key="Software\Classes\CLSID\{BA3A32DD-59A9-44FF-B7F2-FCF184469E12}"
+                       Name="AppID" Value="{BA3A32DD-59A9-44FF-B7F2-FCF184469E12}" Type="string"/>
+        <RegistryValue Root="HKLM" Key="Software\Classes\CLSID\{BA3A32DD-59A9-44FF-B7F2-FCF184469E12}\InprocServer32"
+                       Value="[INSTALLFOLDER]NexusPdfThumbnail.dll" Type="string"/>
+        <RegistryValue Root="HKLM" Key="Software\Classes\CLSID\{BA3A32DD-59A9-44FF-B7F2-FCF184469E12}\InprocServer32"
+                       Name="ThreadingModel" Value="Apartment" Type="string"/>
+        <RegistryValue Root="HKLM" Key="Software\Classes\AppID\{BA3A32DD-59A9-44FF-B7F2-FCF184469E12}"
+                       Value="NexusPDF Thumbnail Handler" Type="string"/>
+        <RegistryValue Root="HKLM" Key="Software\Classes\AppID\{BA3A32DD-59A9-44FF-B7F2-FCF184469E12}"
+                       Name="DllSurrogate" Value="" Type="string"/>
+        <!-- По расширению и по нашему ProgID: оболочка ищет обработчик сперва
+             через ProgID файла, и без второй записи всё упирается в первую. -->
+        <RegistryValue Root="HKLM" Key="Software\Classes\.pdf\ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}"
+                       Value="{BA3A32DD-59A9-44FF-B7F2-FCF184469E12}" Type="string"/>
+        <RegistryValue Root="HKLM" Key="Software\Classes\NexusPdf.Document.1\ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}"
+                       Value="{BA3A32DD-59A9-44FF-B7F2-FCF184469E12}" Type="string"/>
+      </Component>
+    </ComponentGroup>
+
     <Feature Id="Main" Title="NexusPDF" Level="1">
       <ComponentGroupRef Id="AppFiles"/>
       <ComponentGroupRef Id="Shortcuts"/>
       <ComponentGroupRef Id="FileAssociation"/>
+      <ComponentGroupRef Id="ShellThumbnail"/>
     </Feature>
   </Package>
 </Wix>

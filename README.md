@@ -58,6 +58,7 @@ just as much as money.
 | **Comments and drawing** | Highlight, note, pencil, line and arrow with stroke stabilisation. Every mark is a standard PDF annotation. |
 | **Passwords and redaction** | AES-256 encryption, and redaction that removes the content underneath rather than covering it with a black box. |
 | **Signatures and comparison** | Sign with a certificate, verify existing signatures, compare two files page by page. |
+| **PDF previews in Explorer** | Folders and the desktop show the first page instead of a generic icon. Pages are read on demand, so a 240-page file costs no more than a one-page one. |
 
 There is also a command-line tool (`NexusPdfCli`) for batch work: export, merge,
 compress, protect, recognise and compare.
@@ -91,10 +92,17 @@ document content or passwords.
 - 4 GB of memory; 8 GB is more comfortable for large scans
 - No .NET installation needed — the runtime is included
 - No internet connection required, during install or afterwards
+- Administrator rights once, at install time, for the all-users mode. It is the
+  default because PDF previews in Explorer are registered machine-wide: the
+  isolated process Windows builds thumbnails in cannot see per-user
+  registration. Installing just for yourself needs no rights and works fine,
+  only without the previews.
 
 ## Building from source
 
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download) and Windows.
+The Explorer thumbnail handler is native code, so the full build also needs
+Visual Studio with the C++ desktop workload; `dotnet build` alone does not.
 
 ```powershell
 ./build.ps1 -All

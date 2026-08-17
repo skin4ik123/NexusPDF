@@ -147,10 +147,12 @@
                       VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel Margin="0,0,6,0">
           <TextBlock Text="Installation mode" FontSize="13" Foreground="{StaticResource InkSoft}"/>
-          <RadioButton x:Name="PerUserRadio" IsChecked="True" Checked="OnScopeChanged"
-                       Content="Just for me — no administrator rights needed (recommended)"/>
-          <RadioButton x:Name="PerMachineRadio" Checked="OnScopeChanged"
-                       Content="For all users — administrator rights required"/>
+          <!-- По умолчанию для всех: эскизы PDF в Проводнике живут в машинной
+               ветке реестра, пользовательская установка их дать не может. -->
+          <RadioButton x:Name="PerMachineRadio" IsChecked="True" Checked="OnScopeChanged"
+                       Content="For all users — with PDF previews in Explorer (recommended)"/>
+          <RadioButton x:Name="PerUserRadio" Checked="OnScopeChanged"
+                       Content="Just for me — no administrator rights, no PDF previews in Explorer"/>
 
           <TextBlock Text="Install folder" FontSize="13" Foreground="{StaticResource InkSoft}"
                      Margin="0,16,0,4"/>
