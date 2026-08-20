@@ -1,4 +1,4 @@
-using DocumentFormat.OpenXml.Packaging;
+﻿using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using NexusPdf.Application;
 using NexusPdf.Export;
@@ -114,7 +114,7 @@ public sealed class ScanExportTests : IAsyncLifetime
         Assert.Equal(1, summary.RecognizedPages);
 
         using var word = WordprocessingDocument.Open(target, false);
-        var text = word.MainDocumentPart!.Document.Body!.InnerText;
+        var text = word.MainDocumentPart!.Document!.Body!.InnerText;
         Assert.Contains("Nexus", text, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -136,7 +136,7 @@ public sealed class ScanExportTests : IAsyncLifetime
             new PageAnalysisOptions(RecognizeScans: false), null, CancellationToken.None);
 
         using var word = WordprocessingDocument.Open(target, false);
-        var size = word.MainDocumentPart!.Document.Body!.Descendants<PageSize>().Last();
+        var size = word.MainDocumentPart!.Document!.Body!.Descendants<PageSize>().Last();
 
         Assert.Equal(12000u, size.Width!.Value);     // 600 пунктов
         Assert.Equal(8000u, size.Height!.Value);     // 400 пунктов
@@ -160,7 +160,7 @@ public sealed class ScanExportTests : IAsyncLifetime
             new PageAnalysisOptions(RecognizeScans: false), null, CancellationToken.None);
 
         using var word = WordprocessingDocument.Open(target, false);
-        var size = word.MainDocumentPart!.Document.Body!.Descendants<PageSize>().Last();
+        var size = word.MainDocumentPart!.Document!.Body!.Descendants<PageSize>().Last();
 
         Assert.Equal(12000u, size.Width!.Value);
         Assert.Equal(8000u, size.Height!.Value);

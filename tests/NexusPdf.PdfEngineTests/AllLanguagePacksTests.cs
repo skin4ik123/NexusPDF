@@ -26,7 +26,7 @@ public sealed class AllLanguagePacksTests
             _output.WriteLine($"  {p.Id,-20} {p.ModelFile,-38} {p.DictFile}");
 
         Assert.NotEmpty(catalog);
-        Assert.Single(catalog.Where(p => p.IsDefault));
+        Assert.Single(catalog, p => p.IsDefault);
         // Идентификатор пакета НЕ обязан совпадать с именем файла — ровно
         // поэтому имена берутся из каталога, а не угадываются.
         Assert.Contains(catalog, p => p.Id == "japanese" && p.ModelFile.StartsWith("japan_"));

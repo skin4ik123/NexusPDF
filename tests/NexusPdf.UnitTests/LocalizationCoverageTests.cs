@@ -90,7 +90,7 @@ public sealed class LocalizationCoverageTests
     {
         var dir = Path.Combine(RepoRoot(), "src", "NexusPdf.App.Desktop", "Resources", "i18n");
         var packs = Directory.GetFiles(dir, "*.json")
-            .ToDictionary(Path.GetFileNameWithoutExtension, ReadKeys, StringComparer.Ordinal);
+            .ToDictionary(file => Path.GetFileNameWithoutExtension(file)!, ReadKeys, StringComparer.Ordinal);
 
         Assert.True(packs.Count >= 2, "Словарей меньше двух — проверять нечего.");
         var reference = packs["ru"];
@@ -154,7 +154,7 @@ public sealed class LocalizationCoverageTests
     {
         var dir = Path.Combine(RepoRoot(), "src", "NexusPdf.App.Desktop", "Resources", "i18n");
         var packs = Directory.GetFiles(dir, "*.json")
-            .ToDictionary(Path.GetFileNameWithoutExtension, ReadKeys, StringComparer.Ordinal);
+            .ToDictionary(file => Path.GetFileNameWithoutExtension(file)!, ReadKeys, StringComparer.Ordinal);
 
         var wanted = Enum.GetValues<NexusPdf.Printing.PrinterState>()
             .Select(state => "PrinterState_" + state)

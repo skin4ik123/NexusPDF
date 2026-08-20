@@ -1,4 +1,4 @@
-using NexusPdf.Ux;
+﻿using NexusPdf.Ux;
 
 namespace NexusPdf.UnitTests;
 
@@ -68,7 +68,7 @@ public sealed class ToolsLayoutTests
             new ToolsGroupLayout("MenuPrint", new[] { CommandIds.Print }),
         };
         var ids = Ids(ToolsLayout.Sanitize(saved, Known));
-        Assert.Single(ids.Where(id => id == CommandIds.Print));
+        Assert.Single(ids, id => id == CommandIds.Print);
     }
 
     [Fact]

@@ -1,4 +1,4 @@
-using NexusPdf.Printing;
+﻿using NexusPdf.Printing;
 
 namespace NexusPdf.UnitTests;
 
@@ -136,7 +136,7 @@ public sealed class MarksAndOverlaysTests
             },
         };
         var sheets = Build(settings, pageCount: 3);
-        var info = Assert.Single(sheets[1].Marks.Where(m => m.Kind == "page-info"));
+        var info = Assert.Single(sheets[1].Marks, m => m.Kind == "page-info");
         Assert.Equal("doc.pdf лист 2 из 3", info.Text);
     }
 
@@ -150,7 +150,7 @@ public sealed class MarksAndOverlaysTests
             Overlays = new[] { new PrintOverlay { Template = "ЧЕРНОВИК" } },
         };
         var sheets = Build(settings, pageCount: 3);
-        Assert.All(sheets, s => Assert.Single(s.Marks.Where(m => m.Kind == "overlay")));
+        Assert.All(sheets, s => Assert.Single(s.Marks, m => m.Kind == "overlay"));
     }
 
     [Theory]
@@ -200,6 +200,6 @@ public sealed class MarksAndOverlaysTests
             Overlays = new[] { new PrintOverlay { Template = "" } },
         };
         var sheet = Assert.Single(Build(settings));
-        Assert.Empty(sheet.Marks.Where(m => m.Kind == "overlay"));
+        Assert.DoesNotContain(sheet.Marks, m => m.Kind == "overlay");
     }
 }

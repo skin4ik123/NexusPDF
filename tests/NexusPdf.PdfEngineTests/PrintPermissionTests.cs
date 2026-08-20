@@ -1,4 +1,4 @@
-using NexusPdf.Application;
+﻿using NexusPdf.Application;
 using NexusPdf.Pdf.Pdfium;
 using NexusPdf.Pdf.Qpdf;
 using NexusPdf.Printing;
@@ -103,7 +103,7 @@ public sealed class PrintPermissionTests : IAsyncLifetime
         // Предварительная проверка обязана заблокировать задание целиком.
         var plan = MakePlan();
         var issues = Preflight.Analyze(plan, permissions);
-        var blocking = Assert.Single(issues.Where(i => i.Level == PreflightLevel.Critical));
+        var blocking = Assert.Single(issues, i => i.Level == PreflightLevel.Critical);
         Assert.Equal(Preflight.CodePrintForbidden, blocking.Code);
 
         // И экспорт раскладки в файл тоже: это тот же вывод содержимого.

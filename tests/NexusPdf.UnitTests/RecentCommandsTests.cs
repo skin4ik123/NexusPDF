@@ -1,4 +1,4 @@
-using NexusPdf.Ux;
+﻿using NexusPdf.Ux;
 
 namespace NexusPdf.UnitTests;
 
@@ -27,7 +27,7 @@ public sealed class RecentCommandsTests
         recent = RecentCommands.Use(recent, CommandIds.Print);
 
         Assert.Equal(new[] { CommandIds.Print, CommandIds.RotateRight }, recent);
-        Assert.Single(recent.Where(id => id == CommandIds.Print));
+        Assert.Single(recent, id => id == CommandIds.Print);
     }
 
     [Fact]

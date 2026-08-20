@@ -1,4 +1,4 @@
-using NexusPdf.Application;
+﻿using NexusPdf.Application;
 using NexusPdf.Domain;
 using NexusPdf.Pdf.Abstractions;
 using NexusPdf.Pdf.Pdfium;
@@ -191,7 +191,7 @@ public sealed class PdfiumEngineTests : IAsyncLifetime
             await new SaveService(_engine).SaveAsAsync(document, path, keepBackup: false, CancellationToken.None);
 
             Assert.False(document.Session.IsDirty);
-            Assert.Equal(1, document.Session.Model.Pages.Count);
+            Assert.Single(document.Session.Model.Pages);
             Assert.Contains("Page B",
                 await document.PrimaryHandle.GetPageTextAsync(0, CancellationToken.None));
         }

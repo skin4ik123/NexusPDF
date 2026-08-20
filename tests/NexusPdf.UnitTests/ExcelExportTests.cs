@@ -176,11 +176,11 @@ public sealed class ExcelExportTests
 
         using var document = SpreadsheetDocument.Open(path, false);
         var workbookPart = document.WorkbookPart!;
-        var sheet = workbookPart.Workbook.Descendants<Sheet>().Single();
+        var sheet = workbookPart.Workbook!.Descendants<Sheet>().Single();
         Assert.Equal("Стр. 1", sheet.Name!.Value);
 
         var worksheetPart = (WorksheetPart)workbookPart.GetPartById(sheet.Id!.Value!);
-        var cells = worksheetPart.Worksheet.Descendants<Cell>().ToList();
+        var cells = worksheetPart.Worksheet!.Descendants<Cell>().ToList();
 
         // Число записано числом, а не строкой, которая на него похожа.
         var amount = cells.Single(c => c.CellReference == "C2");
@@ -189,11 +189,11 @@ public sealed class ExcelExportTests
             System.Globalization.CultureInfo.InvariantCulture), 6);
 
         // Объединённая шапка осталась объединённой.
-        var merge = worksheetPart.Worksheet.Descendants<MergeCell>().Single();
+        var merge = worksheetPart.Worksheet!.Descendants<MergeCell>().Single();
         Assert.Equal("A1:B1", merge.Reference!.Value);
 
         // Ссылка живая: у неё есть внешняя цель, а не просто синий текст.
-        var hyperlink = worksheetPart.Worksheet.Descendants<Hyperlink>().Single();
+        var hyperlink = worksheetPart.Worksheet!.Descendants<Hyperlink>().Single();
         Assert.Equal("A2", hyperlink.Reference!.Value);
         var relationship = worksheetPart.HyperlinkRelationships.Single(r => r.Id == hyperlink.Id!.Value);
         Assert.Equal("https://example.org/bolt", relationship.Uri.ToString());
@@ -218,10 +218,10 @@ public sealed class ExcelExportTests
 
         using var document = SpreadsheetDocument.Open(path, false);
         var workbookPart = document.WorkbookPart!;
-        var first = workbookPart.Workbook.Descendants<Sheet>().First();
+        var first = workbookPart.Workbook!.Descendants<Sheet>().First();
         var worksheetPart = (WorksheetPart)workbookPart.GetPartById(first.Id!.Value!);
 
-        var hyperlink = worksheetPart.Worksheet.Descendants<Hyperlink>().Single();
+        var hyperlink = worksheetPart.Worksheet!.Descendants<Hyperlink>().Single();
         Assert.Equal("'Стр. 2'!A1", hyperlink.Location!.Value);
         Assert.Null(hyperlink.Id);
     }

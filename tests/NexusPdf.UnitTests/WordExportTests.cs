@@ -146,7 +146,7 @@ public sealed class WordExportTests
 
         using var document = WordprocessingDocument.Open(path, false);
         var main = document.MainDocumentPart!;
-        var body = main.Document.Body!;
+        var body = main.Document!.Body!;
 
         // Таблица стала таблицей Word с объединённой шапкой, а не текстом.
         var table = body.Descendants<Table>().Single();
@@ -168,7 +168,7 @@ public sealed class WordExportTests
         Assert.Equal("https://example.org/", relationship.Uri.ToString());
 
         // Аннотация стала примечанием Word с автором.
-        var comment = main.WordprocessingCommentsPart!.Comments.Elements<Comment>().Single();
+        var comment = main.WordprocessingCommentsPart!.Comments!.Elements<Comment>().Single();
         Assert.Equal("Проверить сумму", comment.InnerText);
         Assert.Equal("Артур", comment.Author!.Value);
         Assert.Single(body.Descendants<CommentReference>());
@@ -205,7 +205,7 @@ public sealed class WordExportTests
         }
 
         using var document = WordprocessingDocument.Open(path, false);
-        var sizes = document.MainDocumentPart!.Document.Body!.Descendants<PageSize>().ToList();
+        var sizes = document.MainDocumentPart!.Document!.Body!.Descendants<PageSize>().ToList();
 
         Assert.Equal(2, sizes.Count);
         Assert.Equal(PageOrientationValues.Portrait, sizes[0].Orient!.Value);
@@ -260,7 +260,7 @@ public sealed class WordExportTests
         }
 
         using var document = WordprocessingDocument.Open(path, false);
-        var text = document.MainDocumentPart!.Document.Body!.InnerText;
+        var text = document.MainDocumentPart!.Document!.Body!.InnerText;
         Assert.Contains("допосле", text);
         Assert.True(text.IndexOf((char)0x02) < 0, "управляющий символ 0x02 остался в документе");
         Assert.True(text.IndexOf((char)0x1F) < 0, "управляющий символ 0x1F остался в документе");
@@ -309,7 +309,7 @@ public sealed class WordExportTests
         }
 
         using var document = WordprocessingDocument.Open(path, false);
-        var fonts = document.MainDocumentPart!.Document.Descendants<RunFonts>().ToList();
+        var fonts = document.MainDocumentPart!.Document!.Descendants<RunFonts>().ToList();
         Assert.DoesNotContain(fonts, f => (f.Ascii?.Value ?? "").Contains("CIDFont"));
     }
 
@@ -350,7 +350,7 @@ public sealed class WordExportTests
         }
 
         using var document = WordprocessingDocument.Open(path, false);
-        var table = document.MainDocumentPart!.Document.Descendants<Table>().First();
+        var table = document.MainDocumentPart!.Document!.Descendants<Table>().First();
 
         var tableLayout = table.GetFirstChild<TableProperties>()!.GetFirstChild<TableLayout>();
         Assert.NotNull(tableLayout);

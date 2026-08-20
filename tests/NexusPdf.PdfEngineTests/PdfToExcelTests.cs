@@ -1,4 +1,4 @@
-using DocumentFormat.OpenXml.Packaging;
+﻿using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using NexusPdf.Export;
 using NexusPdf.Pdf.Pdfium;
@@ -85,9 +85,9 @@ public sealed class PdfToExcelTests : IAsyncLifetime
 
         using var workbook = SpreadsheetDocument.Open(target, false);
         var workbookPart = workbook.WorkbookPart!;
-        var sheet = workbookPart.Workbook.Descendants<Sheet>().Single();
+        var sheet = workbookPart.Workbook!.Descendants<Sheet>().Single();
         var worksheetPart = (WorksheetPart)workbookPart.GetPartById(sheet.Id!.Value!);
-        var cells = worksheetPart.Worksheet.Descendants<Cell>().ToList();
+        var cells = worksheetPart.Worksheet!.Descendants<Cell>().ToList();
 
         // «25,50» из PDF стало числом 25.5 — по такому столбцу считается сумма.
         var price = cells.Single(c => c.CellReference == "C2");
@@ -96,7 +96,7 @@ public sealed class PdfToExcelTests : IAsyncLifetime
             System.Globalization.CultureInfo.InvariantCulture), 6);
 
         // Ссылка из PDF стала ссылкой книги.
-        var hyperlink = worksheetPart.Worksheet.Descendants<Hyperlink>().Single();
+        var hyperlink = worksheetPart.Worksheet!.Descendants<Hyperlink>().Single();
         var relationship = worksheetPart.HyperlinkRelationships.Single(r => r.Id == hyperlink.Id!.Value);
         Assert.Equal("https://example.org/bolt", relationship.Uri.ToString());
 
@@ -133,7 +133,7 @@ public sealed class PdfToExcelTests : IAsyncLifetime
 
         using var document = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(target, false);
         var main = document.MainDocumentPart!;
-        var body = main.Document.Body!;
+        var body = main.Document!.Body!;
 
         // Таблица из PDF стала таблицей Word с тремя колонками.
         var table = body.Descendants<DocumentFormat.OpenXml.Wordprocessing.Table>().Single();
