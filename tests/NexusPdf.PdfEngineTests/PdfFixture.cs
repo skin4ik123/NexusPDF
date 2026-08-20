@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 
 namespace NexusPdf.PdfEngineTests;
@@ -103,6 +103,55 @@ public static class PdfFixture
             WriteRaw($"{offsets[i]:0000000000} 00000 n \n");
         WriteRaw($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xrefPosition}\n%%EOF\n");
         return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Форма из трёх полей: два текстовых и чекбокс — минимум, на котором
+    /// проверяется переход фокуса кликами и видимость значений вне режима.
+    /// Прямоугольники в PDF-координатах (y снизу): text1 [100 700..740 400],
+    /// text2 [100 600..640 400], чекбокс [100 500..530 130].
+    /// </summary>
+    public static string WriteFormTrioToTemp(string fileName)
+    {
+        var objects = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R 6 0 R] " +
+            "/NeedAppearances true /DA (/Helv 12 Tf 0 g) /DR << /Font << /Helv 7 0 R >> >> >> >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [4 0 R 5 0 R 6 0 R] " +
+            "/Resources << /Font << /Helv 7 0 R >> >> >>",
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (text1) " +
+            "/Rect [100 700 400 740] /F 4 /DA (/Helv 12 Tf 0 g) >>",
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (text2) " +
+            "/Rect [100 600 400 640] /F 4 /DA (/Helv 12 Tf 0 g) >>",
+            // Чекбокс: без /AP, состояние /AS Off; ZapfDingbats в DA — как делает Acrobat.
+            "<< /Type /Annot /Subtype /Widget /FT /Btn /T (check1) " +
+            "/Rect [100 500 130 530] /F 4 /AS /Off /DA (/ZaDb 0 Tf 0 g) /MK << /CA (4) >> >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        };
+
+        var buffer = new MemoryStream();
+        void WriteRaw(string s) => buffer.Write(Encoding.ASCII.GetBytes(s));
+        WriteRaw("%PDF-1.5\n");
+        buffer.Write(new byte[] { (byte)'%', 0xE2, 0xE3, 0xCF, 0xD3, (byte)'\n' });
+        var offsets = new long[objects.Count + 1];
+        for (var i = 0; i < objects.Count; i++)
+        {
+            offsets[i + 1] = buffer.Position;
+            WriteRaw($"{i + 1} 0 obj\n{objects[i]}\nendobj\n");
+        }
+        var xrefPosition = buffer.Position;
+        WriteRaw($"xref\n0 {objects.Count + 1}\n");
+        WriteRaw("0000000000 65535 f \n");
+        for (var i = 1; i <= objects.Count; i++)
+            WriteRaw($"{offsets[i]:0000000000} 00000 n \n");
+        WriteRaw($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xrefPosition}\n%%EOF\n");
+
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, fileName);
+        File.WriteAllBytes(path, buffer.ToArray());
+        return path;
     }
 
     /// <summary>Одностраничный PDF с выпадающим списком (combobox, /FT /Ch + флаг Combo).</summary>

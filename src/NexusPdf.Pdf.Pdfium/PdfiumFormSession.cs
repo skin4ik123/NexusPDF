@@ -66,10 +66,42 @@ internal sealed class PdfiumFormSession
             return null;
 
         session._formHandle = handle;
-        // Подсветка полей: мягкий голубой, как в привычных просмотрщиках.
-        fpdf_formfill.FPDF_SetFormFieldHighlightColor(handle, 0, 0xB5D0FF);
-        fpdf_formfill.FPDF_SetFormFieldHighlightAlpha(handle, 90);
+        // Окружение живёт всю жизнь документа и рисует значения полей в каждом
+        // рендере; подсветка — принадлежность РЕЖИМА заполнения и включается
+        // отдельно. Иначе поля выглядели бы «в рамочках» и вне режима.
+        session.SetHighlight(false);
         return session;
+    }
+
+    /// <summary>
+    /// Подсветка полей: мягкий голубой в режиме заполнения, ничего — вне его.
+    /// Значения полей рисуются в обоих случаях; выключение режима раньше
+    /// закрывало окружение целиком, и заполненное «исчезало» с экрана и из
+    /// печати, хотя в документе оставалось.
+    /// </summary>
+    public void SetHighlight(bool on)
+    {
+        if (_formHandle == null) return;
+        if (on)
+        {
+            fpdf_formfill.FPDF_SetFormFieldHighlightColor(_formHandle, 0, 0xB5D0FF);
+            fpdf_formfill.FPDF_SetFormFieldHighlightAlpha(_formHandle, 90);
+        }
+        else
+        {
+            fpdf_formfill.FPDF_RemoveFormFieldHighlight(_formHandle);
+        }
+    }
+
+    /// <summary>
+    /// Выход из режима заполнения: зафиксировать набранное (снятие фокуса
+    /// генерирует значение и appearance-поток), отпустить активную страницу и
+    /// погасить подсветку. Окружение остаётся жить — им рисуются значения.
+    /// </summary>
+    public void CommitAndIdle()
+    {
+        DeactivatePage();
+        SetHighlight(false);
     }
 
     private void Set<T>(Action<T> assign, T callback) where T : Delegate
@@ -119,6 +151,13 @@ internal sealed class PdfiumFormSession
             (int)Math.Round(displayedXPt), (int)Math.Round(displayedYPt),
             ref pageX, ref pageY);
 
+        // Пока в поле есть фокус, pdfium держит захват мыши на нём, и клик по
+        // СОСЕДНЕМУ полю уходит в старое: перейти к следующей ячейке было
+        // почти невозможно. Снятие фокуса перед кликом фиксирует набранное
+        // (SaveData → значение и appearance-поток) и освобождает захват — клик
+        // честно попадает туда, куда указывает мышь.
+        fpdf_formfill.FORM_ForceToKillFocus(_formHandle!);
+        fpdf_formfill.FORM_OnMouseMove(_formHandle!, page, 0, pageX, pageY);
         fpdf_formfill.FORM_OnLButtonDown(_formHandle!, page, 0, pageX, pageY);
         fpdf_formfill.FORM_OnLButtonUp(_formHandle!, page, 0, pageX, pageY);
     }

@@ -91,6 +91,20 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
     private const int AnnotFlagHidden = 1 << 1;
     private const int AnnotFlagPrint = 1 << 2;
 
+    /// <summary>
+    /// Окружение форм к рендеру: обычный FPDF_ANNOT-рендер pdfium вообще не
+    /// рисует Widget-аннотации, их значения выводит только FFLDraw живого
+    /// окружения. Без этого документ с заполненной формой выглядел пустым и
+    /// на экране, и на печати — пока пользователь не включит режим форм.
+    /// Вызывается строго на pdfium-потоке; для документов без AcroForm
+    /// Create возвращает null, и попытка не повторяется дороже одного вызова
+    /// FPDF_GetFormType.
+    /// </summary>
+    private void EnsureFormsForRender()
+    {
+        _forms ??= PdfiumFormSession.Create(NativeDoc);
+    }
+
     /// <summary>Подтип Widget: аннотация, которой нарисовано поле формы.</summary>
     private const int AnnotSubtypeWidget = 20;
 
@@ -106,6 +120,7 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
     private RenderedPageImage RenderFiltered(
         int pageIndex, int width, int height, int extraQuarterTurns, PrintContentOptions options)
     {
+        EnsureFormsForRender();
         // Страница берётся ТЕМ ЖЕ способом, что и в обычном рендере: окружение
         // форм обязано знать о загруженной странице, иначе FFLDraw рисует по
         // чужому состоянию и затирает уже нарисованное.
@@ -215,6 +230,8 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
         if (width < 1 || height < 1)
             throw new ArgumentOutOfRangeException(nameof(width), "Размер растра должен быть положительным.");
 
+        if (!contentOnly)
+            EnsureFormsForRender();
         var rotate = ((extraQuarterTurns % 4) + 4) % 4;
         var activePage = _forms?.TryGetActivePage(pageIndex);
         var page = activePage ?? fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
@@ -446,6 +463,9 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
             return _thread.InvokeAsync(() =>
             {
                 _forms ??= PdfiumFormSession.Create(NativeDoc);
+                // Режим заполнения: поля получают подсветку. Значения рисуются
+                // всегда, подсветка — только пока режим включён.
+                _forms?.SetHighlight(true);
                 return _forms != null;
             }, ct);
         }
@@ -533,15 +553,12 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
         lock (_admissionGate)
         {
             ThrowIfDisposed();
-            return _thread.InvokeAsync(() =>
-            {
-                // Dispose фиксирует значение (DeactivatePage → KillFocus) и
-                // закрывает окружение — подсветка исчезает из рендеров.
-                // Заполненные значения остаются видимыми: pdfium сгенерировал
-                // appearance-стримы виджетов, их рисует обычный FPDF_ANNOT.
-                _forms?.Dispose();
-                _forms = null;
-            }, ct);
+            // Окружение НЕ закрывается: обычный FPDF_ANNOT-рендер виджеты не
+            // рисует вовсе, и с закрытием окружения заполненное «исчезало» с
+            // экрана и из печати, хотя в документе оставалось. Здесь только
+            // фиксируется набранное и гаснет подсветка; значения продолжает
+            // рисовать FFLDraw в каждом рендере.
+            return _thread.InvokeAsync(() => _forms?.CommitAndIdle(), ct);
         }
     }
 
