@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using NexusPdf.Export;
@@ -86,6 +86,8 @@ public sealed class WordExportTests
 
     // ----- запись документа -----
 
+    /// <summary>Управляющий символ как строка — в исходнике его не написать.</summary>
+    private static string Ctl(int code) => ((char)code).ToString();
     private static string TempFile(string name)
     {
         var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
@@ -228,6 +230,168 @@ public sealed class WordExportTests
         Assert.Contains("IHDR", System.Text.Encoding.ASCII.GetString(encoded.Bytes.Take(20).ToArray()));
         Assert.EndsWith("IEND", System.Text.Encoding.ASCII.GetString(
             encoded.Bytes.Skip(encoded.Bytes.Length - 8).Take(4).ToArray()));
+    }
+
+    /// <summary>
+    /// Управляющий символ из PDF не должен рушить весь экспорт.
+    ///
+    /// В XML 1.0 символов вроде 0x02 не существует, и один такой в тексте
+    /// валил запись целиком: «hexadecimal value 0x02 is an invalid character»,
+    /// файла не появлялось вовсе. Именно так не экспортировалась настоящая
+    /// портовая форма.
+    /// </summary>
+    [Fact]
+    public void A_Control_Character_Does_Not_Break_The_Export()
+    {
+        var words = new[]
+        {
+            Word("до" + Ctl(0x02) + "после", 40, 700, 90),
+            Word("ещё" + Ctl(0x1F) + "строка", 40, 680, 90),
+        };
+        var layout = PageAnalyzer.Analyze(
+            0, 595, 842, words, Array.Empty<PdfRulingLine>(), Array.Empty<PdfFormFieldValue>());
+
+        var path = TempFile("управляющие.docx");
+        using (var writer = new DocxExporter(path))
+        {
+            writer.AddPage(layout, Array.Empty<PdfPageLink>(), Array.Empty<PdfAnnotationInfo>(),
+                Array.Empty<PdfPageImage>(), 1);
+            writer.Finish();
+        }
+
+        using var document = WordprocessingDocument.Open(path, false);
+        var text = document.MainDocumentPart!.Document.Body!.InnerText;
+        Assert.Contains("допосле", text);
+        Assert.True(text.IndexOf((char)0x02) < 0, "управляющий символ 0x02 остался в документе");
+        Assert.True(text.IndexOf((char)0x1F) < 0, "управляющий символ 0x1F остался в документе");
+    }
+
+    /// <summary>
+    /// Вес шрифта вне диапазона 100–900 — это мусор, а не полужирное начертание.
+    ///
+    /// У документов со встроенными подмножествами PDFium возвращал 2580 и 3524.
+    /// Прежнее правило «600 и больше» делало полужирным весь документ.
+    /// </summary>
+    [Theory]
+    [InlineData(400, false)]
+    [InlineData(700, true)]
+    [InlineData(900, true)]
+    [InlineData(2580, false)]
+    [InlineData(3524, false)]
+    public void Only_A_Sane_Weight_Means_Bold(int weight, bool expected)
+    {
+        var word = new PdfTextWord(
+            "текст", new PdfTextRect(40, 710, 90, 700), 10, weight, 0xFF000000);
+
+        Assert.Equal(expected, word.IsBold);
+    }
+
+    /// <summary>
+    /// Служебное имя шрифта из PDF не попадает в документ Word.
+    ///
+    /// «CIDFont+ F4» — это имя РЕСУРСА, а не гарнитуры. Записанное в документ,
+    /// оно заставляло Word подставлять чужой шрифт, и текст выглядел набранным
+    /// не тем начертанием и разъезжался по ширине.
+    /// </summary>
+    [Fact]
+    public void A_Resource_Font_Name_Is_Not_Written()
+    {
+        var words = new[] { Word("Текст", 40, 700, 60, font: "CIDFont+ F4") };
+        var layout = PageAnalyzer.Analyze(
+            0, 595, 842, words, Array.Empty<PdfRulingLine>(), Array.Empty<PdfFormFieldValue>());
+
+        var path = TempFile("шрифт.docx");
+        using (var writer = new DocxExporter(path))
+        {
+            writer.AddPage(layout, Array.Empty<PdfPageLink>(), Array.Empty<PdfAnnotationInfo>(),
+                Array.Empty<PdfPageImage>(), 1);
+            writer.Finish();
+        }
+
+        using var document = WordprocessingDocument.Open(path, false);
+        var fonts = document.MainDocumentPart!.Document.Descendants<RunFonts>().ToList();
+        Assert.DoesNotContain(fonts, f => (f.Ascii?.Value ?? "").Contains("CIDFont"));
+    }
+
+    /// <summary>
+    /// Пустые колонки сохраняют свою ширину.
+    ///
+    /// Word по умолчанию подбирает ширины сам, по содержимому, и записанную
+    /// сетку игнорирует. У заполненного бланка это незаметно, а у пустого
+    /// чек-листа колонки для отметок схлопывались в нитку: подбирать было не по
+    /// чему. Ширины должны браться из документа, то есть раскладка — фиксированная.
+    /// </summary>
+    [Fact]
+    public void Empty_Columns_Keep_Their_Width()
+    {
+        // Текст только в первой колонке — как в чек-листе, где графы для
+        // отметок пусты.
+        var words = new[]
+        {
+            Word("Пункт", 50, 664, 60),
+            Word("первый", 50, 644, 60),
+        };
+        var rulings = new PdfRulingLine[]
+        {
+            new(true, 680, 40, 440, 0.8), new(true, 660, 40, 440, 0.8), new(true, 640, 40, 440, 0.8),
+            new(false, 40, 640, 680, 0.8), new(false, 200, 640, 680, 0.8),
+            new(false, 320, 640, 680, 0.8), new(false, 440, 640, 680, 0.8),
+        };
+        var layout = PageAnalyzer.Analyze(
+            0, 595, 842, words, rulings, Array.Empty<PdfFormFieldValue>(),
+            new PageAnalysisOptions(DetectWhitespaceTables: false));
+
+        var path = TempFile("пустые-колонки.docx");
+        using (var writer = new DocxExporter(path))
+        {
+            writer.AddPage(layout, Array.Empty<PdfPageLink>(), Array.Empty<PdfAnnotationInfo>(),
+                Array.Empty<PdfPageImage>(), 1);
+            writer.Finish();
+        }
+
+        using var document = WordprocessingDocument.Open(path, false);
+        var table = document.MainDocumentPart!.Document.Descendants<Table>().First();
+
+        var tableLayout = table.GetFirstChild<TableProperties>()!.GetFirstChild<TableLayout>();
+        Assert.NotNull(tableLayout);
+        Assert.Equal(TableLayoutValues.Fixed, tableLayout!.Type!.Value);
+
+        // Линии стоят на 40, 200, 320 и 440 пунктах — колонки 160, 120 и 120,
+        // то есть 3200, 2400 и 2400 твипов. Ни одна не выродилась в нитку.
+        var widths = table.GetFirstChild<TableGrid>()!
+            .Elements<GridColumn>()
+            .Select(c => int.Parse(c.Width!.Value!))
+            .ToList();
+        Assert.Equal(new[] { 3200, 2400, 2400 }, widths);
+    }
+
+    /// <summary>
+    /// Соседняя колонка не приклеивается к строке.
+    ///
+    /// Строка собирается по вертикальному перекрытию, и в неё попадает всё, что
+    /// стоит на этой высоте. В шапке бланка заголовок и адрес справа лежат на
+    /// одной высоте, и в Word уезжала склейка «THE REPUBLIC OF LIBERIA Dulles,
+    /// Suite 200 Virginia 20166, USA». Разрыв в несколько кеглей — это уже
+    /// другая колонка, а не пробел.
+    /// </summary>
+    [Fact]
+    public void A_Neighbouring_Column_Does_Not_Join_The_Line()
+    {
+        var words = new[]
+        {
+            // Координаты из настоящей шапки: слова идут вплотную, с зазором
+            // около шести пунктов.
+            Word("THE", 183, 740, 40, 8), Word("REPUBLIC", 229, 740, 102, 8),
+            Word("OF", 338, 740, 26, 8), Word("LIBERIA", 370, 740, 58, 8),
+            // Тот же уровень, но через пятьдесят пунктов пустоты — адресный блок.
+            Word("Dulles,", 478, 740, 25, 8), Word("Suite", 508, 740, 20, 8),
+        };
+        var layout = PageAnalyzer.Analyze(
+            0, 595, 842, words, Array.Empty<PdfRulingLine>(), Array.Empty<PdfFormFieldValue>());
+
+        Assert.Equal(2, layout.Lines.Count);
+        Assert.Equal("THE REPUBLIC OF LIBERIA", layout.Lines[0].Text);
+        Assert.Equal("Dulles, Suite", layout.Lines[1].Text);
     }
 
     /// <summary>Документ Word — это ZIP с частями; битый файл Word открыть не сможет.</summary>

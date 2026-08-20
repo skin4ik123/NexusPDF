@@ -1,4 +1,4 @@
-using DocumentFormat.OpenXml.Packaging;
+﻿using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using NexusPdf.Export;
 using NexusPdf.Pdf.Abstractions;
@@ -66,6 +66,44 @@ public sealed class ExcelExportTests
         Assert.Equal(CellKind.Currency, money.Kind);
         Assert.Equal(1500, money.Number, 6);
         Assert.Equal("₽", money.Currency);
+    }
+
+    /// <summary>
+    /// Управляющий символ из PDF не должен рушить книгу Excel.
+    ///
+    /// В XML 1.0 таких символов не существует, и один такой валил запись
+    /// целиком: «hexadecimal value 0x02 is an invalid character». Word я
+    /// защитил раньше, а Excel остался — и портовая форма уведомления
+    /// по-прежнему не выгружалась в таблицу.
+    /// </summary>
+    [Fact]
+    public void A_Control_Character_Does_Not_Break_The_Workbook()
+    {
+        var stx = ((char)0x02).ToString();
+        var words = new[]
+        {
+            new PdfTextWord("до" + stx + "после", new PdfTextRect(50, 700, 120, 690), 8, 400, 0xFF000000),
+            new PdfTextWord("вторая", new PdfTextRect(200, 700, 260, 690), 8, 400, 0xFF000000),
+            new PdfTextWord("строка", new PdfTextRect(50, 680, 120, 670), 8, 400, 0xFF000000),
+            new PdfTextWord("данных", new PdfTextRect(200, 680, 260, 670), 8, 400, 0xFF000000),
+        };
+        var rulings = new PdfRulingLine[]
+        {
+            new(true, 705, 40, 300, 0.8), new(true, 685, 40, 300, 0.8), new(true, 665, 40, 300, 0.8),
+            new(false, 40, 665, 705, 0.8), new(false, 170, 665, 705, 0.8), new(false, 300, 665, 705, 0.8),
+        };
+        var layout = PageAnalyzer.Analyze(
+            0, 595, 842, words, rulings, Array.Empty<PdfFormFieldValue>());
+
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "управляющие.xlsx");
+
+        var summary = XlsxExporter.Write(
+            path, new[] { new ExportPage(layout, Array.Empty<PdfPageLink>()) });
+
+        Assert.True(summary.Tables >= 1);
+        Assert.True(new FileInfo(path).Length > 500);
     }
 
     [Fact]

@@ -56,6 +56,12 @@ public static class PageAnalyzer
                 .ToList();
         }
 
+        // Остаток — свободный текст, и вот теперь строки можно резать по
+        // колонкам: поиску таблиц по просветам нужны были целые строки, а
+        // абзацам наоборот — отдельные, иначе заголовок склеивается с адресом
+        // из соседней колонки шапки.
+        lines = TextLineBuilder.SplitColumns(lines);
+
         return new PageLayout(
             pageIndex, widthPt, heightPt,
             tables.OrderByDescending(t => t.Bounds.Top).ToList(),

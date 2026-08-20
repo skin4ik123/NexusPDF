@@ -357,7 +357,8 @@ public static class XlsxExporter
             if (draft.Value.Kind == CellKind.Text || draft.Text.Length == 0)
             {
                 cell.DataType = CellValues.InlineString;
-                cell.InlineString = new InlineString(new Text(draft.Text) { Space = SpaceProcessingModeValues.Preserve });
+                cell.InlineString = new InlineString(
+                    new Text(XmlText.Safe(draft.Text)) { Space = SpaceProcessingModeValues.Preserve });
             }
             else
             {

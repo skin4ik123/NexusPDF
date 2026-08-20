@@ -413,7 +413,17 @@ public sealed record PdfTextWord(
     /// <summary>Повёрнут ли текст (не горизонтальная строка слева направо).</summary>
     public bool IsRotated => RotationQuarters != 0;
 
-    public bool IsBold => FontWeight >= 600;
+    /// <summary>
+    /// Полужирное ли начертание.
+    ///
+    /// Вес засчитывается только в допустимом диапазоне 100–900: у документов со
+    /// встроенными подмножествами шрифтов PDFium возвращает мусор — на живой
+    /// форме встречались 2580, 3388, 3524. Прежнее правило «600 и больше»
+    /// объявляло полужирным ВЕСЬ документ (62 пробега из 82), и экспорт в Word
+    /// выглядел набранным жирным целиком. Неизвестный вес честнее считать
+    /// обычным: лишний жир виден сразу, потерянный — почти нет.
+    /// </summary>
+    public bool IsBold => FontWeight is >= 600 and <= 900;
     public double Width => RectPt.Right - RectPt.Left;
     public double Height => RectPt.Top - RectPt.Bottom;
     /// <summary>Середина по вертикали — по ней слова собираются в строки.</summary>

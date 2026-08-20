@@ -1,4 +1,4 @@
-using NexusPdf.Export;
+﻿using NexusPdf.Export;
 using NexusPdf.Pdf.Abstractions;
 
 namespace NexusPdf.UnitTests;
@@ -17,6 +17,42 @@ public sealed class TableDetectionTests
 
     private static PdfRulingLine H(double y, double from, double to) => new(true, y, from, to, 0.8);
     private static PdfRulingLine V(double x, double from, double to) => new(false, x, from, to, 0.8);
+
+    /// <summary>
+    /// Одна граница, нарисованная кусочками, остаётся ОДНОЙ колонкой.
+    ///
+    /// Генераторы часто рисуют вертикальную линию таблицы не целиком, а
+    /// отдельным отрезком на каждую строку. Сшивание оставляет их разными
+    /// линиями с одинаковой позицией, и сетка получала лишние колонки нулевой
+    /// ширины: у морского чек-листа RLM из четырёх колонок выходило десять, а
+    /// графы для отметок схлопывались в нитку.
+    /// </summary>
+    [Fact]
+    public void Segments_Of_One_Border_Do_Not_Add_Columns()
+    {
+        var rulings = new[]
+        {
+            H(700, 40, 300), H(680, 40, 300), H(660, 40, 300),
+            // Левая, средняя и правая границы — каждая двумя отрезками,
+            // по одному на строку.
+            V(40, 680, 700), V(40, 660, 680),
+            V(170, 680, 700), V(170, 660, 680),
+            V(300, 680, 700), V(300, 660, 680),
+        };
+        var words = new[]
+        {
+            Word("слева", 50, 685), Word("справа", 180, 685),
+            Word("низ", 50, 665), Word("тоже", 180, 665),
+        };
+
+        var tables = RulingTableDetector.Detect(rulings, words);
+
+        var table = Assert.Single(tables);
+        Assert.Equal(2, table.ColumnCount);
+        Assert.Equal(2, table.RowCount);
+        // Границы — ровно три, без повторов: 40, 170 и 300.
+        Assert.Equal(new[] { 40.0, 170.0, 300.0 }, table.ColumnEdges);
+    }
 
     /// <summary>Сетка 2×3 по нарисованным границам: тексты попадают в свои ячейки.</summary>
     [Fact]

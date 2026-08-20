@@ -1,4 +1,4 @@
-using DocumentFormat.OpenXml;
+﻿using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using NexusPdf.Pdf.Abstractions;
@@ -105,6 +105,7 @@ public sealed class DocxExporter : IDisposable
     {
         var size = new PdfPageDescriptor(layout.WidthPt, layout.HeightPt);
         var margins = MarginsOf(layout);
+        var breakBefore = false;
 
         if (_anyContent)
         {
@@ -114,16 +115,33 @@ public sealed class DocxExporter : IDisposable
                 Math.Abs(size.HeightPoints - _sectionSize.HeightPoints) > 1)
                 CloseSection();
             else
-                _body.AppendChild(new Paragraph(new Run(new Break { Type = BreakValues.Page })));
+                breakBefore = true;
         }
         _sectionSize = size;
         if (!_anyContent) _sectionMargins = margins;
 
         // Якорь страницы: на него ведут внутренние ссылки документа.
+        //
+        // Он же несёт признак «начать с новой страницы». Отдельный абзац с
+        // разрывом не годится: он сам занимает строку, и когда предыдущая
+        // страница заполнена до низа, абзац переносится на следующую, а разрыв
+        // гонит содержимое на третью — между разделами чек-листа RLM так
+        // появлялись чистые листы.
+        // Пустой абзац, которым закрывается таблица, перед разрывом не нужен:
+        // он остаётся висеть внизу страницы и, если места уже нет, уезжает на
+        // следующую — рождая чистый лист. Разделять две таблицы ему тут больше
+        // нечего, дальше и так новая страница.
+        if (breakBefore && _body.LastChild is Paragraph blank &&
+            !blank.HasChildren)
+            _body.RemoveChild(blank);
+
         var id = (++_bookmarkId).ToString();
-        _body.AppendChild(new Paragraph(
+        var anchor = new Paragraph(
             new BookmarkStart { Id = id, Name = PageAnchor(layout.PageIndex) },
-            new BookmarkEnd { Id = id }));
+            new BookmarkEnd { Id = id });
+        if (breakBefore)
+            anchor.PrependChild(new ParagraphProperties(new PageBreakBefore()));
+        _body.AppendChild(anchor);
 
         foreach (var block in Order(layout, images))
         {
@@ -214,6 +232,7 @@ public sealed class DocxExporter : IDisposable
             properties.AppendChild(new ParagraphStyleId { Val = "Heading2" });
 
         element.AppendChild(properties);
+        ApplyMeasuredLeading(element, paragraph.Lines);
         AppendRuns(element, paragraph.Lines.SelectMany(l => l.Words).ToList(), links, pageCount);
         AttachComments(element, notes, paragraph.Left, paragraph.Top, paragraph.Right, paragraph.Bottom);
 
@@ -263,10 +282,41 @@ public sealed class DocxExporter : IDisposable
         string.Equals(a.FontName, b.FontName, StringComparison.Ordinal) &&
         Math.Abs(a.FontSizePt - b.FontSizePt) < 0.6;
 
+    /// <summary>
+    /// Годится ли имя шрифта из PDF для Word.
+    ///
+    /// В PDF имя шрифта — это имя РЕСУРСА, а не гарнитуры. У документов со
+    /// встроенными подмножествами там сплошь и рядом «CIDFont+ F4» или просто
+    /// «F1»: такого шрифта в системе нет, Word молча подставляет запасной, и
+    /// документ выглядит набранным чужой гарнитурой — обычно более плотной и
+    /// широкой. Именно так трёхстраничная форма разъезжалась на пять страниц
+    /// и казалась целиком полужирной, хотя полужирным не был ни один пробег.
+    ///
+    /// Когда имя бессмысленно, честнее не указывать его вовсе: тогда работает
+    /// шрифт документа по умолчанию, метрики предсказуемы, а пользователь
+    /// меняет гарнитуру одним действием на весь текст.
+    /// </summary>
+    private static bool IsUsableFontName(string name)
+    {
+        var trimmed = name.Trim();
+        if (trimmed.Length < 3) return false;
+        if (trimmed.Contains("CIDFont", StringComparison.OrdinalIgnoreCase)) return false;
+
+        // «F4», «TT12», «C0_0», «g_d0_f1» — идентификаторы ресурсов, не гарнитуры.
+        var letters = trimmed.Count(char.IsLetter);
+        if (letters <= 2) return false;
+
+        var alphabetic = trimmed.Where(char.IsLetter).ToArray();
+        if (alphabetic.Length > 0 && alphabetic.All(char.IsUpper) && trimmed.Any(char.IsDigit) && letters <= 3)
+            return false;
+
+        return true;
+    }
+
     private static Run BuildRun(string text, PdfTextWord style)
     {
         var properties = new RunProperties();
-        if (style.FontName.Length > 0)
+        if (IsUsableFontName(style.FontName))
             properties.AppendChild(new RunFonts { Ascii = style.FontName, HighAnsi = style.FontName, ComplexScript = style.FontName });
         if (style.FontSizePt > 0)
         {
@@ -280,7 +330,7 @@ public sealed class DocxExporter : IDisposable
         var rgb = style.ColorArgb & 0x00FFFFFF;
         if (rgb != 0) properties.AppendChild(new Color { Val = rgb.ToString("X6") });
 
-        return new Run(properties, new Text(text) { Space = SpaceProcessingModeValues.Preserve });
+        return new Run(properties, new Text(XmlText.Safe(text)) { Space = SpaceProcessingModeValues.Preserve });
     }
 
     /// <summary>Ставит пробег внутрь гиперссылки. false — ссылка не годится для Word.</summary>
@@ -338,6 +388,15 @@ public sealed class DocxExporter : IDisposable
         // распознанной по пробелам, границ не было, и придумывать их нельзя.
         if (table.Source == TableSource.Ruling)
             properties.AppendChild(Borders());
+
+        // Ширины колонок — из документа, а не на усмотрение Word.
+        //
+        // Без этой строки Word подбирает ширины сам, по содержимому, и
+        // записанную ниже сетку не смотрит вовсе. На заполненном бланке разницы
+        // почти нет, а на ПУСТОМ подбирать не по чему: каждая колонка
+        // схлопывается в минимальную, и таблица превращается в стопку ниток.
+        // Именно так выгружался пустой чек-лист RLM.
+        properties.AppendChild(new TableLayout { Type = TableLayoutValues.Fixed });
         element.AppendChild(properties);
 
         var grid = new TableGrid();
@@ -414,7 +473,20 @@ public sealed class DocxExporter : IDisposable
         var words = WordsOf(layout, cell.Bounds);
         if (words.Count > 0)
         {
-            AppendRuns(paragraph, words, links, pageCount);
+            // Строки ячейки переносятся строками, а не склеиваются в одну.
+            //
+            // Обычный абзац текста переливать по ширине правильно — там перенос
+            // случаен и зависит от вёрстки. В ячейке всё наоборот: это бланк,
+            // где каждая строка — отдельный пункт. Склейка превращала «1-Submitted
+            // at the port of… 2-Name of ship… 3-Arriving from…» в нечитаемую
+            // простыню, и заполнить такую форму было уже нельзя.
+            var lines = TextLineBuilder.Build(words);
+            ApplyMeasuredLeading(paragraph, lines);
+            for (var i = 0; i < lines.Count; i++)
+            {
+                if (i > 0) paragraph.AppendChild(new Run(new Break()));
+                AppendRuns(paragraph, lines[i].Words, links, pageCount);
+            }
             AttachComments(paragraph, notes,
                 cell.Bounds.Left, cell.Bounds.Top, cell.Bounds.Right, cell.Bounds.Bottom);
             return paragraph;
@@ -425,8 +497,56 @@ public sealed class DocxExporter : IDisposable
         var properties = new RunProperties();
         if (cell.IsBold) properties.AppendChild(new Bold());
         paragraph.AppendChild(new Run(
-            properties, new Text(cell.Text) { Space = SpaceProcessingModeValues.Preserve }));
+            properties, new Text(XmlText.Safe(cell.Text)) { Space = SpaceProcessingModeValues.Preserve }));
         return paragraph;
+    }
+
+    /// <summary>
+    /// Межстрочный интервал — такой же, каким он был в документе.
+    ///
+    /// Word по умолчанию ставит строки «одинарно», а это около 1,22 кегля. В
+    /// вёрстке бланков интервал обычно плотнее, и разница в четверть строки на
+    /// каждой строке превращает три страницы в семь: содержимое перестаёт
+    /// помещаться в ячейки и переползает дальше. Здесь шаг берётся из самого
+    /// PDF — по расстоянию между серединами соседних строк.
+    ///
+    /// Медиана, а не среднее: одна пустая строка или заголовок другого кегля
+    /// внутри ячейки иначе растянули бы весь блок.
+    /// </summary>
+    private static void ApplyMeasuredLeading(Paragraph paragraph, IReadOnlyList<TextLine> lines)
+    {
+        if (lines.Count < 2) return;
+
+        var steps = new List<double>();
+        for (var i = 1; i < lines.Count; i++)
+        {
+            var step = lines[i - 1].CenterY - lines[i].CenterY;
+            if (step > 0) steps.Add(step);
+        }
+        if (steps.Count == 0) return;
+
+        var pitch = TextLine.Median(steps, 0);
+        if (pitch <= 0) return;
+
+        // Слишком тесный интервал срежет буквам верхушки: подставленный шрифт
+        // может оказаться крупнее исходного. Но и отказываться при малейшем
+        // сжатии нельзя — в бланках шаг строки почти всегда чуть меньше кегля,
+        // и прежнее правило «не меньше кегля» выключало перенос шага там, где
+        // он и нужен. Небольшое сжатие Word переживает без потерь.
+        var biggest = lines.Max(l => l.FontSize);
+        var floor = biggest * 0.85;
+        if (pitch < floor) pitch = floor;
+
+        var properties = paragraph.GetFirstChild<ParagraphProperties>();
+        if (properties == null) return;
+        properties.RemoveAllChildren<SpacingBetweenLines>();
+        properties.AppendChild(new SpacingBetweenLines
+        {
+            After = "0",
+            Before = "0",
+            Line = Twips(pitch),
+            LineRule = LineSpacingRuleValues.Exact,
+        });
     }
 
     /// <summary>Поворот текста ячейки, если повёрнуто большинство её слов.</summary>
@@ -577,7 +697,7 @@ public sealed class DocxExporter : IDisposable
 
             var id = (++_commentId).ToString();
             EnsureComments().AppendChild(new Comment(
-                new Paragraph(new Run(new Text(note.Contents) { Space = SpaceProcessingModeValues.Preserve })))
+                new Paragraph(new Run(new Text(XmlText.Safe(note.Contents)) { Space = SpaceProcessingModeValues.Preserve })))
             {
                 Id = id,
                 Author = note.Author.Length > 0 ? note.Author : "PDF",

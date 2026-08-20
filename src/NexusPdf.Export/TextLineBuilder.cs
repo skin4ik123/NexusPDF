@@ -60,6 +60,54 @@ public static class TextLineBuilder
         return smallest <= 0 || overlap >= smallest * SameLineOverlap;
     }
 
+    /// <summary>Во сколько кеглей должен быть разрыв, чтобы это была уже другая колонка.</summary>
+    private const double ColumnGapEm = 3.0;
+
+    /// <summary>И не меньше этого в пунктах — чтобы мелкий шрифт не рвался зря.</summary>
+    private const double MinColumnGapPt = 18.0;
+
+    /// <summary>
+    /// Разрезание строк по колонкам.
+    ///
+    /// Строка собирается по вертикальному перекрытию, и в неё попадает всё, что
+    /// стоит на этой высоте — включая соседнюю колонку. В шапке бланка заголовок
+    /// «THE REPUBLIC OF LIBERIA» и адрес справа лежат на одной высоте, и в Word
+    /// уезжала склейка «THE REPUBLIC OF LIBERIA Dulles, Suite 200 Virginia
+    /// 20166, USA», которую невозможно читать.
+    ///
+    /// Признак — разрыв в несколько кеглей: обычный пробел это четверть кегля,
+    /// а между колонками там были 25 и 62 пункта при кегле 7,6. Нижняя граница
+    /// в пунктах нужна, чтобы у мелкого шрифта не рвалось каждое второе слово.
+    ///
+    /// Вызывать это можно только ПОСЛЕ поиска таблиц по просветам: тому нужны
+    /// целые строки, по ним он и находит границы колонок.
+    /// </summary>
+    public static IReadOnlyList<TextLine> SplitColumns(IReadOnlyList<TextLine> lines)
+    {
+        var result = new List<TextLine>();
+        foreach (var line in lines)
+        {
+            if (line.Words.Count < 2) { result.Add(line); continue; }
+
+            var threshold = Math.Max(line.FontSize * ColumnGapEm, MinColumnGapPt);
+            var segment = new List<PdfTextWord> { line.Words[0] };
+            var right = line.Words[0].RectPt.Right;
+
+            foreach (var word in line.Words.Skip(1))
+            {
+                if (word.RectPt.Left - right > threshold)
+                {
+                    result.Add(new TextLine(segment));
+                    segment = new List<PdfTextWord>();
+                }
+                segment.Add(word);
+                right = Math.Max(right, word.RectPt.Right);
+            }
+            result.Add(new TextLine(segment));
+        }
+        return result;
+    }
+
     /// <summary>
     /// Разбиение строк на блоки по вертикальным разрывам: между абзацами и
     /// таблицами расстояние заметно больше, чем между строками внутри них.

@@ -133,8 +133,8 @@ public static class RulingTableDetector
     private static ExtractedTable? BuildTable(
         List<PdfRulingLine> rows, List<PdfRulingLine> columns, IReadOnlyList<PdfTextWord> words)
     {
-        var ys = rows.Select(r => r.Position).OrderByDescending(y => y).ToList();
-        var xs = columns.Select(c => c.Position).OrderBy(x => x).ToList();
+        var ys = Collapse(rows.Select(r => r.Position).OrderByDescending(y => y));
+        var xs = Collapse(columns.Select(c => c.Position).OrderBy(x => x));
         if (ys.Count < 2 || xs.Count < 2) return null;
 
         var rowCount = ys.Count - 1;
@@ -186,6 +186,29 @@ public static class RulingTableDetector
 
         return new ExtractedTable(
             rowCount, columnCount, cells, xs, TableSource.Ruling, bounds, Confidence: 1.0);
+    }
+
+    /// <summary>
+    /// Линии сетки по одной на позицию.
+    ///
+    /// Одну границу таблицы генераторы сплошь и рядом рисуют не целой линией, а
+    /// отдельным отрезком на каждую строку. Сшивание отрезков оставляет их
+    /// разными линиями с ОДИНАКОВОЙ позицией, и сетка получает десяток колонок
+    /// нулевой ширины вместо одной границы: у морского чек-листа RLM из четырёх
+    /// колонок выходило десять, а графы для отметок схлопывались в нитку.
+    ///
+    /// Порядок значений сохраняется — вызывающий уже отсортировал их так, как
+    /// ему нужно (строки сверху вниз, колонки слева направо).
+    /// </summary>
+    private static List<double> Collapse(IEnumerable<double> positions)
+    {
+        var result = new List<double>();
+        foreach (var position in positions)
+        {
+            if (result.Count > 0 && Math.Abs(position - result[^1]) <= SnapTolerance) continue;
+            result.Add(position);
+        }
+        return result;
     }
 
     private static bool HasVertical(List<PdfRulingLine> columns, double x, double bottom, double top)
