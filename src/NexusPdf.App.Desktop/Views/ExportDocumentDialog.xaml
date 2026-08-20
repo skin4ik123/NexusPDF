@@ -1,4 +1,4 @@
-<Window x:Class="NexusPdf.App.Desktop.Views.ExportDocumentDialog"
+﻿<Window x:Class="NexusPdf.App.Desktop.Views.ExportDocumentDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:l="clr-namespace:NexusPdf.App.Desktop.Localization"
@@ -20,7 +20,7 @@
     <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
       <RadioButton x:Name="ScopeRange" Content="{l:Loc ExportScopeRange}" VerticalAlignment="Center"
                    Foreground="{DynamicResource TextBrush}"/>
-      <TextBox x:Name="RangeBox" Width="170" Margin="10,0,0,0" Style="{StaticResource ThemedTextBox}"
+      <TextBox x:Name="RangeBox" AutomationProperties.Name="{l:Loc ExportScopeRange}" Width="170" Margin="10,0,0,0" Style="{StaticResource ThemedTextBox}"
                IsEnabled="{Binding IsChecked, ElementName=ScopeRange}"
                TextChanged="OnRangeChanged"/>
     </StackPanel>

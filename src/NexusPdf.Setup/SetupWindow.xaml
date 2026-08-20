@@ -1,4 +1,4 @@
-<Window x:Class="NexusPdf.Setup.SetupWindow"
+﻿<Window x:Class="NexusPdf.Setup.SetupWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Install NexusPDF"
@@ -162,6 +162,7 @@
               <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <TextBox x:Name="PathBox" FontSize="13" Padding="8,7" BorderBrush="{StaticResource Line}"
+                     AutomationProperties.Name="Installation folder"
                      Foreground="{StaticResource Ink}" TextChanged="OnPathEdited"/>
             <Button Grid.Column="1" Content="Browse…" Style="{StaticResource Ghost}" Margin="8,0,0,0"
                     Click="OnBrowse"/>

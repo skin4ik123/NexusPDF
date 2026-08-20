@@ -1,4 +1,4 @@
-<Window x:Class="NexusPdf.App.Desktop.Views.AddTextDialog"
+﻿<Window x:Class="NexusPdf.App.Desktop.Views.AddTextDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:l="clr-namespace:NexusPdf.App.Desktop.Localization"
@@ -8,7 +8,7 @@
         Background="{DynamicResource PanelBg}">
   <StackPanel Margin="20">
     <TextBlock Text="{l:Loc AtText}" Foreground="{DynamicResource TextSecondary}" FontSize="12"/>
-    <TextBox x:Name="TextBox1" Style="{StaticResource ThemedTextBox}" Margin="0,4,0,0"/>
+    <TextBox x:Name="TextBox1" AutomationProperties.Name="{l:Loc AtText}" Style="{StaticResource ThemedTextBox}" Margin="0,4,0,0"/>
 
     <!-- Гарнитура и начертание. Список закрытый: в него входят только шрифты,
          которые есть в самой Windows и умеют кириллицу, — иначе документ у
@@ -22,7 +22,7 @@
         <ColumnDefinition Width="8"/>
         <ColumnDefinition Width="Auto"/>
       </Grid.ColumnDefinitions>
-      <ComboBox x:Name="FontBox" Grid.Column="0" SelectedIndex="0">
+      <ComboBox x:Name="FontBox" AutomationProperties.Name="{l:Loc FontFamilyLabel}" Grid.Column="0" SelectedIndex="0">
         <ComboBox.ItemTemplate>
           <DataTemplate>
             <TextBlock Text="{Binding}" FontFamily="{Binding}" FontSize="14"/>
@@ -49,7 +49,7 @@
       </Grid.ColumnDefinitions>
       <StackPanel Grid.Column="0">
         <TextBlock Text="{l:Loc FontSizeLabel}" Foreground="{DynamicResource TextSecondary}" FontSize="12"/>
-        <TextBox x:Name="SizeBox" Style="{StaticResource ThemedTextBox}" Margin="0,4,0,0" Text="14"/>
+        <TextBox x:Name="SizeBox" AutomationProperties.Name="{l:Loc FontSizeLabel}" Style="{StaticResource ThemedTextBox}" Margin="0,4,0,0" Text="14"/>
       </StackPanel>
       <StackPanel Grid.Column="2">
         <TextBlock Text="{l:Loc AtColor}" Foreground="{DynamicResource TextSecondary}" FontSize="12"/>

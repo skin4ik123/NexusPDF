@@ -951,5 +951,8 @@
   "SettingSingleInstance": "Открывать всё в одном окне",
   "SettingSingleInstanceHint": "Новый файл открывается вкладкой в уже запущенной программе, а не отдельным окном",
   "SettingSingleInstanceOn": "Следующие файлы откроются в этом окне",
-  "SettingSingleInstanceOff": "Следующие файлы откроются в отдельных окнах"
+  "SettingSingleInstanceOff": "Следующие файлы откроются в отдельных окнах",
+  "WmDefaultText": "ЧЕРНОВИК",
+  "ObjectXMm": "X, мм",
+  "ObjectYMm": "Y, мм"
 }

@@ -480,15 +480,15 @@
               <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0" Margin="0,0,6,0">
-              <TextBlock Text="X, мм" FontSize="10" Foreground="{DynamicResource TextSecondary}"/>
-              <TextBox Style="{StaticResource ThemedTextBox}"
+              <TextBlock Text="{l:Loc ObjectXMm}" FontSize="10" Foreground="{DynamicResource TextSecondary}"/>
+              <TextBox AutomationProperties.Name="{l:Loc ObjectXMm}" Style="{StaticResource ThemedTextBox}"
                        IsEnabled="{Binding CanMoveSelectedObject}"
                        KeyDown="OnObjectFieldKeyDown"
                        Text="{Binding SelectedObjectXMm, StringFormat={}{0:F1}}"/>
             </StackPanel>
             <StackPanel Grid.Column="1">
-              <TextBlock Text="Y, мм" FontSize="10" Foreground="{DynamicResource TextSecondary}"/>
-              <TextBox Style="{StaticResource ThemedTextBox}"
+              <TextBlock Text="{l:Loc ObjectYMm}" FontSize="10" Foreground="{DynamicResource TextSecondary}"/>
+              <TextBox AutomationProperties.Name="{l:Loc ObjectYMm}" Style="{StaticResource ThemedTextBox}"
                        IsEnabled="{Binding CanMoveSelectedObject}"
                        KeyDown="OnObjectFieldKeyDown"
                        Text="{Binding SelectedObjectYMm, StringFormat={}{0:F1}}"/>
@@ -505,7 +505,7 @@
             <StackPanel Grid.Column="0" Margin="0,0,6,0">
               <TextBlock Text="{l:Loc UxObjectWidth}" FontSize="10"
                          Foreground="{DynamicResource TextSecondary}"/>
-              <TextBox Style="{StaticResource ThemedTextBox}"
+              <TextBox AutomationProperties.Name="{l:Loc UxObjectWidth}" Style="{StaticResource ThemedTextBox}"
                        IsEnabled="{Binding CanResizeSelectedObject}"
                        KeyDown="OnObjectFieldKeyDown"
                        Text="{Binding SelectedObjectWidthMm, StringFormat={}{0:F1}}"/>
@@ -513,7 +513,7 @@
             <StackPanel Grid.Column="1">
               <TextBlock Text="{l:Loc UxObjectHeight}" FontSize="10"
                          Foreground="{DynamicResource TextSecondary}"/>
-              <TextBox Style="{StaticResource ThemedTextBox}"
+              <TextBox AutomationProperties.Name="{l:Loc UxObjectHeight}" Style="{StaticResource ThemedTextBox}"
                        IsEnabled="{Binding CanResizeSelectedObject}"
                        KeyDown="OnObjectFieldKeyDown"
                        Text="{Binding SelectedObjectHeightMm, StringFormat={}{0:F1}}"/>
@@ -657,7 +657,7 @@
           </Grid>
           <!-- Поиск по панели: шестьдесят инструментов глазом не охватить. -->
           <Grid Grid.Row="1" Margin="10,0,10,6">
-            <TextBox x:Name="ToolsSearch" Padding="26,4,22,4"
+            <TextBox x:Name="ToolsSearch" AutomationProperties.Name="{l:Loc ToolsSearchHint}" Padding="26,4,22,4"
                      Text="{Binding DataContext.Tools.Filter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged,
                             RelativeSource={RelativeSource AncestorType=Window}}"
                      Background="{DynamicResource CardBg}" Foreground="{DynamicResource TextBrush}"

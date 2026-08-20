@@ -1,4 +1,4 @@
-<Window x:Class="NexusPdf.App.Desktop.Views.ExportImagesDialog"
+﻿<Window x:Class="NexusPdf.App.Desktop.Views.ExportImagesDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:l="clr-namespace:NexusPdf.App.Desktop.Localization"
@@ -21,7 +21,7 @@
 
     <TextBlock Text="{l:Loc ExportDpi}" Foreground="{DynamicResource TextSecondary}" FontSize="12"
                Margin="0,12,0,4"/>
-    <ComboBox x:Name="DpiCombo" Width="120" HorizontalAlignment="Left" SelectedIndex="1">
+    <ComboBox x:Name="DpiCombo" AutomationProperties.Name="{l:Loc ExportDpi}" Width="120" HorizontalAlignment="Left" SelectedIndex="1">
       <ComboBoxItem Content="96"/>
       <ComboBoxItem Content="150"/>
       <ComboBoxItem Content="300"/>

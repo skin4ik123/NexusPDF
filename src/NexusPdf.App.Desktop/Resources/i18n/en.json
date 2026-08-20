@@ -951,5 +951,8 @@
   "SettingSingleInstance": "Open everything in one window",
   "SettingSingleInstanceHint": "A new file opens as a tab in the running program instead of a separate window",
   "SettingSingleInstanceOn": "The next files will open in this window",
-  "SettingSingleInstanceOff": "The next files will open in separate windows"
+  "SettingSingleInstanceOff": "The next files will open in separate windows",
+  "WmDefaultText": "DRAFT",
+  "ObjectXMm": "X, mm",
+  "ObjectYMm": "Y, mm"
 }
