@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace NexusPdf.UnitTests;
@@ -139,6 +139,40 @@ public sealed class LocalizationCoverageTests
         }
 
         Assert.True(problems.Count == 0, string.Join("\n", problems));
+    }
+
+    /// <summary>
+    /// Ключи, которые собираются из имени значения перечисления:
+    /// Loc.Get("PrinterState_" + state) и подобные.
+    ///
+    /// Поиск по строковым литералам такие обращения не видит, поэтому новое
+    /// значение перечисления тихо превращается в латинское имя ключа посреди
+    /// русского окна — ровно там, где пользователь ждёт состояние принтера.
+    /// </summary>
+    [Fact]
+    public void Composed_Enum_Keys_Exist_In_Every_Language()
+    {
+        var dir = Path.Combine(RepoRoot(), "src", "NexusPdf.App.Desktop", "Resources", "i18n");
+        var packs = Directory.GetFiles(dir, "*.json")
+            .ToDictionary(Path.GetFileNameWithoutExtension, ReadKeys, StringComparer.Ordinal);
+
+        var wanted = Enum.GetValues<NexusPdf.Printing.PrinterState>()
+            .Select(state => "PrinterState_" + state)
+            .Concat(Enum.GetValues<NexusPdf.Printing.PrintJobState>()
+                .Select(NexusPdf.Printing.PrintJobStateMapper.TitleKey))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(key => key, StringComparer.Ordinal)
+            .ToList();
+
+        var problems = new List<string>();
+        foreach (var (language, keys) in packs.OrderBy(p => p.Key, StringComparer.Ordinal))
+        {
+            var missing = wanted.Where(key => !keys.Contains(key)).ToList();
+            if (missing.Count > 0)
+                problems.Add($"{language}: нет строк — {string.Join(", ", missing)}");
+        }
+
+        Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems));
     }
 
     private static Dictionary<string, string> ReadValues(string path)

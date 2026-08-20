@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -44,7 +44,7 @@ public static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine("Операция не выполнена: " + ex.Message);
+            Console.Error.WriteLine("Операция не выполнена: " + Explain(ex));
             return 2;
         }
         finally
@@ -56,15 +56,110 @@ public static class Program
         }
     }
 
+    /// <summary>
+    /// Понятная причина отказа вместо системного текста.
+    ///
+    /// Самые частые сбои — файла нет и нет доступа — приходят из .NET на
+    /// английском, и программа, которая везде говорит по-русски, вдруг выдавала
+    /// «Could not find file» или «Access to the path is denied». Здесь эти
+    /// случаи названы по-человечески, а всё прочее остаётся как есть: выдумывать
+    /// перевод неизвестной ошибки хуже, чем показать её дословно.
+    /// </summary>
+    private static string Explain(Exception ex) => ex switch
+    {
+        FileNotFoundException e => $"файл не найден: {e.FileName}",
+        DirectoryNotFoundException => "папка не найдена — проверьте путь.",
+        UnauthorizedAccessException => "нет доступа к файлу или папке. " +
+            "Файл может быть открыт в другой программе или защищён от записи.",
+        IOException e when e.Message.Contains("being used by another process",
+            StringComparison.OrdinalIgnoreCase) => "файл занят другой программой — закройте его и повторите.",
+        PathTooLongException => "слишком длинный путь к файлу.",
+        OutOfMemoryException => "не хватило памяти. Попробуйте обработать файл по частям ключом --pages.",
+        _ => ex.Message,
+    };
+
     private sealed class UsageException : Exception
     {
         public UsageException(string message) : base(message) { }
+    }
+
+    /// <summary>
+    /// Ключи, которые понимает каждая команда.
+    ///
+    /// Раньше неизвестный ключ просто игнорировался, и программа делала вид,
+    /// что поняла: «export-images --pages 1» молча выгружало все страницы, а
+    /// опечатка «--forse» съедала следующий аргумент — путь к файлу — и
+    /// превращалась в «нужны вход и выход». Отказ с перечнем допустимых
+    /// ключей честнее любого из этих двух исходов.
+    /// </summary>
+    private static readonly Dictionary<string, string[]> KnownOptions = new(StringComparer.Ordinal)
+    {
+        ["export-images"] = ["dpi", "format", "password", "force"],
+        ["extract-text"] = ["password", "force"],
+        ["word"] = ["pages", "ocr", "no-guess-tables", "engine", "lang", "password", "force"],
+        ["excel"] = ["pages", "ocr", "no-guess-tables", "dot-decimal", "engine", "lang", "password", "force"],
+        ["merge"] = ["force"],
+        ["from-images"] = ["force"],
+        ["optimize"] = ["force"],
+        ["compress"] = ["preset", "dpi", "quality", "keep-fonts", "force"],
+        ["protect"] = ["password", "owner-password", "force"],
+        ["ocr"] = ["editable", "engine", "lang", "password", "force"],
+        ["compare"] = ["text", "password-a", "password-b"],
+    };
+
+    /// <summary>Ключ, на который похож ошибочный: подсказка вместо голого отказа.</summary>
+    private static string? ClosestOption(string wrong, IEnumerable<string> known)
+    {
+        string? best = null;
+        var bestDistance = int.MaxValue;
+        foreach (var candidate in known)
+        {
+            var distance = Distance(wrong, candidate);
+            if (distance < bestDistance) { bestDistance = distance; best = candidate; }
+        }
+        // Правка на треть длины — уже не опечатка, а другой ключ.
+        return bestDistance <= Math.Max(1, wrong.Length / 3) ? best : null;
+    }
+
+    private static int Distance(string a, string b)
+    {
+        var previous = new int[b.Length + 1];
+        var current = new int[b.Length + 1];
+        for (var j = 0; j <= b.Length; j++) previous[j] = j;
+        for (var i = 1; i <= a.Length; i++)
+        {
+            current[0] = i;
+            for (var j = 1; j <= b.Length; j++)
+            {
+                var cost = char.ToLowerInvariant(a[i - 1]) == char.ToLowerInvariant(b[j - 1]) ? 0 : 1;
+                current[j] = Math.Min(Math.Min(current[j - 1] + 1, previous[j] + 1), previous[j - 1] + cost);
+            }
+            (previous, current) = (current, previous);
+        }
+        return previous[b.Length];
+    }
+
+    private static void RejectUnknownOptions(string verb, Dictionary<string, string> options)
+    {
+        if (!KnownOptions.TryGetValue(verb, out var known))
+            return;
+        foreach (var name in options.Keys)
+        {
+            if (known.Contains(name, StringComparer.OrdinalIgnoreCase))
+                continue;
+            var hint = ClosestOption(name, known);
+            throw new UsageException(
+                $"{verb}: ключ --{name} не существует." +
+                (hint == null ? "" : $" Возможно, имелся в виду --{hint}.") +
+                $" Допустимы: {string.Join(", ", known.Select(k => "--" + k))}.");
+        }
     }
 
     private static async Task<int> RunAsync(PdfiumRenderEngine engine, string verb, string[] rest)
     {
         var ct = CancellationToken.None;
         var (positional, options) = ParseArgs(rest);
+        RejectUnknownOptions(verb, options);
 
         switch (verb)
         {
@@ -660,10 +755,13 @@ NexusPdfCli — консольные операции NexusPDF (локально
       Сборка PDF из изображений (PNG/JPEG/BMP/TIFF; каждая — страница).
   optimize      <вход.pdf> <выход.pdf>
       Структурная оптимизация без потерь (qpdf) + линеаризация.
-  compress      <вход.pdf> <выход.pdf> [--dpi 150] [--quality 75]
+  compress      <вход.pdf> <выход.pdf> [--preset smart] [--dpi 150] [--quality 75] [--keep-fonts]
       Сжатие С ПОТЕРЯМИ: изображения выше целевого DPI уменьшаются и
       пересжимаются в JPEG. Прозрачные и факсовые (CCITT/JBIG2/JPX)
       пропускаются; защищённые паролем файлы — честный отказ.
+      --preset: smart | quality | balanced | max | structure | custom.
+      Явные --dpi или --quality означают «делай как сказано» и отменяют пресет.
+      --keep-fonts оставляет шрифты целиком, без вырезания неиспользуемых глифов.
   protect       <вход.pdf> <выход.pdf> --password X [--owner-password Y]
       Защищённая копия (AES-256). Пароль в командной строке виден другим
       процессам и попадает в историю — надёжнее задать его переменной
@@ -682,7 +780,8 @@ NexusPdfCli — консольные операции NexusPDF (локально
       пословные текстовые отличия изменённых страниц (- удалено, + добавлено).
 
 Общее: --force — перезаписать существующие файлы результата (в том числе
-картинки страниц у export-images). merge и from-images переносят страницы
+картинки страниц у export-images). Ключ, которого у команды нет, — ошибка
+аргументов, а не молчаливое умолчание. merge и from-images переносят страницы
 и аннотации, но не закладки/формы/вложения исходников.
 Коды возврата: 0 — успех, 1 — ошибка аргументов, 2 — ошибка операции,
 3 — compare нашёл отличия.

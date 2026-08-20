@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using NexusPdf.App.Desktop.Localization;
@@ -190,6 +190,25 @@ public static class AppMenuFactory
             }.WithClick(_ => main.SetLanguageCommand.Execute(setting)));
         }
         settings.Items.Add(language);
+
+        settings.Items.Add(new Separator());
+        // Обе настройки уже были в файле настроек и влияли на поведение, но
+        // менять их можно было только руками в JSON — для пользователя их
+        // попросту не существовало.
+        settings.Items.Add(new MenuItem
+        {
+            Header = Loc.Get("SettingKeepBackup"),
+            ToolTip = Loc.Get("SettingKeepBackupHint"),
+            IsCheckable = true,
+            IsChecked = main.KeepBackupOnSave,
+        }.WithClick(_ => main.ToggleKeepBackupCommand.Execute(null)));
+        settings.Items.Add(new MenuItem
+        {
+            Header = Loc.Get("SettingSingleInstance"),
+            ToolTip = Loc.Get("SettingSingleInstanceHint"),
+            IsCheckable = true,
+            IsChecked = main.SingleInstance,
+        }.WithClick(_ => main.ToggleSingleInstanceCommand.Execute(null)));
 
         settings.Items.Add(new Separator());
         settings.Items.Add(new MenuItem { Header = Loc.Get("UxQuickPanelMenu") }

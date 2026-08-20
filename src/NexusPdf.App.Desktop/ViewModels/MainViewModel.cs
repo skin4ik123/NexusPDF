@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
@@ -2339,6 +2339,43 @@ public sealed partial class MainViewModel : ObservableObject
         Services.Ux.TouchInputWatcher.SetSetting(density);
         if (ActiveDocument is { } doc)
             doc.StatusText = Loc.Get("UxDensityApplied");
+    }
+
+    public bool KeepBackupOnSave => _services.Settings.KeepBackupOnSave;
+
+    /// <summary>
+    /// Резервная копия рядом с файлом при сохранении.
+    ///
+    /// Настройка была в файле настроек и работала, но включить её из
+    /// программы было нельзя — то есть для пользователя её не существовало.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleKeepBackup()
+    {
+        _services.Settings.KeepBackupOnSave = !_services.Settings.KeepBackupOnSave;
+        _services.SaveSettings();
+        OnPropertyChanged(nameof(KeepBackupOnSave));
+        if (ActiveDocument is { } doc)
+            doc.StatusText = Loc.Get(_services.Settings.KeepBackupOnSave
+                ? "SettingBackupOn" : "SettingBackupOff");
+    }
+
+    public bool SingleInstance => _services.Settings.SingleInstance;
+
+    /// <summary>
+    /// Открывать документы в уже запущенной программе или каждый в своём окне.
+    /// Проверяется при запуске, поэтому применяется со следующего открытия
+    /// файла — об этом и говорит строка состояния.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleSingleInstance()
+    {
+        _services.Settings.SingleInstance = !_services.Settings.SingleInstance;
+        _services.SaveSettings();
+        OnPropertyChanged(nameof(SingleInstance));
+        if (ActiveDocument is { } doc)
+            doc.StatusText = Loc.Get(_services.Settings.SingleInstance
+                ? "SettingSingleInstanceOn" : "SettingSingleInstanceOff");
     }
 
     [RelayCommand]

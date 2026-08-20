@@ -23,8 +23,23 @@ public static class Loc
     /// </summary>
     public static IReadOnlyList<string> AvailableLanguages { get; } = new[] { "en", "ru", "uk" };
 
+    /// <summary>
+    /// Язык системы, если перевод на него есть, иначе английский.
+    ///
+    /// Нужно для первого запуска: программа переведена на три языка, и
+    /// открываться по-английски на русской или украинской Windows ей незачем.
+    /// Английский остаётся запасным вариантом для всех остальных систем.
+    /// </summary>
+    public static string SystemDefault()
+    {
+        var code = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+        return AvailableLanguages.Contains(code, StringComparer.OrdinalIgnoreCase) ? code : "en";
+    }
+
+    /// <param name="language">Пусто — взять язык системы.</param>
     public static void Load(string language)
     {
+        if (string.IsNullOrWhiteSpace(language)) language = SystemDefault();
         _fallback = ReadDictionary("ru") ?? new Dictionary<string, string>();
         _current = ReadDictionary(language) ?? _fallback;
         CurrentLanguage = _current == _fallback ? "ru" : language;

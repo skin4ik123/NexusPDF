@@ -1,4 +1,4 @@
-using NexusPdf.Infrastructure;
+﻿using NexusPdf.Infrastructure;
 
 namespace NexusPdf.UnitTests;
 
@@ -34,9 +34,10 @@ public sealed class InfrastructureTests : IDisposable
         var path = Path.Combine(_dir, "settings.json");
         File.WriteAllText(path, "{ мусор ");
         var loaded = new JsonSettingsStore(path).Load();
-        // Умолчание языка — английский: программа рассчитана не только на
-        // русскоговорящих, а выбранный язык хранится в этом же файле.
-        Assert.Equal("en", loaded.Language);
+        // Умолчание языка — пусто, то есть «как в системе»: программа
+        // переведена на три языка, и открываться по-английски на русской
+        // Windows ей незачем. Выбранный вручную язык хранится в этом же файле.
+        Assert.Equal("", loaded.Language);
     }
 
     [Fact]

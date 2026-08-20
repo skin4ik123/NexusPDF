@@ -6,7 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="PDFiumCore" Version="152.0.7961" />
+    <PackageReference Include="PDFiumCore" Version="153.0.7999" />
   </ItemGroup>
 
   <ItemGroup>

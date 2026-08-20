@@ -1,4 +1,4 @@
-<UserControl x:Class="NexusPdf.App.Desktop.Views.DocumentView"
+﻿<UserControl x:Class="NexusPdf.App.Desktop.Views.DocumentView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:l="clr-namespace:NexusPdf.App.Desktop.Localization"
@@ -743,15 +743,25 @@
                       <ItemsControl.ItemTemplate>
                         <DataTemplate>
                           <Button Style="{StaticResource ToolButton}" Command="{Binding Invoke}"
-                                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                                   ToolTip="{Binding Tooltip}"
                                   AutomationProperties.Name="{Binding Title}">
-                            <StackPanel Orientation="Horizontal">
+                            <!-- Сетка, а НЕ горизонтальный StackPanel: в стопке
+                                 надписи меряются в бесконечной ширине, поэтому
+                                 многоточие никогда не срабатывало, и длинное
+                                 название просто срезалось краем панели на
+                                 полуслове. В колонке «*» ширина конечна, и
+                                 обрезка снова означает многоточие. -->
+                            <Grid>
+                              <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                              </Grid.ColumnDefinitions>
                               <TextBlock Style="{StaticResource ToolGlyph}" Text="{Binding Glyph}"
                                          Width="22"/>
-                              <TextBlock Text="{Binding Title}" Margin="6,0,0,0"
+                              <TextBlock Grid.Column="1" Text="{Binding Title}" Margin="6,0,0,0"
                                          VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
+                            </Grid>
                           </Button>
                         </DataTemplate>
                       </ItemsControl.ItemTemplate>

@@ -943,5 +943,13 @@
   "FontKeepNamed": "Keep: {0}",
   "TextEditRasterNeeded": "This line can only be changed by flattening the page",
   "TextEditRasterNeededHint": "Its text sits inside a nested object of the document and cannot be rewritten in place. NexusPDF will erase the line and put the new text over it — but to remove the old letters for good, this page becomes an image when you save. Text elsewhere on this page will stop being selectable and searchable. Other pages are untouched.",
-  "TextEditRasterAccept": "Edit and flatten the page"
+  "TextEditRasterAccept": "Edit and flatten the page",
+  "SettingKeepBackup": "Keep a backup copy",
+  "SettingKeepBackupHint": "On save, the previous version stays next to the file with a .bak extension",
+  "SettingBackupOn": "A backup copy will be kept next to the file",
+  "SettingBackupOff": "Backup copies are no longer kept",
+  "SettingSingleInstance": "Open everything in one window",
+  "SettingSingleInstanceHint": "A new file opens as a tab in the running program instead of a separate window",
+  "SettingSingleInstanceOn": "The next files will open in this window",
+  "SettingSingleInstanceOff": "The next files will open in separate windows"
 }

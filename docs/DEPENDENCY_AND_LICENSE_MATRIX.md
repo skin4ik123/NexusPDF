@@ -19,7 +19,7 @@
 | Зависимость | Версия | Назначение | Лицензия | Закрытый комм. продукт | Уведомления | Источник | Проверка поставки |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | .NET 10 (runtime/SDK) | 10.0.400 | платформа | MIT | да | да | dotnet.microsoft.com | подпись Microsoft |
-| PDFiumCore | 152.0.7961 | биндинги PDFium | MIT | да | да | nuget.org | SHA-512 NuGet |
+| PDFiumCore | 153.0.7999 | биндинги PDFium | MIT | да | да | nuget.org | SHA-512 NuGet |
 | bblanchon.PDFium.Win32 | 152.0.7961 | нативный PDFium | Apache-2.0 + BSD-3-Clause | да | да | nuget.org (сборки pdfium-binaries) | SHA-512 NuGet |
 | CommunityToolkit.Mvvm | 8.4.2 | MVVM-генераторы | MIT | да | да | nuget.org | SHA-512 NuGet |
 | Microsoft.Extensions.DependencyInjection | 10.0.11 | DI | MIT | да | да | nuget.org | SHA-512 NuGet |
