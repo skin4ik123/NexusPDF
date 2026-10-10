@@ -49,6 +49,7 @@ internal static class PdfiumImageEncoding
             var pagePointer = page.__Instance;
             var success = LoadInline((IntPtr)(&pagePointer), 1, obj.__Instance, ref windowsAccess) != 0;
             GC.KeepAlive(callback);
+            Console.WriteLine($"JPEG_PROBE bytes={jpeg.Length} loaded={success} windows=true");
             return success;
         }
 

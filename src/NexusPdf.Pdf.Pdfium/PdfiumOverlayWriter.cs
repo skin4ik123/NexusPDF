@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using NexusPdf.Pdf.Abstractions;
 using PDFiumCore;
 
@@ -1225,6 +1225,7 @@ internal static class PdfiumOverlayWriter
 
         try
         {
+            Console.WriteLine($"OVERLAY_PROBE jpegBytes={image.EncodedJpeg?.Length ?? 0}");
             if (image.EncodedJpeg is not { Length: > 0 } ||
                 !PdfiumImageEncoding.LoadJpeg(page, obj, image.EncodedJpeg))
             {

@@ -367,7 +367,7 @@ internal static class PdfiumScanEnhancer
         try
         {
             var bitmap = fpdfview.FPDFBitmapCreateEx(
-                width, height, 3, handle.AddrOfPinnedObject(), width * 4);
+                width, height, PdfiumImageEncoding.BitmapFormat(bgra), handle.AddrOfPinnedObject(), width * 4);
             if (bitmap == null || bitmap.__Instance == IntPtr.Zero) return false;
             try
             {

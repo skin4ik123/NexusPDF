@@ -251,6 +251,7 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
         // Quality can reduce an oversized JPEG even without downsampling.
         // The 15% size gate below rejects pointless repeated recompression.
 
+        var replacingOriginal = false;
         long oldLength = ReadStreamLength(doc, entry.Xref);
         if (oldLength <= 2048) return false; // мелочь не окупает ни риска, ни времени
 
@@ -296,6 +297,7 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
                     $"/ColorSpace {colourSpace} /BitsPerComponent 8 >>");
                 doc.UpdateStream(replacement, jpeg, compress: false);
                 doc.XrefSetKey(replacement, "Filter", "/DCTDecode");
+                replacingOriginal = true;
                 doc.XrefCopy(replacement, entry.Xref, new[] { "OC", "Interpolate" });
                 return true;
             }
@@ -304,8 +306,10 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
                 if (owned) pix.Dispose();
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            if (replacingOriginal)
+                throw new PdfEngineException("Не удалось безопасно заменить изображение; исходный документ сохранён.", ex);
             // Одна несговорчивая картинка не должна срывать сжатие документа:
             // она просто остаётся как была.
             return false;

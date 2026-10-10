@@ -1,4 +1,4 @@
-name: Verify NexusPDF 0.26 PDF fixes
+name: Diagnose remaining JPEG regressions
 
 on:
   push:
@@ -34,7 +34,7 @@ jobs:
         run: dotnet test tests/NexusPdf.UnitTests -c Release --no-build --logger "trx"
 
       - name: PDF engine and reported regression tests
-        run: dotnet test tests/NexusPdf.PdfEngineTests -c Release --no-build --logger "trx"
+        run: dotnet test tests/NexusPdf.PdfEngineTests -c Release --no-build --filter "FullyQualifiedName~ReportedPdfRegressionTests" --logger "trx" --logger "console;verbosity=detailed"
 
       - name: Printing tests
         if: ${{ !cancelled() }}

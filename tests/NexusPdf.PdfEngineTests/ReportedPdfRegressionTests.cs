@@ -9,6 +9,8 @@ namespace NexusPdf.PdfEngineTests;
 
 public sealed class ReportedPdfRegressionTests : IAsyncLifetime
 {
+    private readonly Xunit.Abstractions.ITestOutputHelper _output;
+    public ReportedPdfRegressionTests(Xunit.Abstractions.ITestOutputHelper output) => _output = output;
     private readonly PdfiumRenderEngine _pdfium = new();
     private readonly MuPdfCompressionEngine _mupdf = new();
     private readonly QpdfEngine _qpdf = new();
@@ -187,6 +189,10 @@ public sealed class ReportedPdfRegressionTests : IAsyncLifetime
                 new ImagePageSpec(pixels, 600, 800, 600, 800, jpeg)
             }, target, CancellationToken.None);
         }
+        _output.WriteLine($"JPEG import: {jpeg.Length} bytes -> PDF {new FileInfo(target).Length} bytes; overlay={overlay}.");
+        _output.WriteLine("PDF filters: " + string.Join("; ",
+            System.Text.RegularExpressions.Regex.Matches(Encoding.Latin1.GetString(File.ReadAllBytes(target)),
+                @"/Filter[^>\n\r]{0,100}").Select(match => match.Value)));
         Assert.True(new FileInfo(target).Length <= jpeg.Length + 4096,
             $"Import inflated a {jpeg.Length}-byte JPEG to {new FileInfo(target).Length} bytes.");
         await using var reopened = await _pdfium.OpenAsync(target, null, CancellationToken.None);
@@ -204,6 +210,7 @@ public sealed class ReportedPdfRegressionTests : IAsyncLifetime
         }, source, CancellationToken.None);
         var result = await _mupdf.CompressAsync(source, target,
             new PdfCompressionRequest(150, 35, false, false), CancellationToken.None);
+        _output.WriteLine($"Photo compression: {result.BytesBefore} bytes -> {result.BytesAfter} bytes.");
         Assert.True(result.Recompressed > 0, "An unnecessary alpha mask prevented photo compression.");
         Assert.True(result.BytesAfter < result.BytesBefore / 2);
     }
@@ -328,6 +335,8 @@ public sealed class ReportedPdfRegressionTests : IAsyncLifetime
         Assert.Equal(transparent ? 0 : 1, result.Recompressed);
         await using var reopened = await _pdfium.OpenAsync(target, null, CancellationToken.None);
         var image = await reopened.RenderPageAsync(0, 120, 120, 0, CancellationToken.None);
+        var rightCentre = 60 * image.Stride + 90 * 4;
+        _output.WriteLine($"Legacy mask transparent={transparent}, kept={result.KeptOriginal}, right RGB={image.Bgra[rightCentre + 2]},{image.Bgra[rightCentre + 1]},{image.Bgra[rightCentre]}");
         AssertVisible(image);
         if (transparent)
         {
@@ -372,6 +381,40 @@ public sealed class ReportedPdfRegressionTests : IAsyncLifetime
         await tools.CompressImagesCopyAsync(document, Path.Combine(dir, "copy.pdf"),
             100, 35, RejectEncoding, CancellationToken.None, structureOnly: true);
         AssertVisible(await document.RenderLogicalPageAsync(0, 120, 160, CancellationToken.None));
+    }
+
+    private sealed class FailingCompression : IPdfCompressionEngine
+    {
+        public bool IsAvailable => true;
+        public string UnavailableReason => "";
+        public Task<PdfCompressionResult> CompressAsync(string sourcePath, string targetPath,
+            PdfCompressionRequest request, CancellationToken ct)
+        {
+            File.Copy(sourcePath, targetPath);
+            throw new PdfEngineException("Simulated failure after a partial output was created.");
+        }
+    }
+
+    [Fact]
+    public async Task Failed_Processing_Preserves_The_Session_And_Removes_Intermediate_Files()
+    {
+        var dir = NewDir();
+        var source = Path.Combine(dir, "source.pdf");
+        await _pdfium.CreateImageDocumentAsync(new[] {
+            new ImagePageSpec(Pixels(200, 200), 200, 200, 200, 200)
+        }, source, CancellationToken.None);
+        var original = File.ReadAllBytes(source);
+        await using var document = await OpenedDocument.OpenAsync(_pdfium, source, null, CancellationToken.None);
+        var originalModel = document.Session.Model;
+        var tools = new DocumentToolsService(_pdfium, _qpdf, _qpdf, new FailingCompression());
+        await Assert.ThrowsAsync<PdfEngineException>(() => tools.ProcessInPlaceAsync(document,
+            new ProcessingPlan(Compress: new PdfCompressionRequest(100, 35, false, false)), dir,
+            (bgra, w, h, choice) => Jpeg(bgra, w, h, choice.Quality), null, CancellationToken.None));
+        Assert.Same(originalModel, document.Session.Model);
+        Assert.False(document.Session.IsDirty);
+        Assert.Equal(original, File.ReadAllBytes(source));
+        Assert.Empty(Directory.GetFiles(dir, "processed-*.pdf"));
+        AssertVisible(await document.RenderLogicalPageAsync(0, 120, 120, CancellationToken.None));
     }
 
 }
