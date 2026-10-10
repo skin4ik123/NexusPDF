@@ -15,7 +15,6 @@ namespace NexusPdf.Pdf.Pdfium;
 internal static class PdfiumOverlayWriter
 {
     private const int FpdfFontTrueType = 2;
-    private const int FpdfBitmapBgra = 4;
 
     public static void ApplyOverlays(
         FpdfDocumentT document, FpdfPageT page, OverlayFontCache fonts,
@@ -1196,7 +1195,7 @@ internal static class PdfiumOverlayWriter
         try
         {
             var bitmap = fpdfview.FPDFBitmapCreateEx(
-                replacement.PixelWidth, replacement.PixelHeight, FpdfBitmapBgra,
+                replacement.PixelWidth, replacement.PixelHeight, PdfiumImageEncoding.BitmapFormat(replacement.Bgra),
                 pin.AddrOfPinnedObject(), stride);
             if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
                 throw new PdfEngineException("Не удалось подготовить растр замены изображения.");
@@ -1226,27 +1225,32 @@ internal static class PdfiumOverlayWriter
 
         try
         {
-            var stride = image.PixelWidth * 4;
-            var pin = GCHandle.Alloc(image.Bgra, GCHandleType.Pinned);
-            try
+            if (image.EncodedJpeg is not { Length: > 0 } ||
+                !PdfiumImageEncoding.LoadJpeg(page, obj, image.EncodedJpeg))
             {
-                var bitmap = fpdfview.FPDFBitmapCreateEx(
-                    image.PixelWidth, image.PixelHeight, FpdfBitmapBgra, pin.AddrOfPinnedObject(), stride);
-                if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
-                    throw new PdfEngineException("Не удалось подготовить растр изображения.");
+                var stride = image.PixelWidth * 4;
+                var pin = GCHandle.Alloc(image.Bgra, GCHandleType.Pinned);
                 try
                 {
-                    if (fpdf_edit.FPDFImageObjSetBitmap(null, 0, obj, bitmap) == 0)
-                        throw new PdfEngineException("Не удалось поместить изображение в объект.");
+                    var bitmap = fpdfview.FPDFBitmapCreateEx(
+                        image.PixelWidth, image.PixelHeight, PdfiumImageEncoding.BitmapFormat(image.Bgra),
+                        pin.AddrOfPinnedObject(), stride);
+                    if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
+                        throw new PdfEngineException("Не удалось подготовить растр изображения.");
+                    try
+                    {
+                        if (fpdf_edit.FPDFImageObjSetBitmap(null, 0, obj, bitmap) == 0)
+                            throw new PdfEngineException("Не удалось поместить изображение в объект.");
+                    }
+                    finally
+                    {
+                        fpdfview.FPDFBitmapDestroy(bitmap);
+                    }
                 }
                 finally
                 {
-                    fpdfview.FPDFBitmapDestroy(bitmap);
+                    pin.Free();
                 }
-            }
-            finally
-            {
-                pin.Free();
             }
 
             // Единичный квадрат изображения масштабируется до отображаемого

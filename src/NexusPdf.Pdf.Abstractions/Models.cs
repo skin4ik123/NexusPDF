@@ -49,7 +49,8 @@ public sealed record ImageOverlay(
     double XPt,
     double YPt,
     double WidthPt,
-    double HeightPt) : PageOverlay;
+    double HeightPt,
+    byte[]? EncodedJpeg = null) : PageOverlay;
 
 /// <summary>Черновик заметки-комментария (значок с текстом). Точка — в отображаемых координатах на момент размещения.</summary>
 public sealed record NoteAnnotationDraft(
@@ -536,7 +537,8 @@ public sealed record ImagePageSpec(
     int PixelWidth,
     int PixelHeight,
     double WidthPoints,
-    double HeightPoints);
+    double HeightPoints,
+    byte[]? EncodedJpeg = null);
 
 /// <summary>Одна страница будущего документа: источник, номер страницы в источнике, добавочный поворот (в четвертях оборота по часовой), накладываемый контент и аннотации источника, помеченные к удалению.</summary>
 public sealed record ComposedPage(

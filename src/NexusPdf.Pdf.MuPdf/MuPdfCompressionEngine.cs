@@ -20,8 +20,8 @@ namespace NexusPdf.Pdf.MuPdf;
 ///  - плотность считается по ФАКТИЧЕСКОМУ размещению на страницах, а не по
 ///    заголовку изображения: скан «2000 пикселей на всю A4» — это 171 DPI;
 ///  - заметно плотнее цели — уменьшение до цели и кодирование в JPEG;
-///  - уже JPEG и примерно в цели — НЕ ТРОГАЕТСЯ: повторное кодирование без
-///    уменьшения даёт потерю качества при копеечном выигрыше;
+///  - JPEG в цели тоже проверяется с выбранным качеством, но принимается
+///    только существенное уменьшение, без бесполезного повторного кодирования;
 ///  - несжатые и Flate-изображения в цели — пробуем JPEG без уменьшения;
 ///  - 1-битные, CCITT, JBIG2, JPX и изображения с прозрачностью (SMask) не
 ///    трогаются вовсе;
@@ -232,8 +232,6 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
             filter.Contains("JPX", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        var isJpeg = filter.Contains("DCT", StringComparison.OrdinalIgnoreCase);
-
         // Плотность по размещению. Безразмерное размещение (не нашли) — плотность
         // неизвестна: уменьшать нельзя, пережать без потерь размера можно.
         double scale = 1.0;
@@ -248,9 +246,8 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
                 scale = request.TargetDpi / dpi;
         }
 
-        // Уже JPEG в целевой плотности: не перекодируем. Именно этот случай
-        // прежний движок «мылил без выигрыша».
-        if (isJpeg && scale >= 0.999) return false;
+        // Quality can reduce an oversized JPEG even without downsampling.
+        // The 15% size gate below rejects pointless repeated recompression.
 
         long oldLength = ReadStreamLength(doc, entry.Xref);
         if (oldLength <= 2048) return false; // мелочь не окупает ни риска, ни времени

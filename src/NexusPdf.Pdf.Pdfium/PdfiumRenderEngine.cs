@@ -695,7 +695,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
                 {
                     var overlay = new ImageOverlay(
                         spec.Bgra, spec.PixelWidth, spec.PixelHeight,
-                        0, 0, spec.WidthPoints, spec.HeightPoints);
+                        0, 0, spec.WidthPoints, spec.HeightPoints, spec.EncodedJpeg);
                     // Здесь оверлей только растровый, шрифт не понадобится, но
                     // кэш всё равно передаётся: пустой он ничего не грузит.
                     PdfiumOverlayWriter.ApplyOverlays(

@@ -934,7 +934,7 @@ public sealed partial class MainViewModel : ObservableObject
             var heightPt = widthPt * image.Aspect;
             return new NexusPdf.Pdf.Abstractions.ImageOverlay(
                 image.Bgra, image.PixelWidth, image.PixelHeight,
-                xPt - widthPt / 2, yPt - heightPt / 2, widthPt, heightPt);
+                xPt - widthPt / 2, yPt - heightPt / 2, widthPt, heightPt, image.EncodedJpeg);
         });
     }
 

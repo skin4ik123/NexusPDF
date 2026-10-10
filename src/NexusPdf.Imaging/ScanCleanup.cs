@@ -230,6 +230,38 @@ public static class ScanCleanup
         for (var c = 0; c < channels; c++)
             if (globals[c] < NoPaperBelow) return;
 
+        // A page whose paper is already white must be stable on the next pass.
+        // Reapplying the white-point stretch progressively erased faint strokes.
+        var alreadyWhite = true;
+        for (var c = 0; c < channels; c++)
+            alreadyWhite &= globals[c] >= 254 && background[c].All(level => level >= 250);
+        if (alreadyWhite) return;
+
+        // A broad range of colours is image content, not a paper colour cast.
+        // Normalize by the estimated paper so a uniformly yellow scan still qualifies.
+        if (channels == 3)
+        {
+            var colourful = 0;
+            var sampled = 0;
+            for (var y = 0; y < height; y += 8)
+            for (var x = 0; x < width; x += 8)
+            {
+                var o = ((long)y * width + x) * 4;
+                if (o + 2 >= bgra.Length) continue;
+                var b = bgra[o] * 255.0 / globals[0];
+                var g = bgra[o + 1] * 255.0 / globals[1];
+                var r = bgra[o + 2] * 255.0 / globals[2];
+                if (Math.Max(b, Math.Max(g, r)) - Math.Min(b, Math.Min(g, r)) > 24)
+                    colourful++;
+                sampled++;
+            }
+            if (sampled > 0 && colourful > sampled * 0.20) return;
+        }
+
+        // Read contrast from the unchanged input; using pixels already whitened
+        // earlier in the loop makes the result depend on scan direction.
+        var originalGray = GrayImage.FromBgra(bgra, width, height);
+
         for (var c = 0; c < channels; c++)
         {
             var low = globals[c] * 0.55;
@@ -264,6 +296,16 @@ public static class ScanCleanup
                 var o = ((long)y * width + x) * 4;
                 if (o + 2 >= bgra.Length) continue;
 
+                // Thin pencil lines and pale lettering are darker than their
+                // neighbours even when they sit inside the whitening threshold.
+                const int detailRadius = 8;
+                var nearPaper = Math.Max(
+                    Math.Max(originalGray[Math.Max(0, x - detailRadius), y],
+                             originalGray[Math.Min(width - 1, x + detailRadius), y]),
+                    Math.Max(originalGray[x, Math.Max(0, y - detailRadius)],
+                             originalGray[x, Math.Min(height - 1, y + detailRadius)]));
+                var preserveDetail = nearPaper - originalGray[x, y] >= 4;
+
                 for (var c = 0; c < 3; c++)
                 {
                     var tile = background[channels == 1 ? 0 : c];
@@ -275,7 +317,8 @@ public static class ScanCleanup
                     if (level < 1) continue;
 
                     var levelled = bgra[o + c] * 255.0 / level;
-                    bgra[o + c] = (byte)Math.Clamp((levelled - black) * 255.0 / span, 0, 255);
+                    bgra[o + c] = (byte)Math.Clamp(
+                        preserveDetail ? levelled : (levelled - black) * 255.0 / span, 0, 255);
                 }
             }
         }
