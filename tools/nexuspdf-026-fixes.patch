@@ -1,0 +1,319 @@
+diff --git a/src/NexusPdf.App.Desktop/Services/ImageEncoder.cs b/src/NexusPdf.App.Desktop/Services/ImageEncoder.cs
+index d507c9b..35137a6 100644
+--- a/src/NexusPdf.App.Desktop/Services/ImageEncoder.cs
++++ b/src/NexusPdf.App.Desktop/Services/ImageEncoder.cs
+@@ -148,6 +148,11 @@ public static class ImageEncoder
+         var stride = converted.PixelWidth * 4;
+         var pixels = new byte[stride * (long)converted.PixelHeight];
+         converted.CopyPixels(pixels, stride, 0);
+-        return new ImagePageSpec(pixels, converted.PixelWidth, converted.PixelHeight, widthPoints, heightPoints);
++        // Keep the original compressed stream only when the pixels were not resized.
++        // A 70 KB JPEG must not become a multi-megabyte bitmap inside the PDF.
++        byte[]? jpeg = totalPixels <= maxPixels && frame.Decoder is JpegBitmapDecoder
++            ? File.ReadAllBytes(path) : null;
++        return new ImagePageSpec(pixels, converted.PixelWidth, converted.PixelHeight,
++            widthPoints, heightPoints, jpeg);
+     }
+ }
+diff --git a/src/NexusPdf.App.Desktop/Services/ImageLoader.cs b/src/NexusPdf.App.Desktop/Services/ImageLoader.cs
+index f13cd0e..6ea53b9 100644
+--- a/src/NexusPdf.App.Desktop/Services/ImageLoader.cs
++++ b/src/NexusPdf.App.Desktop/Services/ImageLoader.cs
+@@ -4,7 +4,7 @@ using System.Windows.Media.Imaging;
+ 
+ namespace NexusPdf.App.Desktop.Services;
+ 
+-public sealed record LoadedImage(byte[] Bgra, int PixelWidth, int PixelHeight)
++public sealed record LoadedImage(byte[] Bgra, int PixelWidth, int PixelHeight, byte[]? EncodedJpeg = null)
+ {
+     public double Aspect => PixelHeight / (double)Math.Max(1, PixelWidth);
+ }
+@@ -28,6 +28,8 @@ public static class ImageLoader
+         BitmapSource decoded = BitmapFrame.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+ 
+         var totalPixels = (double)decoded.PixelWidth * decoded.PixelHeight;
++        var keepJpeg = totalPixels <= MaxPixels && imageBytes.Length >= 3 &&
++                       imageBytes[0] == 0xFF && imageBytes[1] == 0xD8 && imageBytes[2] == 0xFF;
+         if (totalPixels > MaxPixels)
+         {
+             var k = Math.Sqrt(MaxPixels / totalPixels);
+@@ -40,7 +42,8 @@ public static class ImageLoader
+         var stride = converted.PixelWidth * 4;
+         var pixels = new byte[stride * (long)converted.PixelHeight];
+         converted.CopyPixels(pixels, stride, 0);
+-        return new LoadedImage(pixels, converted.PixelWidth, converted.PixelHeight);
++        return new LoadedImage(pixels, converted.PixelWidth, converted.PixelHeight,
++            keepJpeg ? imageBytes : null);
+     }
+ 
+     public static BitmapSource Preview(LoadedImage image)
+diff --git a/src/NexusPdf.App.Desktop/ViewModels/MainViewModel.cs b/src/NexusPdf.App.Desktop/ViewModels/MainViewModel.cs
+index e36a9fa..673ec74 100644
+--- a/src/NexusPdf.App.Desktop/ViewModels/MainViewModel.cs
++++ b/src/NexusPdf.App.Desktop/ViewModels/MainViewModel.cs
+@@ -934,7 +934,7 @@ public sealed partial class MainViewModel : ObservableObject
+             var heightPt = widthPt * image.Aspect;
+             return new NexusPdf.Pdf.Abstractions.ImageOverlay(
+                 image.Bgra, image.PixelWidth, image.PixelHeight,
+-                xPt - widthPt / 2, yPt - heightPt / 2, widthPt, heightPt);
++                xPt - widthPt / 2, yPt - heightPt / 2, widthPt, heightPt, image.EncodedJpeg);
+         });
+     }
+ 
+diff --git a/src/NexusPdf.Imaging/ScanCleanup.cs b/src/NexusPdf.Imaging/ScanCleanup.cs
+index 1f6b4b7..b4852f9 100644
+--- a/src/NexusPdf.Imaging/ScanCleanup.cs
++++ b/src/NexusPdf.Imaging/ScanCleanup.cs
+@@ -230,6 +230,38 @@ public static class ScanCleanup
+         for (var c = 0; c < channels; c++)
+             if (globals[c] < NoPaperBelow) return;
+ 
++        // A page whose paper is already white must be stable on the next pass.
++        // Reapplying the white-point stretch progressively erased faint strokes.
++        var alreadyWhite = true;
++        for (var c = 0; c < channels; c++)
++            alreadyWhite &= globals[c] >= 254 && background[c].All(level => level >= 250);
++        if (alreadyWhite) return;
++
++        // A broad range of colours is image content, not a paper colour cast.
++        // Normalize by the estimated paper so a uniformly yellow scan still qualifies.
++        if (channels == 3)
++        {
++            var colourful = 0;
++            var sampled = 0;
++            for (var y = 0; y < height; y += 8)
++            for (var x = 0; x < width; x += 8)
++            {
++                var o = ((long)y * width + x) * 4;
++                if (o + 2 >= bgra.Length) continue;
++                var b = bgra[o] * 255.0 / globals[0];
++                var g = bgra[o + 1] * 255.0 / globals[1];
++                var r = bgra[o + 2] * 255.0 / globals[2];
++                if (Math.Max(b, Math.Max(g, r)) - Math.Min(b, Math.Min(g, r)) > 24)
++                    colourful++;
++                sampled++;
++            }
++            if (sampled > 0 && colourful > sampled * 0.20) return;
++        }
++
++        // Read contrast from the unchanged input; using pixels already whitened
++        // earlier in the loop makes the result depend on scan direction.
++        var originalGray = GrayImage.FromBgra(bgra, width, height);
++
+         for (var c = 0; c < channels; c++)
+         {
+             var low = globals[c] * 0.55;
+@@ -264,6 +296,16 @@ public static class ScanCleanup
+                 var o = ((long)y * width + x) * 4;
+                 if (o + 2 >= bgra.Length) continue;
+ 
++                // Thin pencil lines and pale lettering are darker than their
++                // neighbours even when they sit inside the whitening threshold.
++                const int detailRadius = 8;
++                var nearPaper = Math.Max(
++                    Math.Max(originalGray[Math.Max(0, x - detailRadius), y],
++                             originalGray[Math.Min(width - 1, x + detailRadius), y]),
++                    Math.Max(originalGray[x, Math.Max(0, y - detailRadius)],
++                             originalGray[x, Math.Min(height - 1, y + detailRadius)]));
++                var preserveDetail = nearPaper - originalGray[x, y] >= 4;
++
+                 for (var c = 0; c < 3; c++)
+                 {
+                     var tile = background[channels == 1 ? 0 : c];
+@@ -275,7 +317,8 @@ public static class ScanCleanup
+                     if (level < 1) continue;
+ 
+                     var levelled = bgra[o + c] * 255.0 / level;
+-                    bgra[o + c] = (byte)Math.Clamp((levelled - black) * 255.0 / span, 0, 255);
++                    bgra[o + c] = (byte)Math.Clamp(
++                        preserveDetail ? levelled : (levelled - black) * 255.0 / span, 0, 255);
+                 }
+             }
+         }
+diff --git a/src/NexusPdf.Pdf.Abstractions/Models.cs b/src/NexusPdf.Pdf.Abstractions/Models.cs
+index 60ee2ee..a285af4 100644
+--- a/src/NexusPdf.Pdf.Abstractions/Models.cs
++++ b/src/NexusPdf.Pdf.Abstractions/Models.cs
+@@ -49,7 +49,8 @@ public sealed record ImageOverlay(
+     double XPt,
+     double YPt,
+     double WidthPt,
+-    double HeightPt) : PageOverlay;
++    double HeightPt,
++    byte[]? EncodedJpeg = null) : PageOverlay;
+ 
+ /// <summary>Черновик заметки-комментария (значок с текстом). Точка — в отображаемых координатах на момент размещения.</summary>
+ public sealed record NoteAnnotationDraft(
+@@ -536,7 +537,8 @@ public sealed record ImagePageSpec(
+     int PixelWidth,
+     int PixelHeight,
+     double WidthPoints,
+-    double HeightPoints);
++    double HeightPoints,
++    byte[]? EncodedJpeg = null);
+ 
+ /// <summary>Одна страница будущего документа: источник, номер страницы в источнике, добавочный поворот (в четвертях оборота по часовой), накладываемый контент и аннотации источника, помеченные к удалению.</summary>
+ public sealed record ComposedPage(
+diff --git a/src/NexusPdf.Pdf.MuPdf/MuPdfCompressionEngine.cs b/src/NexusPdf.Pdf.MuPdf/MuPdfCompressionEngine.cs
+index 0ab6342..6e81dc4 100644
+--- a/src/NexusPdf.Pdf.MuPdf/MuPdfCompressionEngine.cs
++++ b/src/NexusPdf.Pdf.MuPdf/MuPdfCompressionEngine.cs
+@@ -20,8 +20,8 @@ namespace NexusPdf.Pdf.MuPdf;
+ ///  - плотность считается по ФАКТИЧЕСКОМУ размещению на страницах, а не по
+ ///    заголовку изображения: скан «2000 пикселей на всю A4» — это 171 DPI;
+ ///  - заметно плотнее цели — уменьшение до цели и кодирование в JPEG;
+-///  - уже JPEG и примерно в цели — НЕ ТРОГАЕТСЯ: повторное кодирование без
+-///    уменьшения даёт потерю качества при копеечном выигрыше;
++///  - JPEG в цели тоже проверяется с выбранным качеством, но принимается
++///    только существенное уменьшение, без бесполезного повторного кодирования;
+ ///  - несжатые и Flate-изображения в цели — пробуем JPEG без уменьшения;
+ ///  - 1-битные, CCITT, JBIG2, JPX и изображения с прозрачностью (SMask) не
+ ///    трогаются вовсе;
+@@ -232,8 +232,6 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
+             filter.Contains("JPX", StringComparison.OrdinalIgnoreCase))
+             return false;
+ 
+-        var isJpeg = filter.Contains("DCT", StringComparison.OrdinalIgnoreCase);
+-
+         // Плотность по размещению. Безразмерное размещение (не нашли) — плотность
+         // неизвестна: уменьшать нельзя, пережать без потерь размера можно.
+         double scale = 1.0;
+@@ -248,9 +246,8 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
+                 scale = request.TargetDpi / dpi;
+         }
+ 
+-        // Уже JPEG в целевой плотности: не перекодируем. Именно этот случай
+-        // прежний движок «мылил без выигрыша».
+-        if (isJpeg && scale >= 0.999) return false;
++        // Quality can reduce an oversized JPEG even without downsampling.
++        // The 15% size gate below rejects pointless repeated recompression.
+ 
+         long oldLength = ReadStreamLength(doc, entry.Xref);
+         if (oldLength <= 2048) return false; // мелочь не окупает ни риска, ни времени
+diff --git a/src/NexusPdf.Pdf.Pdfium/PdfiumImageEncoding.cs b/src/NexusPdf.Pdf.Pdfium/PdfiumImageEncoding.cs
+new file mode 100644
+index 0000000..bf27d1d
+--- /dev/null
++++ b/src/NexusPdf.Pdf.Pdfium/PdfiumImageEncoding.cs
+@@ -0,0 +1,39 @@
++using System.Runtime.InteropServices;
++using PDFiumCore;
++
++namespace NexusPdf.Pdf.Pdfium;
++
++internal static class PdfiumImageEncoding
++{
++    // BGRx keeps the same four-byte stride without introducing a soft mask.
++    // A real alpha channel must remain BGRA, including fully transparent pixels.
++    public static int BitmapFormat(byte[] bgra)
++    {
++        for (var i = 3; i < bgra.Length; i += 4)
++            if (bgra[i] != 255) return 4;
++        return 3;
++    }
++
++    public static unsafe bool LoadJpeg(FpdfPageT page, FpdfPageobjectT obj, byte[] jpeg)
++    {
++        int GetBlock(IntPtr _, ulong position, byte* buffer, ulong size)
++        {
++            if (position > (ulong)jpeg.Length || size > (ulong)jpeg.Length - position)
++                return 0;
++            Marshal.Copy(jpeg, (int)position, (IntPtr)buffer, (int)size);
++            return 1;
++        }
++
++        var getBlock = new PDFiumCore.Delegates.Func_int___IntPtr_ulong_bytePtr_ulong(GetBlock);
++        var access = new FPDF_FILEACCESS
++        {
++            MFileLen = (uint)jpeg.Length,
++            MGetBlock = getBlock,
++            MParam = IntPtr.Zero,
++        };
++        // Inline loading copies the JPEG bytes before the callback goes away.
++        var loaded = fpdf_edit.FPDFImageObjLoadJpegFileInline(page, 1, obj, access) != 0;
++        GC.KeepAlive(getBlock);
++        return loaded;
++    }
++}
+diff --git a/src/NexusPdf.Pdf.Pdfium/PdfiumOverlayWriter.cs b/src/NexusPdf.Pdf.Pdfium/PdfiumOverlayWriter.cs
+index f41c884..8c785a4 100644
+--- a/src/NexusPdf.Pdf.Pdfium/PdfiumOverlayWriter.cs
++++ b/src/NexusPdf.Pdf.Pdfium/PdfiumOverlayWriter.cs
+@@ -15,7 +15,6 @@ namespace NexusPdf.Pdf.Pdfium;
+ internal static class PdfiumOverlayWriter
+ {
+     private const int FpdfFontTrueType = 2;
+-    private const int FpdfBitmapBgra = 4;
+ 
+     public static void ApplyOverlays(
+         FpdfDocumentT document, FpdfPageT page, OverlayFontCache fonts,
+@@ -1196,7 +1195,7 @@ internal static class PdfiumOverlayWriter
+         try
+         {
+             var bitmap = fpdfview.FPDFBitmapCreateEx(
+-                replacement.PixelWidth, replacement.PixelHeight, FpdfBitmapBgra,
++                replacement.PixelWidth, replacement.PixelHeight, PdfiumImageEncoding.BitmapFormat(replacement.Bgra),
+                 pin.AddrOfPinnedObject(), stride);
+             if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
+                 throw new PdfEngineException("Не удалось подготовить растр замены изображения.");
+@@ -1226,28 +1225,33 @@ internal static class PdfiumOverlayWriter
+ 
+         try
+         {
+-            var stride = image.PixelWidth * 4;
+-            var pin = GCHandle.Alloc(image.Bgra, GCHandleType.Pinned);
+-            try
++            if (image.EncodedJpeg is not { Length: > 0 } ||
++                !PdfiumImageEncoding.LoadJpeg(page, obj, image.EncodedJpeg))
+             {
+-                var bitmap = fpdfview.FPDFBitmapCreateEx(
+-                    image.PixelWidth, image.PixelHeight, FpdfBitmapBgra, pin.AddrOfPinnedObject(), stride);
+-                if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
+-                    throw new PdfEngineException("Не удалось подготовить растр изображения.");
++                var stride = image.PixelWidth * 4;
++                var pin = GCHandle.Alloc(image.Bgra, GCHandleType.Pinned);
+                 try
+                 {
+-                    if (fpdf_edit.FPDFImageObjSetBitmap(null, 0, obj, bitmap) == 0)
+-                        throw new PdfEngineException("Не удалось поместить изображение в объект.");
++                    var bitmap = fpdfview.FPDFBitmapCreateEx(
++                        image.PixelWidth, image.PixelHeight, PdfiumImageEncoding.BitmapFormat(image.Bgra),
++                        pin.AddrOfPinnedObject(), stride);
++                    if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
++                        throw new PdfEngineException("Не удалось подготовить растр изображения.");
++                    try
++                    {
++                        if (fpdf_edit.FPDFImageObjSetBitmap(null, 0, obj, bitmap) == 0)
++                            throw new PdfEngineException("Не удалось поместить изображение в объект.");
++                    }
++                    finally
++                    {
++                        fpdfview.FPDFBitmapDestroy(bitmap);
++                    }
+                 }
+                 finally
+                 {
+-                    fpdfview.FPDFBitmapDestroy(bitmap);
++                    pin.Free();
+                 }
+             }
+-            finally
+-            {
+-                pin.Free();
+-            }
+ 
+             // Единичный квадрат изображения масштабируется до отображаемого
+             // прямоугольника, доворачивается на 90°·q (+ добавка при повороте
+diff --git a/src/NexusPdf.Pdf.Pdfium/PdfiumRenderEngine.cs b/src/NexusPdf.Pdf.Pdfium/PdfiumRenderEngine.cs
+index 9067c82..668bb39 100644
+--- a/src/NexusPdf.Pdf.Pdfium/PdfiumRenderEngine.cs
++++ b/src/NexusPdf.Pdf.Pdfium/PdfiumRenderEngine.cs
+@@ -695,7 +695,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
+                 {
+                     var overlay = new ImageOverlay(
+                         spec.Bgra, spec.PixelWidth, spec.PixelHeight,
+-                        0, 0, spec.WidthPoints, spec.HeightPoints);
++                        0, 0, spec.WidthPoints, spec.HeightPoints, spec.EncodedJpeg);
+                     // Здесь оверлей только растровый, шрифт не понадобится, но
+                     // кэш всё равно передаётся: пустой он ничего не грузит.
+                     PdfiumOverlayWriter.ApplyOverlays(
