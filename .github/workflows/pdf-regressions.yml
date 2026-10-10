@@ -1,4 +1,4 @@
-name: Verify NexusPDF 0.26 PDF regressions
+name: Verify NexusPDF 0.26 PDF fixes
 
 on:
   push:
@@ -8,56 +8,92 @@ on:
 
 permissions:
   contents: write
-  actions: read
 
 jobs:
   verify:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-
-      - name: Retrieve the current source from the imported Drive archive
-        uses: actions/download-artifact@v4
-        with:
-          name: nexuspdf-drive-sources
-          run-id: 38086355974
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/nexuspdf-drive-source
-
-      - name: Import the actual 0.26 source into this work branch
-        shell: pwsh
-        run: |
-          $source = Join-Path $env:RUNNER_TEMP 'nexuspdf-drive-source/source'
-          Copy-Item -Path (Join-Path $source '*') -Destination . -Recurse -Force
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add --all
-          if (git status --porcelain) {
-            git commit -m 'Import current NexusPDF 0.26.0 sources from the verified Drive archive'
-            git push origin HEAD:codex/nexuspdf-026-fixes
-          }
 
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
 
-      - name: Fetch the pinned qpdf dependency
+      - name: Reproduce the original whitening loss before applying fixes
+        if: ${{ hashFiles('tools/nexuspdf-026-fixes.patch') != '' }}
+        shell: pwsh
+        run: |
+          $probe = Join-Path $env:RUNNER_TEMP 'whitening-probe'
+          dotnet new console --framework net10.0 --output $probe
+          dotnet add "$probe/whitening-probe.csproj" reference "$PWD/src/NexusPdf.Imaging/NexusPdf.Imaging.csproj"
+          @'
+          using NexusPdf.Imaging;
+          const int width = 320, height = 240;
+          var pixels = new byte[width * height * 4];
+          for (var i = 0; i < pixels.Length; i += 4) {
+              pixels[i] = pixels[i + 1] = pixels[i + 2] = 210;
+              pixels[i + 3] = 255;
+          }
+          for (var y = 118; y < 122; y++)
+          for (var x = 40; x < 280; x++) {
+              var o = (y * width + x) * 4;
+              pixels[o] = pixels[o + 1] = pixels[o + 2] = 190;
+          }
+          for (var pass = 0; pass < 2; pass++) {
+              ScanCleanup.LevelBackground(pixels, width, height);
+              Console.WriteLine($"Pass {pass + 1}: paper={pixels[(20 * width + 160) * 4]}, pencil={pixels[(120 * width + 160) * 4]}");
+          }
+          return pixels[(120 * width + 160) * 4] >= 250 ? 1 : 0;
+          '@ | Set-Content "$probe/Program.cs" -Encoding utf8
+          dotnet run --project "$probe/whitening-probe.csproj"
+          if ($LASTEXITCODE -ne 1) { throw 'The original whitening regression did not reproduce.' }
+          exit 0
+
+      - name: Apply and commit the fixes to the current source branch
+        shell: pwsh
+        run: |
+          $patch = 'tools/nexuspdf-026-fixes.patch'
+          if (Test-Path $patch) {
+            git apply --check --ignore-space-change $patch
+            if ($LASTEXITCODE -ne 0) { throw 'Source patch does not match the imported archive.' }
+            git apply --ignore-space-change --whitespace=nowarn $patch
+            if ($LASTEXITCODE -ne 0) { throw 'Could not apply source fixes.' }
+            Remove-Item $patch
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add --all
+            git commit -m 'Preserve compressed JPEG imports and protect detail during repeated optimization'
+            git push origin HEAD:codex/nexuspdf-026-fixes
+            if ($LASTEXITCODE -ne 0) { throw 'Could not save the reviewed fixes to the work branch.' }
+          }
+          git rev-parse HEAD
+
+      - name: Fetch pinned PDF and OCR tools
         shell: pwsh
         run: |
           $lock = Get-Content tools/qpdf.lock.json | ConvertFrom-Json
           ./tools/fetch-qpdf.ps1 -Version $lock.version -ExpectedSha256 $lock.sha256
+          ./tools/fetch-tessdata.ps1
+          ./tools/fetch-ocrmodels.ps1
 
-      - name: Run the reproduction and nearby regression cases
-        shell: pwsh
-        run: |
-          dotnet test tests/NexusPdf.PdfEngineTests -c Release --logger "trx" --filter "FullyQualifiedName~ReportedPdfRegressionTests|FullyQualifiedName~ProcessInPlaceTests|FullyQualifiedName~MuPdfCompressionTests|FullyQualifiedName~SaveStructureTests|FullyQualifiedName~RecompressTests"
+      - name: Build the current solution including the desktop application
+        run: dotnet build NexusPdf.slnx -c Release
+
+      - name: Unit tests
+        run: dotnet test tests/NexusPdf.UnitTests -c Release --no-build --logger "trx"
+
+      - name: PDF engine and reported regression tests
+        run: dotnet test tests/NexusPdf.PdfEngineTests -c Release --no-build --logger "trx"
+
+      - name: Printing tests
+        run: dotnet test tests/NexusPdf.PrintingTests -c Release --no-build --logger "trx"
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nexuspdf-pdf-regression-results
+          name: nexuspdf-pdf-fix-results
           path: '**/TestResults/*.trx'
           if-no-files-found: warn
           retention-days: 14
