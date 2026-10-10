@@ -130,6 +130,10 @@ public sealed partial class DocumentToolsService
                     // Движок отдал исходник: сжимать было нечего или стало хуже.
                     if (result.KeptOriginal) File.Copy(current, next, overwrite: true);
                 }
+                else if (compress.StructureOnly)
+                {
+                    File.Copy(current, next, overwrite: true);
+                }
                 else
                 {
                     var stats = await _renderEngine.RecompressImagesAsync(
@@ -146,19 +150,15 @@ public sealed partial class DocumentToolsService
                 ct.ThrowIfCancellationRequested();
                 progress?.Report(new ProcessingProgress(ProcessingStage.Optimizing, 0, 0));
                 var next = stem + "-3.pdf";
+                intermediates.Add(next);
                 try
                 {
                     await _structure.OptimizeAsync(current, next, linearize: true, ct).ConfigureAwait(false);
                     // Оптимизация, которая сделала файл больше, не оптимизация.
                     if (new FileInfo(next).Length <= new FileInfo(current).Length)
                     {
-                        intermediates.Add(current);
                         current = next;
                         structureDone = true;
-                    }
-                    else
-                    {
-                        intermediates.Add(next);
                     }
                 }
                 catch (OperationCanceledException)
@@ -169,7 +169,6 @@ public sealed partial class DocumentToolsService
                 {
                     // qpdf не обязан справляться с любым файлом; терять из-за
                     // этого чистку и пересжатие нельзя.
-                    intermediates.Add(next);
                 }
             }
 

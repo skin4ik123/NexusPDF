@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using MuPDF.NET;
 using FileInfo = System.IO.FileInfo;
 using NexusPdf.Pdf.Abstractions;
@@ -92,6 +92,7 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
         var work = targetPath + ".mupdf";
         var recompressed = 0;
         var skipped = 0;
+        var expectedPages = 0;
         try
         {
             ct.ThrowIfCancellationRequested();
@@ -101,6 +102,7 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
                     throw new PdfEngineException(
                         "Документ защищён паролем: пересохранение сняло бы защиту.");
 
+                expectedPages = doc.PageCount;
                 if (!request.StructureOnly)
                     (recompressed, skipped) = RecompressImages(doc, request, ct);
 
@@ -130,7 +132,7 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
             // молча отдать битый файл — хуже, чем не сжать вовсе.
             using (var check = new Document(work))
             {
-                if (check.PageCount <= 0)
+                if (check.PageCount != expectedPages || check.PageCount <= 0)
                     throw new PdfEngineException("Пересобранный документ не читается.");
             }
 
@@ -224,7 +226,7 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
 
         // Прозрачность, битональные и «особые» кодеки не трогаем: JPEG их
         // только испортит, а CCITT/JBIG2 и так плотнее любого JPEG.
-        if (entry.Smask > 0) return false;
+        if (!HasOnlyOpaqueMask(doc, entry)) return false;
         if (entry.Bpc <= 1) return false;
         var filter = entry.Filter ?? "";
         if (filter.Contains("CCITT", StringComparison.OrdinalIgnoreCase) ||
@@ -284,8 +286,17 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
                 if (jpeg.Length >= oldLength * WorthwhileImageRatio)
                     return false; // выигрыш не стоит потери качества
 
-                var page = doc[placement.FirstPageIndex];
-                page.ReplaceImage(entry.Xref, null!, null!, jpeg);
+                // Build the replacement independently and copy it over the same XObject.
+                // Page.ReplaceImage inserts a temporary drawing and can clear
+                // existing content when insertion reuses an image/content xref.
+                var replacement = doc.GetNewXref();
+                var colourSpace = pix.N - pix.Alpha == 1 ? "/DeviceGray" : "/DeviceRGB";
+                doc.UpdateObject(replacement,
+                    $"<< /Type /XObject /Subtype /Image /Width {pix.W} /Height {pix.H} " +
+                    $"/ColorSpace {colourSpace} /BitsPerComponent 8 >>");
+                doc.UpdateStream(replacement, jpeg, compress: false);
+                doc.XrefSetKey(replacement, "Filter", "/DCTDecode");
+                doc.XrefCopy(replacement, entry.Xref, new[] { "OC", "Interpolate" });
                 return true;
             }
             finally
@@ -297,6 +308,25 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
         {
             // Одна несговорчивая картинка не должна срывать сжатие документа:
             // она просто остаётся как была.
+            return false;
+        }
+    }
+
+    private static bool HasOnlyOpaqueMask(Document doc, Entry entry)
+    {
+        try
+        {
+            // A colour-key/hard mask also represents real transparency.
+            if (doc.XrefGetKey(entry.Xref, "Mask").Item1 != "null") return false;
+            if (entry.Smask <= 0) return true;
+            // Older NexusPDF imports wrote an all-white SMask even for JPEGs.
+            // Decode it before deciding: genuine alpha must never become JPEG.
+            if ((long)entry.Width * entry.Height > 40_000_000) return false;
+            using var mask = new Pixmap(doc, entry.Smask);
+            return mask.N == 1 && mask.SAMPLES.All(sample => sample == 255);
+        }
+        catch (Exception)
+        {
             return false;
         }
     }

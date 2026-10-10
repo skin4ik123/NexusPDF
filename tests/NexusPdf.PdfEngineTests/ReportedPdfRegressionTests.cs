@@ -283,10 +283,95 @@ public sealed class ReportedPdfRegressionTests : IAsyncLifetime
             var page = document.Session.Model.Pages[0];
             var handle = document.Handles[page.SourceId];
             Assert.Contains("Bolt", await handle.GetPageTextAsync(page.SourcePageIndex, CancellationToken.None));
-            Assert.True((await handle.GetAnnotationsAsync(page.SourcePageIndex, CancellationToken.None)).Count >= 2,
-                "A link or filled form was lost.");
+            Assert.Contains(await handle.GetAnnotationsAsync(page.SourcePageIndex, CancellationToken.None),
+                annotation => annotation.Subtype == 20 && annotation.Value == "Acme Ltd");
+            Assert.NotEmpty(await handle.GetPageLinksAsync(page.SourcePageIndex, CancellationToken.None));
             var image = await document.RenderLogicalPageAsync(0, 612, 792, CancellationToken.None);
             Assert.Contains(image.Bgra.Where((_, i) => i % 4 != 3), value => value < 100);
         }
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Compression_Distinguishes_Opaque_And_Transparent_Legacy_Masks(bool transparent)
+    {
+        var dir = NewDir();
+        const int width = 600, height = 600;
+        var jpeg = Jpeg(Pixels(width, height), width, height, 95);
+        var mask = Enumerable.Repeat((byte)255, width * height).ToArray();
+        if (transparent)
+            for (var y = 0; y < height; y++)
+            for (var x = 0; x < width / 2; x++) mask[y * width + x] = 0;
+        using var packedMask = new MemoryStream();
+        using (var zlib = new System.IO.Compression.ZLibStream(packedMask,
+                   System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true)) zlib.Write(mask);
+        var maskBytes = packedMask.ToArray();
+        var content = "q 600 0 0 600 0 0 cm /Im1 Do Q";
+        var pdf = "%PDF-1.4\n" +
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" +
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n" +
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 600] " +
+            "/Contents 4 0 R /Resources << /XObject << /Im1 5 0 R >> >> >>\nendobj\n" +
+            $"4 0 obj\n<< /Length {content.Length} >>\nstream\n{content}\nendstream\nendobj\n" +
+            "5 0 obj\n<< /Type /XObject /Subtype /Image /Width 600 /Height 600 " +
+            "/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /SMask 6 0 R " +
+            $"/Length {jpeg.Length} >>\nstream\n{Encoding.Latin1.GetString(jpeg)}\nendstream\nendobj\n" +
+            "6 0 obj\n<< /Type /XObject /Subtype /Image /Width 600 /Height 600 " +
+            "/ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode " +
+            $"/Length {maskBytes.Length} >>\nstream\n{Encoding.Latin1.GetString(maskBytes)}\nendstream\nendobj\n" +
+            "trailer\n<< /Root 1 0 R /Size 7 >>\n%%EOF\n";
+        var source = Path.Combine(dir, "legacy-mask.pdf");
+        var target = Path.Combine(dir, "compressed.pdf");
+        File.WriteAllBytes(source, Encoding.Latin1.GetBytes(pdf));
+        var result = await _mupdf.CompressAsync(source, target,
+            new PdfCompressionRequest(150, 35, false, false), CancellationToken.None);
+        Assert.Equal(transparent ? 0 : 1, result.Recompressed);
+        await using var reopened = await _pdfium.OpenAsync(target, null, CancellationToken.None);
+        var image = await reopened.RenderPageAsync(0, 120, 120, 0, CancellationToken.None);
+        AssertVisible(image);
+        if (transparent)
+        {
+            var o = 60 * image.Stride + 20 * 4;
+            Assert.True(image.Bgra[o] >= 250 && image.Bgra[o + 1] >= 250 && image.Bgra[o + 2] >= 250);
+        }
+    }
+
+    [Fact]
+    public async Task Whitening_A_Colour_Jpeg_Does_Not_Replace_Its_Compressed_Stream()
+    {
+        var dir = NewDir();
+        var source = Path.Combine(dir, "photo.pdf");
+        var target = Path.Combine(dir, "whitened.pdf");
+        var pixels = Pixels(600, 800);
+        var jpeg = Jpeg(pixels, 600, 800, 10);
+        await _pdfium.CreateImageDocumentAsync(new[] {
+            new ImagePageSpec(pixels, 600, 800, 600, 800, jpeg)
+        }, source, CancellationToken.None);
+        var result = await _pdfium.EnhanceScansAsync(source, null, target,
+            new ScanEnhanceOptions(Deskew: false, Despeckle: false, LevelBackground: true),
+            null, CancellationToken.None);
+        Assert.Equal(0, result.ImagesCleaned);
+        Assert.True(new FileInfo(target).Length <= jpeg.Length + 4096);
+    }
+
+    [Fact]
+    public async Task Structure_Only_Fallback_Does_Not_Invoke_The_Image_Encoder()
+    {
+        var dir = NewDir();
+        var source = Path.Combine(dir, "source.pdf");
+        await _pdfium.CreateImageDocumentAsync(new[] {
+            new ImagePageSpec(Pixels(600, 800), 600, 800, 300, 400)
+        }, source, CancellationToken.None);
+        await using var document = await OpenedDocument.OpenAsync(_pdfium, source, null, CancellationToken.None);
+        var tools = new DocumentToolsService(_pdfium, _qpdf, _qpdf);
+        byte[] RejectEncoding(byte[] bgra, int w, int h, ImageEncodingChoice choice) =>
+            throw new InvalidOperationException("Structure-only processing invoked the JPEG encoder.");
+        await tools.ProcessInPlaceAsync(document,
+            new ProcessingPlan(Compress: new PdfCompressionRequest(100, 35, true, false), OptimizeStructure: true),
+            dir, RejectEncoding, null, CancellationToken.None);
+        await tools.CompressImagesCopyAsync(document, Path.Combine(dir, "copy.pdf"),
+            100, 35, RejectEncoding, CancellationToken.None, structureOnly: true);
+        AssertVisible(await document.RenderLogicalPageAsync(0, 120, 160, CancellationToken.None));
+    }
+
 }

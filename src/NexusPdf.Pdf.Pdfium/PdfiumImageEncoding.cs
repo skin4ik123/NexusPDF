@@ -5,6 +5,20 @@ namespace NexusPdf.Pdf.Pdfium;
 
 internal static class PdfiumImageEncoding
 {
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int WindowsGetBlock(IntPtr parameter, uint position, IntPtr buffer, uint size);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowsFileAccess
+    {
+        public uint FileLength;
+        public IntPtr GetBlock;
+        public IntPtr Parameter;
+    }
+
+    [DllImport("pdfium", EntryPoint = "FPDFImageObj_LoadJpegFileInline", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int LoadInline(IntPtr pages, int count, IntPtr image, ref WindowsFileAccess access);
+
     // BGRx keeps the same four-byte stride without introducing a soft mask.
     // A real alpha channel must remain BGRA, including fully transparent pixels.
     public static int BitmapFormat(byte[] bgra)
@@ -16,6 +30,28 @@ internal static class PdfiumImageEncoding
 
     public static unsafe bool LoadJpeg(FpdfPageT page, FpdfPageobjectT obj, byte[] jpeg)
     {
+        // PDFiumCore generates unsigned long as ulong, but Windows uses a
+        // 32-bit unsigned long even in x64. Read the callback using its real ABI.
+        if (OperatingSystem.IsWindows())
+        {
+            int ReadBlock(IntPtr _, uint position, IntPtr buffer, uint size)
+            {
+                if (position > jpeg.Length || size > jpeg.Length - position) return 0;
+                Marshal.Copy(jpeg, (int)position, buffer, (int)size);
+                return 1;
+            }
+            var callback = new WindowsGetBlock(ReadBlock);
+            var windowsAccess = new WindowsFileAccess
+            {
+                FileLength = (uint)jpeg.Length,
+                GetBlock = Marshal.GetFunctionPointerForDelegate(callback),
+            };
+            var pagePointer = page.__Instance;
+            var success = LoadInline((IntPtr)(&pagePointer), 1, obj.__Instance, ref windowsAccess) != 0;
+            GC.KeepAlive(callback);
+            return success;
+        }
+
         int GetBlock(IntPtr _, ulong position, byte* buffer, ulong size)
         {
             if (position > (ulong)jpeg.Length || size > (ulong)jpeg.Length - position)
@@ -25,7 +61,7 @@ internal static class PdfiumImageEncoding
         }
 
         var getBlock = new PDFiumCore.Delegates.Func_int___IntPtr_ulong_bytePtr_ulong(GetBlock);
-        var access = new FPDF_FILEACCESS
+        using var access = new FPDF_FILEACCESS
         {
             MFileLen = (uint)jpeg.Length,
             MGetBlock = getBlock,

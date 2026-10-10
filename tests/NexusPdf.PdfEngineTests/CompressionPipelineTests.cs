@@ -116,10 +116,10 @@ public sealed class CompressionPipelineTests
     }
 
     [Fact]
-    public async Task A_Fitting_Jpeg_Is_Not_Recompressed()
+    public async Task A_Fitting_Jpeg_Can_Shrink_Without_Changing_Dimensions()
     {
         var dir = TempDir();
-        // 900 px на A4 ≈ 109 DPI — уже меньше цели: трогать нечего.
+        // 900 px on A4 is below the target DPI: quality may change, dimensions must not.
         var jpeg = MakeJpeg(900, 1273, 85);
         var source = WriteScanPdf(dir, jpeg, 900, 1273);
         var target = Path.Combine(dir, "out.pdf");
@@ -128,8 +128,9 @@ public sealed class CompressionPipelineTests
             new PdfCompressionRequest(130, 68, StructureOnly: false, SubsetFonts: false),
             CancellationToken.None);
 
-        // Картинка не перекодирована: мыло без выигрыша — прежняя болезнь.
-        Assert.Equal(0, result.Recompressed);
+        // Accept quality recompression only when the resulting file is smaller.
+        Assert.True(result.BytesAfter <= result.BytesBefore);
+        Assert.True(result.KeptOriginal || result.BytesAfter < result.BytesBefore * 0.985);
         var (width, _, _) = await FirstImageOf(result.KeptOriginal ? source : target);
         Assert.Equal(900, width);
     }

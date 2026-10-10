@@ -232,8 +232,11 @@ public sealed partial class DocumentToolsService
                     {
                         // Запасной путь на своём движке: работает всегда, но
                         // не умеет 1-битные сканы и шрифты.
-                        stats = await _renderEngine.RecompressImagesAsync(
-                            plain, null, tempPath, targetDpi, quality, encode, ct).ConfigureAwait(false);
+                        if (structureOnly)
+                            File.Copy(plain, tempPath, overwrite: true);
+                        else
+                            stats = await _renderEngine.RecompressImagesAsync(
+                                plain, null, tempPath, targetDpi, quality, encode, ct).ConfigureAwait(false);
 
                         // Структурная оптимизация тем же заходом: потоки объектов
                         // и сжатая таблица ссылок дают ещё несколько процентов и

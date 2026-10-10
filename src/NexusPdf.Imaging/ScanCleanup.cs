@@ -172,13 +172,13 @@ public static class ScanCleanup
     /// ровно белым. Без этого шага деление даёт бумагу 240…252 — на экране это
     /// по-прежнему грязно-серый лист, а не чистый.
     /// </summary>
-    public static void LevelBackground(byte[] bgra, int width, int height,
+    public static bool LevelBackground(byte[] bgra, int width, int height,
         BackgroundOptions? options = null)
     {
         var settings = options ?? new BackgroundOptions();
         var tilesX = TileCount(width);
         var tilesY = TileCount(height);
-        if (width < tilesX * 2 || height < tilesY * 2) return;
+        if (width < tilesX * 2 || height < tilesY * 2) return false;
 
         var channels = settings.NeutralizeTint ? 3 : 1;
         var tileW = (double)width / tilesX;
@@ -228,14 +228,14 @@ public static class ScanCleanup
         // Страница без светлой бумаги — это фотография или чёрная заливка во
         // весь лист. Ей выравнивание фона только навредит.
         for (var c = 0; c < channels; c++)
-            if (globals[c] < NoPaperBelow) return;
+            if (globals[c] < NoPaperBelow) return false;
 
         // A page whose paper is already white must be stable on the next pass.
         // Reapplying the white-point stretch progressively erased faint strokes.
         var alreadyWhite = true;
         for (var c = 0; c < channels; c++)
             alreadyWhite &= globals[c] >= 254 && background[c].All(level => level >= 250);
-        if (alreadyWhite) return;
+        if (alreadyWhite) return false;
 
         // A broad range of colours is image content, not a paper colour cast.
         // Normalize by the estimated paper so a uniformly yellow scan still qualifies.
@@ -255,7 +255,7 @@ public static class ScanCleanup
                     colourful++;
                 sampled++;
             }
-            if (sampled > 0 && colourful > sampled * 0.20) return;
+            if (sampled > 0 && colourful > sampled * 0.20) return false;
         }
 
         // Read contrast from the unchanged input; using pixels already whitened
@@ -280,6 +280,7 @@ public static class ScanCleanup
         var black = strength * 0.10;
         var span = Math.Max(1.0, white - black);
 
+        var changed = false;
         for (var y = 0; y < height; y++)
         {
             var gy = Math.Clamp(y / tileH - 0.5, 0, tilesY - 1.0);
@@ -317,11 +318,14 @@ public static class ScanCleanup
                     if (level < 1) continue;
 
                     var levelled = bgra[o + c] * 255.0 / level;
-                    bgra[o + c] = (byte)Math.Clamp(
+                    var value = (byte)Math.Clamp(
                         preserveDetail ? levelled : (levelled - black) * 255.0 / span, 0, 255);
+                    changed |= value != bgra[o + c];
+                    bgra[o + c] = value;
                 }
             }
         }
+        return changed;
     }
 
     /// <summary>
