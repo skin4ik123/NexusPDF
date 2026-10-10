@@ -123,4 +123,170 @@ public sealed class ReportedPdfRegressionTests : IAsyncLifetime
         Assert.True(nonWhite > image.PixelWidth * image.PixelHeight / 10,
             "Optimization replaced the page content with a blank page.");
     }
+
+    [Theory]
+    [InlineData(30)]
+    [InlineData(60)]
+    [InlineData(100)]
+    public void Repeated_Whitening_Preserves_Pale_Pencil_Strokes(int strength)
+    {
+        const int width = 320, height = 240;
+        var pixels = new byte[width * height * 4];
+        for (var i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i] = pixels[i + 1] = pixels[i + 2] = 210;
+            pixels[i + 3] = 255;
+        }
+        for (var y = 118; y < 122; y++)
+        for (var x = 40; x < 280; x++)
+        {
+            var o = (y * width + x) * 4;
+            pixels[o] = pixels[o + 1] = pixels[o + 2] = 190;
+        }
+        for (var pass = 0; pass < 5; pass++)
+        {
+            NexusPdf.Imaging.ScanCleanup.LevelBackground(pixels, width, height,
+                new NexusPdf.Imaging.ScanCleanup.BackgroundOptions(strength));
+            var paper = pixels[(20 * width + 160) * 4];
+            var pencil = pixels[(120 * width + 160) * 4];
+            Assert.True(paper >= 250, $"Paper is still grey: {paper}.");
+            Assert.True(paper - pencil >= 15,
+                $"Pass {pass + 1}, strength {strength}: pencil disappeared ({paper} / {pencil}).");
+        }
+    }
+
+    [Fact]
+    public void Whitening_Leaves_A_Colour_Photograph_Unchanged()
+    {
+        var pixels = Pixels(320, 240);
+        var before = pixels.ToArray();
+        NexusPdf.Imaging.ScanCleanup.LevelBackground(pixels, 320, 240);
+        Assert.Equal(before, pixels);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Importing_A_Compressed_Jpeg_Keeps_Its_Original_Stream(bool overlay)
+    {
+        var dir = NewDir();
+        var pixels = Pixels(600, 800);
+        var jpeg = Jpeg(pixels, 600, 800, 10);
+        var target = Path.Combine(dir, "imported.pdf");
+        if (overlay)
+        {
+            var blank = PdfFixture.WriteToTemp("blank.pdf", new PdfFixture.PageSpec(600, 800, Text: ""));
+            await using var document = await _pdfium.OpenAsync(blank, null, CancellationToken.None);
+            var picture = new ImageOverlay(pixels, 600, 800, 0, 0, 600, 800, jpeg);
+            await _pdfium.ComposeAsync(new[] { new ComposedPage(document, 0, 0,
+                new PageOverlay[] { picture }) }, target, CancellationToken.None);
+        }
+        else
+        {
+            await _pdfium.CreateImageDocumentAsync(new[] {
+                new ImagePageSpec(pixels, 600, 800, 600, 800, jpeg)
+            }, target, CancellationToken.None);
+        }
+        Assert.True(new FileInfo(target).Length <= jpeg.Length + 4096,
+            $"Import inflated a {jpeg.Length}-byte JPEG to {new FileInfo(target).Length} bytes.");
+        await using var reopened = await _pdfium.OpenAsync(target, null, CancellationToken.None);
+        AssertVisible(await reopened.RenderPageAsync(0, 120, 160, 0, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task An_Opaque_Imported_Photo_Remains_Compressible()
+    {
+        var dir = NewDir();
+        var source = Path.Combine(dir, "opaque.pdf");
+        var target = Path.Combine(dir, "compressed.pdf");
+        await _pdfium.CreateImageDocumentAsync(new[] {
+            new ImagePageSpec(Pixels(600, 800), 600, 800, 300, 400)
+        }, source, CancellationToken.None);
+        var result = await _mupdf.CompressAsync(source, target,
+            new PdfCompressionRequest(150, 35, false, false), CancellationToken.None);
+        Assert.True(result.Recompressed > 0, "An unnecessary alpha mask prevented photo compression.");
+        Assert.True(result.BytesAfter < result.BytesBefore / 2);
+    }
+
+    [Fact]
+    public async Task Import_Preserves_Real_Transparency()
+    {
+        var dir = NewDir();
+        var source = Path.Combine(dir, "transparent.pdf");
+        var pixels = Pixels(200, 200);
+        for (var y = 0; y < 200; y++)
+        for (var x = 0; x < 100; x++)
+            pixels[(y * 200 + x) * 4 + 3] = 0;
+        await _pdfium.CreateImageDocumentAsync(new[] {
+            new ImagePageSpec(pixels, 200, 200, 200, 200)
+        }, source, CancellationToken.None);
+        await using var document = await _pdfium.OpenAsync(source, null, CancellationToken.None);
+        var image = await document.RenderPageAsync(0, 200, 200, 0, CancellationToken.None);
+        var o = (100 * image.Stride) + 20 * 4;
+        Assert.True(image.Bgra[o] >= 250 && image.Bgra[o + 1] >= 250 && image.Bgra[o + 2] >= 250);
+        AssertVisible(image);
+    }
+
+    [Fact]
+    public async Task Pale_Strokes_Survive_The_Full_Optimization_Pipeline()
+    {
+        const int width = 320, height = 240;
+        var dir = NewDir();
+        var pixels = new byte[width * height * 4];
+        for (var i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i] = pixels[i + 1] = pixels[i + 2] = 210;
+            pixels[i + 3] = 255;
+        }
+        for (var y = 118; y < 122; y++)
+        for (var x = 40; x < 280; x++)
+        {
+            var o = (y * width + x) * 4;
+            pixels[o] = pixels[o + 1] = pixels[o + 2] = 190;
+        }
+        var source = Path.Combine(dir, "pencil.pdf");
+        await _pdfium.CreateImageDocumentAsync(new[] {
+            new ImagePageSpec(pixels, width, height, width, height)
+        }, source, CancellationToken.None);
+        await using var document = await OpenedDocument.OpenAsync(_pdfium, source, null, CancellationToken.None);
+        var tools = new DocumentToolsService(_pdfium, _qpdf, _qpdf, _mupdf);
+        var plan = new ProcessingPlan(
+            new ScanEnhanceOptions(Deskew: false, Despeckle: false,
+                LevelBackground: true, BackgroundStrength: 100),
+            new PdfCompressionRequest(150, 75, false, false), OptimizeStructure: true);
+        for (var pass = 0; pass < 3; pass++)
+        {
+            await tools.ProcessInPlaceAsync(document, plan, dir,
+                (bgra, w, h, choice) => Jpeg(bgra, w, h, choice.Quality),
+                null, CancellationToken.None);
+            var image = await document.RenderLogicalPageAsync(0, width, height, CancellationToken.None);
+            var paper = image.Bgra[20 * image.Stride + 160 * 4];
+            var pencil = image.Bgra[120 * image.Stride + 160 * 4];
+            Assert.True(paper - pencil >= 12, $"Pass {pass + 1} erased the pencil stroke.");
+        }
+    }
+
+    [Fact]
+    public async Task Repeated_Optimization_Keeps_Text_Links_And_Filled_Forms()
+    {
+        var source = PdfFixture.WriteTableToTemp("table.pdf");
+        var dir = Path.GetDirectoryName(source)!;
+        await using var document = await OpenedDocument.OpenAsync(_pdfium, source, null, CancellationToken.None);
+        var tools = new DocumentToolsService(_pdfium, _qpdf, _qpdf, _mupdf);
+        var plan = new ProcessingPlan(Compress: new PdfCompressionRequest(150, 75, false, true),
+            OptimizeStructure: true);
+        for (var pass = 0; pass < 3; pass++)
+        {
+            await tools.ProcessInPlaceAsync(document, plan, dir,
+                (bgra, w, h, choice) => Jpeg(bgra, w, h, choice.Quality),
+                null, CancellationToken.None);
+            var page = document.Session.Model.Pages[0];
+            var handle = document.Handles[page.SourceId];
+            Assert.Contains("Bolt", await handle.GetPageTextAsync(page.SourcePageIndex, CancellationToken.None));
+            Assert.True((await handle.GetAnnotationsAsync(page.SourcePageIndex, CancellationToken.None)).Count >= 2,
+                "A link or filled form was lost.");
+            var image = await document.RenderLogicalPageAsync(0, 612, 792, CancellationToken.None);
+            Assert.Contains(image.Bgra.Where((_, i) => i % 4 != 3), value => value < 100);
+        }
+    }
 }
