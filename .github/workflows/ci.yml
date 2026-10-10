@@ -15,15 +15,19 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Fetch pinned tools (qpdf, tessdata)
+      - name: Fetch pinned tools (qpdf, tessdata, OCR models)
         shell: pwsh
         run: |
           $lock = Get-Content tools/qpdf.lock.json | ConvertFrom-Json
           ./tools/fetch-qpdf.ps1 -Version $lock.version -ExpectedSha256 $lock.sha256
           ./tools/fetch-tessdata.ps1
+          ./tools/fetch-ocrmodels.ps1
 
       - name: Build
         run: dotnet build NexusPdf.slnx -c Release
+
+      - name: Desktop WPF image import
+        run: dotnet run --project tests/NexusPdf.DesktopImportProbe -c Release
 
       - name: Unit tests
         run: dotnet test tests/NexusPdf.UnitTests -c Release --no-build --logger "trx"
