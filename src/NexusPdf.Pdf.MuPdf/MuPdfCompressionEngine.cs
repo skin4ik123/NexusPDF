@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using MuPDF.NET;
 using FileInfo = System.IO.FileInfo;
 using NexusPdf.Pdf.Abstractions;
@@ -104,7 +104,7 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
 
                 expectedPages = doc.PageCount;
                 if (!request.StructureOnly)
-                    (recompressed, skipped) = RecompressImages(doc, request, ct);
+                    (recompressed, skipped) = RecompressImages(doc, sourcePath, request, ct);
 
                 ct.ThrowIfCancellationRequested();
                 if (request.SubsetFonts)
@@ -158,8 +158,11 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
     // ----- Пер-картиночный конвейер -----
 
     private static (int Recompressed, int Skipped) RecompressImages(
-        Document doc, PdfCompressionRequest request, CancellationToken ct)
+        Document doc, string sourcePath, PdfCompressionRequest request, CancellationToken ct)
     {
+        // MuPDF.NET extraction may consume buffers in the native image cache.
+        // Inspect a separate document; only accepted replacements touch the one saved.
+        using var inspection = new Document(sourcePath);
         var recompressed = 0;
         var skipped = 0;
 
@@ -170,8 +173,8 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
         for (var pageIndex = 0; pageIndex < doc.PageCount; pageIndex++)
         {
             ct.ThrowIfCancellationRequested();
-            var page = doc[pageIndex];
-            foreach (var entry in doc.GetPageImages(pageIndex, false))
+            var page = inspection[pageIndex];
+            foreach (var entry in inspection.GetPageImages(pageIndex, false))
             {
                 if (entry.Xref <= 0) continue;
                 if (!plan.TryGetValue(entry.Xref, out var placement))
@@ -196,7 +199,7 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
         foreach (var placement in plan.Values)
         {
             ct.ThrowIfCancellationRequested();
-            if (ProcessImage(doc, placement, request))
+            if (ProcessImage(doc, inspection, placement, request))
                 recompressed++;
             else
                 skipped++;
@@ -218,13 +221,13 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
     }
 
     /// <summary>true — изображение заменено меньшим; false — оставлено как было.</summary>
-    private static bool ProcessImage(Document doc, ImagePlacement placement, PdfCompressionRequest request)
+    private static bool ProcessImage(Document doc, Document inspection, ImagePlacement placement, PdfCompressionRequest request)
     {
         var entry = placement.Entry;
 
         // Прозрачность, битональные и «особые» кодеки не трогаем: JPEG их
         // только испортит, а CCITT/JBIG2 и так плотнее любого JPEG.
-        if (!HasOnlyOpaqueMask(doc, entry)) return false;
+        if (!HasOnlyOpaqueMask(inspection, entry)) return false;
         if (entry.Bpc <= 1) return false;
         var filter = entry.Filter ?? "";
         if (filter.Contains("CCITT", StringComparison.OrdinalIgnoreCase) ||
@@ -250,12 +253,12 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
         // The 15% size gate below rejects pointless repeated recompression.
 
         var replacingOriginal = false;
-        long oldLength = ReadStreamLength(doc, entry.Xref);
+        long oldLength = ReadStreamLength(inspection, entry.Xref);
         if (oldLength <= 2048) return false; // мелочь не окупает ни риска, ни времени
 
         try
         {
-            var extracted = doc.ExtractImage(entry.Xref);
+            var extracted = inspection.ExtractImage(entry.Xref);
             if (extracted?.Image is not { Length: > 0 } bytes) return false;
 
             using var source = new Pixmap(bytes);
@@ -327,8 +330,7 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
             if (doc.XrefGetKey(entry.Smask, "BitsPerComponent").Item2 != "8" ||
                 doc.XrefGetKey(entry.Smask, "ColorSpace").Item2 != "/DeviceGray" ||
                 doc.XrefGetKey(entry.Smask, "Decode").Item1 != "null") return false;
-            // Inspect the decoded PDF stream without constructing a Pixmap tied
-            // to the document's image cache. Reading an alpha mask must not mutate it.
+            // This document is used only for inspection and is never saved.
             var mask = doc.XrefStream(entry.Smask);
             return mask is { Length: > 0 } && mask.Length == (long)entry.Width * entry.Height &&
                    mask.All(sample => sample == 255);

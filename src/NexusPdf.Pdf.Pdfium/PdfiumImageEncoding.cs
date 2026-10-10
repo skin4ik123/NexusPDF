@@ -14,6 +14,44 @@ internal static class PdfiumImageEncoding
         return 3;
     }
 
+    /// <summary>Прозрачность по альфе ОТРЕНДЕРЕННОГО битмапа: /SMask вкомпонована именно в него.</summary>
+    public static bool HasTransparency(FpdfDocumentT doc, FpdfPageT page, FpdfPageobjectT obj)
+    {
+        var rendered = fpdf_edit.FPDFImageObjGetRenderedBitmap(doc, page, obj);
+        if (rendered == null || rendered.__Instance == IntPtr.Zero)
+            return true; // не смогли проверить — не рискуем
+        try
+        {
+            var format = fpdfview.FPDFBitmapGetFormat(rendered);
+            if (format != 4)
+                return false; // без альфа-канала прозрачности нет
+            var width = fpdfview.FPDFBitmapGetWidth(rendered);
+            var height = fpdfview.FPDFBitmapGetHeight(rendered);
+            var stride = fpdfview.FPDFBitmapGetStride(rendered);
+            var buffer = fpdfview.FPDFBitmapGetBuffer(rendered);
+            if (buffer == IntPtr.Zero)
+                return true;
+            unsafe
+            {
+                var src = (byte*)buffer;
+                for (var y = 0; y < height; y++)
+                {
+                    var row = src + (long)y * stride;
+                    for (var x = 0; x < width; x++)
+                    {
+                        if (row[x * 4 + 3] != 0xFF)
+                            return true;
+                    }
+                }
+            }
+            return false;
+        }
+        finally
+        {
+            fpdfview.FPDFBitmapDestroy(rendered);
+        }
+    }
+
     public static unsafe bool LoadJpeg(FpdfPageT page, FpdfPageobjectT obj, byte[] jpeg)
     {
         int GetBlock(IntPtr _, ulong position, byte* buffer, ulong size)

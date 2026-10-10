@@ -84,6 +84,48 @@ public sealed class ReportedPdfRegressionTests : IAsyncLifetime
         AssertVisible(await reopened.RenderPageAsync(0, 120, 120, 0, CancellationToken.None));
     }
 
+    [Fact]
+    public async Task Compressing_One_Photo_Preserves_Another_Already_Compressed_Photo()
+    {
+        const int width = 600, height = 600;
+        var dir = NewDir();
+        var pixels = Pixels(width, height);
+        var largeJpeg = Jpeg(pixels, width, height, 95);
+        var smallJpeg = Jpeg(pixels, width, height, 10);
+        var contents = "q 600 0 0 600 0 0 cm /Im1 Do Q q 600 0 0 600 600 0 cm /Im2 Do Q";
+        var pdf = "%PDF-1.4\n" +
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" +
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n" +
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1200 600] " +
+            "/Contents 4 0 R /Resources << /XObject << /Im1 5 0 R /Im2 6 0 R >> >> >>\nendobj\n" +
+            $"4 0 obj\n<< /Length {contents.Length} >>\nstream\n{contents}\nendstream\nendobj\n";
+        foreach (var (number, jpeg) in new[] { (5, largeJpeg), (6, smallJpeg) })
+            pdf += $"{number} 0 obj\n<< /Type /XObject /Subtype /Image /Width 600 /Height 600 " +
+                   "/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode " +
+                   $"/Length {jpeg.Length} >>\nstream\n{Encoding.Latin1.GetString(jpeg)}\nendstream\nendobj\n";
+        pdf += "trailer\n<< /Root 1 0 R /Size 7 >>\n%%EOF\n";
+        var current = Path.Combine(dir, "mixed-photos.pdf");
+        File.WriteAllBytes(current, Encoding.Latin1.GetBytes(pdf));
+        for (var pass = 0; pass < 3; pass++)
+        {
+            var target = Path.Combine(dir, $"compressed-{pass}.pdf");
+            var result = await _mupdf.CompressAsync(current, target,
+                new PdfCompressionRequest(150, 35, false, false), CancellationToken.None);
+            if (pass == 0) Assert.Equal(1, result.Recompressed);
+            Assert.True(File.ReadAllBytes(target).AsSpan().IndexOf(smallJpeg) >= 0,
+                "Inspection discarded the stream of an image that did not need recompression.");
+            await using var reopened = await _pdfium.OpenAsync(target, null, CancellationToken.None);
+            var image = await reopened.RenderPageAsync(0, 240, 120, 0, CancellationToken.None);
+            foreach (var x in new[] { 60, 180 })
+            {
+                var o = 60 * image.Stride + x * 4;
+                Assert.True(image.Bgra[o] < 235 || image.Bgra[o + 1] < 235 || image.Bgra[o + 2] < 235,
+                    "One of the two photographs disappeared.");
+            }
+            current = target;
+        }
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
@@ -249,6 +291,35 @@ public sealed class ReportedPdfRegressionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Whitening_Preserves_Real_Transparency()
+    {
+        const int width = 200, height = 200;
+        var dir = NewDir();
+        var source = Path.Combine(dir, "transparent.pdf");
+        var target = Path.Combine(dir, "cleaned.pdf");
+        var pixels = new byte[width * height * 4];
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+        {
+            var o = (y * width + x) * 4;
+            pixels[o] = pixels[o + 1] = pixels[o + 2] = 210;
+            pixels[o + 3] = x < width / 2 ? (byte)0 : (byte)255;
+        }
+        await _pdfium.CreateImageDocumentAsync(new[] {
+            new ImagePageSpec(pixels, width, height, width, height)
+        }, source, CancellationToken.None);
+        await using var original = await _pdfium.OpenAsync(source, null, CancellationToken.None);
+        var before = await original.RenderPageAsync(0, width, height, 0, CancellationToken.None);
+        var result = await _pdfium.EnhanceScansAsync(source, null, target,
+            new ScanEnhanceOptions(Deskew: false, Despeckle: false, LevelBackground: true),
+            null, CancellationToken.None);
+        Assert.Equal(0, result.ImagesCleaned);
+        await using var cleaned = await _pdfium.OpenAsync(target, null, CancellationToken.None);
+        var after = await cleaned.RenderPageAsync(0, width, height, 0, CancellationToken.None);
+        Assert.Equal(before.Bgra, after.Bgra);
+    }
+
+    [Fact]
     public async Task Pale_Strokes_Survive_The_Full_Optimization_Pipeline()
     {
         const int width = 320, height = 240;
@@ -349,34 +420,6 @@ public sealed class ReportedPdfRegressionTests : IAsyncLifetime
             var originalImage = await originalHandle.RenderPageAsync(0, 120, 120, 0, CancellationToken.None);
             _output.WriteLine($"Source mask image right centre: {originalImage.Bgra[60 * originalImage.Stride + 90 * 4]}");
             AssertVisible(originalImage);
-        }
-        if (transparent)
-        {
-            foreach (var settings in new[] {
-                ("plain", 0, 0, 0, 0, 0), ("garbage", 4, 0, 0, 0, 0),
-                ("clean", 4, 1, 0, 0, 0), ("deflate", 4, 0, 1, 0, 0),
-                ("images", 4, 0, 1, 1, 0), ("objects", 4, 0, 1, 1, 1),
-                ("full", 4, 1, 1, 1, 1) })
-            {
-                var candidate = Path.Combine(dir, "diagnostic-" + settings.Item1 + ".pdf");
-                using (var rewrite = new MuPDF.NET.Document(source))
-                    rewrite.Save(candidate, garbage: settings.Item2, clean: settings.Item3,
-                        deflate: settings.Item4, deflateImages: settings.Item5,
-                        deflateFonts: settings.Item4, useObjstms: settings.Item6, preserveMetadata: 1);
-                await using var probe = await _pdfium.OpenAsync(candidate, null, CancellationToken.None);
-                var rendered = await probe.RenderPageAsync(0, 120, 120, 0, CancellationToken.None);
-                _output.WriteLine($"Save variant {settings.Item1}: right pixel {rendered.Bgra[60 * rendered.Stride + 90 * 4]}, bytes {new FileInfo(candidate).Length}");
-                using var inspect = new MuPDF.NET.Document(candidate);
-                foreach (var entry in inspect.GetPageImages(0, false))
-                {
-                    _output.WriteLine($"Image xref {entry.Xref}, smask {entry.Smask}, filter {entry.Filter}");
-                    if (entry.Smask > 0)
-                    {
-                        var decoded = inspect.XrefStream(entry.Smask);
-                        _output.WriteLine($"Mask: length {decoded.Length}, zero {decoded.Count(value => value == 0)}, white {decoded.Count(value => value == 255)}, colorspace {inspect.XrefGetKey(entry.Smask, "ColorSpace")}");
-                    }
-                }
-            }
         }
         var result = await _mupdf.CompressAsync(source, target,
             new PdfCompressionRequest(150, 35, false, false), CancellationToken.None);

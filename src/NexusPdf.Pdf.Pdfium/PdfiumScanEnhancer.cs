@@ -263,6 +263,10 @@ internal static class PdfiumScanEnhancer
             var placedArea = Math.Abs((double)matrix.A * matrix.D - (double)matrix.B * matrix.C);
             if (placedArea < pageArea * ScanCoverage) continue;
 
+            // GetBitmap omits a separate SMask. Replacing that raster would
+            // discard genuine alpha, so cleanup leaves transparent images alone.
+            if (PdfiumImageEncoding.HasTransparency(doc, page, obj)) continue;
+
             var bitmap = fpdf_edit.FPDFImageObjGetBitmap(obj);
             if (bitmap == null || bitmap.__Instance == IntPtr.Zero) continue;
             byte[]? bgra;
