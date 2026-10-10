@@ -267,6 +267,12 @@ public sealed class UxCommandHub
         [CommandIds.DrawArrow] = _ => _main.DrawArrowCommand.Execute(null),
         [CommandIds.RestoreStroke] = t => t.Document?.RestoreFreeStrokeCommand.Execute(null),
 
+        // Измерение
+        [CommandIds.MeasureDistance] = _ => _main.MeasureDistanceCommand.Execute(null),
+        [CommandIds.MeasurePerimeter] = _ => _main.MeasurePerimeterCommand.Execute(null),
+        [CommandIds.MeasureArea] = _ => _main.MeasureAreaCommand.Execute(null),
+        [CommandIds.MeasureCalibrate] = _ => _main.MeasureCalibrateCommand.Execute(null),
+
         // Формы
         [CommandIds.ToggleFormMode] = _ => _main.ToggleFormModeActiveCommand.Execute(null),
 

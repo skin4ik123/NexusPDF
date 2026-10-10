@@ -133,6 +133,16 @@ public sealed class NullToVisibilityConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+/// <summary>Подпись видна, пока в ней есть текст: пустая рамка у курсора — мусор.</summary>
+public sealed class StringToVisibilityConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is string { Length: > 0 } ? Visibility.Visible : Visibility.Collapsed;
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
 /// <summary>
 /// Видимость по нескольким условиям сразу: панель свойств показывается, только
 /// если она включена И объект действительно выбран.

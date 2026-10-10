@@ -126,24 +126,78 @@ public sealed class ManualDuplexTests
     }
 
     [Fact]
+    public void Odd_Count_Face_Up_Starts_The_Second_Pass_With_A_Blank_Back()
+    {
+        // Лицом вверх принтер подаёт стопку в обратном порядке: первым идёт
+        // последний лицевой лист, у которого оборота нет. Без пустого листа
+        // оборот второго листа лёг бы на третий, первого — на второй.
+        var plan = Plan(5);
+        var second = ManualDuplex.SecondPass(plan, OutputFacing.FaceUp);
+
+        Assert.Equal(ManualDuplex.FirstPass(plan).Sheets.Count, second.Sheets.Count);
+        Assert.Empty(second.Sheets[0].Pages);
+        Assert.Equal(new[] { 3, 1 }, second.Sheets.Skip(1).Select(s => s.Pages[0].SourcePageIndex));
+        Assert.True(ManualDuplex.AddsBlankBack(plan));
+    }
+
+    [Fact]
+    public void Odd_Count_Face_Down_Ends_The_Second_Pass_With_A_Blank_Back()
+    {
+        // Лицом вниз последний лист иначе остался бы в лотке и ушёл бы в
+        // следующее, чужое задание.
+        var second = ManualDuplex.SecondPass(Plan(5), OutputFacing.FaceDown);
+
+        Assert.Equal(3, second.Sheets.Count);
+        Assert.Equal(new[] { 1, 3 }, second.Sheets.Take(2).Select(s => s.Pages[0].SourcePageIndex));
+        Assert.Empty(second.Sheets[2].Pages);
+    }
+
+    [Fact]
+    public void Even_Count_Adds_No_Blank_Back()
+    {
+        var plan = Plan(6);
+        Assert.False(ManualDuplex.AddsBlankBack(plan));
+        Assert.All(ManualDuplex.SecondPass(plan, OutputFacing.FaceUp).Sheets, s => Assert.NotEmpty(s.Pages));
+    }
+
+    [Fact]
     public void Instructions_Name_The_Edge_Explicitly()
     {
         // «Переверните» без уточнения края даёт перевёрнутые обороты ровно в
         // половине случаев, поэтому край назван прямо.
-        var longEdge = ManualDuplex.Explain(OutputFacing.FaceDown, DuplexMode.LongEdge);
-        Assert.Contains(longEdge.Steps, s => s.Contains("ДЛИННОЙ"));
+        var longEdge = ManualDuplex.Explain(OutputFacing.FaceDown, flipOnShortEdge: false);
+        Assert.Contains("MdStepFlipLong", longEdge.StepKeys);
+        Assert.Equal("MdEdgeLong", longEdge.EdgeHintKey);
 
-        var shortEdge = ManualDuplex.Explain(OutputFacing.FaceDown, DuplexMode.ShortEdge);
-        Assert.Contains(shortEdge.Steps, s => s.Contains("КОРОТКОЙ"));
+        var shortEdge = ManualDuplex.Explain(OutputFacing.FaceDown, flipOnShortEdge: true);
+        Assert.Contains("MdStepFlipShort", shortEdge.StepKeys);
+        Assert.Equal("MdEdgeShort", shortEdge.EdgeHintKey);
     }
 
     [Fact]
-    public void Instructions_Explain_The_Output_Direction()
+    public void Instructions_Explain_The_Output_Direction_And_The_Blank_Sheet()
     {
-        var faceUp = ManualDuplex.Explain(OutputFacing.FaceUp, DuplexMode.LongEdge);
-        Assert.Contains(faceUp.Steps, s => s.Contains("лицом вверх"));
+        var faceUp = ManualDuplex.Explain(OutputFacing.FaceUp, flipOnShortEdge: false, addsBlankBack: true);
+        Assert.Contains("MdStepFaceUp", faceUp.StepKeys);
+        Assert.Contains("MdStepBlankBack", faceUp.StepKeys);
 
-        var faceDown = ManualDuplex.Explain(OutputFacing.FaceDown, DuplexMode.LongEdge);
-        Assert.Contains(faceDown.Steps, s => s.Contains("лицом вниз"));
+        var faceDown = ManualDuplex.Explain(OutputFacing.FaceDown, flipOnShortEdge: false);
+        Assert.Contains("MdStepFaceDown", faceDown.StepKeys);
+        Assert.DoesNotContain("MdStepBlankBack", faceDown.StepKeys);
+    }
+
+    [Fact]
+    public void Landscape_Sheets_Flip_On_The_Short_Edge()
+    {
+        // Альбомные листы (и буклет — альбомный лист, сложенный пополам)
+        // переворачивают по короткому краю, книжные — по длинному.
+        var portrait = Plan(4);
+        Assert.False(ManualDuplex.FlipsOnShortEdge(portrait));
+
+        var landscape = portrait with
+        {
+            Sheets = portrait.Sheets.Select(s => s with { PaperSizePt = new SizePt(841.89, 595.28) }).ToList(),
+        };
+        Assert.True(ManualDuplex.FlipsOnShortEdge(landscape));
     }
 }

@@ -42,7 +42,7 @@ public sealed record MarkSettings
     public double BleedPt { get; init; }
 
     /// <summary>Текст подписи листа; поддерживает те же подстановки, что и наложения.</summary>
-    public string PageInfoTemplate { get; init; } = "{file} · лист {sheet} из {sheets} · {date}";
+    public string PageInfoTemplate { get; init; } = PrintText.Get("MarkPageInfoTemplate");
 }
 
 /// <summary>Где на листе размещается печатное наложение.</summary>

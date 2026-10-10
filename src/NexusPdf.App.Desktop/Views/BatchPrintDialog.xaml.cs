@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -45,9 +45,17 @@ public partial class BatchPrintDialog : Window
         ProfileBox.ItemsSource = new PrintProfileStore().LoadAll();
         ProfileBox.SelectedIndex = 0;
 
-        var printers = _printers.Discover();
+        // Только имена, мгновенно: возможности выбранного принтера дочитываются
+        // при старте печати. Полный опрос в конструкторе держал окно закрытым.
+        var printers = _printers.DiscoverNames()
+            .Select(WindowsPrinterService.Skeleton)
+            .ToList();
         PrinterBox.ItemsSource = printers;
-        PrinterBox.SelectedItem = printers.FirstOrDefault(p => p.IsDefault) ?? printers.FirstOrDefault();
+        // Как в центре печати: тот принтер, на котором печатали в прошлый раз.
+        PrinterBox.SelectedItem =
+            printers.FirstOrDefault(p => string.Equals(p.PrinterName, services.Settings.LastPrinterName,
+                StringComparison.OrdinalIgnoreCase))
+            ?? printers.FirstOrDefault(p => p.IsDefault) ?? printers.FirstOrDefault();
 
         UpdateStatus();
     }
@@ -94,12 +102,45 @@ public partial class BatchPrintDialog : Window
         if (ProfileBox.SelectedItem is not PrintProfile profile) return;
         if (PrinterBox.SelectedItem is not PrinterCapabilities printer) return;
 
-        var paper = printer.PaperSizes.FirstOrDefault(p => p.Name == "A4")
-                    ?? printer.PaperSizes.FirstOrDefault();
+        if (printer.PaperSizes.Count == 0)
+        {
+            // Возможности ещё не читались: дочитать перед стартом, не блокируя окно.
+            StatusText.Text = Loc.Get("PrinterProbing");
+            var fresh = await _printers.ReadAsync(
+                printer.PrinterName, WindowsPrinterService.DefaultTimeout, CancellationToken.None);
+            StatusText.Text = "";
+            if (fresh == null)
+            {
+                ErrorDialog.Show(this, Loc.Get("BpTitle"), Loc.Get("PrinterNotResponding"), "");
+                return;
+            }
+            printer = fresh;
+        }
+
+        var paper = ChoosePaper(profile, printer);
         if (paper == null)
         {
             ErrorDialog.Show(this, Loc.Get("BpTitle"), Loc.Get("BpNoPaper"), "");
             return;
+        }
+
+        // Непечатаемые поля выбранной бумаги. Без них «уменьшать крупные»
+        // считал печатаемым весь лист, и пакет обрезал края страниц, хотя
+        // тот же профиль из центра печати печатал их целиком.
+        if (!printer.HardMarginsByPaper.ContainsKey(paper.Name))
+        {
+            var margins = await _printers.ReadHardMarginsAsync(
+                printer.PrinterName, paper, WindowsPrinterService.DefaultTimeout, CancellationToken.None);
+            if (margins != null)
+            {
+                printer = printer with
+                {
+                    HardMarginsByPaper = new Dictionary<string, MarginsPt>(printer.HardMarginsByPaper)
+                    {
+                        [paper.Name] = margins.Value,
+                    },
+                };
+            }
         }
 
         _running = true;
@@ -149,7 +190,8 @@ public partial class BatchPrintDialog : Window
         catch (Exception ex)
         {
             Serilog.Log.Error(ex, "Ошибка пакетной печати");
-            ErrorDialog.Show(this, Loc.Get("ErrorTitle"), Loc.Get("PrintFailed"), ex.ToString());
+            ErrorDialog.Show(this, Loc.Get("ErrorTitle"),
+                Loc.F("PrintFailedReason", ViewModels.PrintCenterViewModel.DescribeSubmitFailure(ex)), ex.ToString());
         }
         finally
         {
@@ -158,6 +200,25 @@ public partial class BatchPrintDialog : Window
             StopButton.Visibility = Visibility.Collapsed;
             Bar.Visibility = Visibility.Collapsed;
         }
+    }
+
+    /// <summary>
+    /// Бумага пакета: та, что указана в профиле; иначе — бумага принтера по
+    /// умолчанию; иначе A4 или Letter по размеру (имена у драйверов разные).
+    /// </summary>
+    private static PaperSizeOption? ChoosePaper(PrintProfile profile, PrinterCapabilities printer)
+    {
+        var papers = printer.PaperSizes;
+        if (profile.PaperName.Length > 0 &&
+            papers.FirstOrDefault(p => string.Equals(p.Name, profile.PaperName, StringComparison.OrdinalIgnoreCase))
+                is { } named)
+            return named;
+        if (printer.DefaultPaperDriverValue is { } code &&
+            papers.FirstOrDefault(p => p.DriverValue == code) is { } preferred)
+            return preferred;
+        return papers.FirstOrDefault(p => JobSplitter.SamePaper(p.SizePt, new SizePt(595.28, 841.89)))
+               ?? papers.FirstOrDefault(p => JobSplitter.SamePaper(p.SizePt, new SizePt(612, 792)))
+               ?? papers.FirstOrDefault();
     }
 
     private void OnStop(object sender, RoutedEventArgs e)
@@ -175,6 +236,5 @@ public partial class BatchPrintDialog : Window
     {
         // Пакет в работе — окно не бросаем: половина файлов уже могла уйти.
         if (_running) { e.Cancel = true; return; }
-        _printers.Dispose();
     }
 }

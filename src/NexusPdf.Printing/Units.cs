@@ -44,10 +44,10 @@ public static class Units
     /// <summary>Короткое обозначение единицы для интерфейса.</summary>
     public static string Suffix(LengthUnit unit) => unit switch
     {
-        LengthUnit.Millimeters => "мм",
-        LengthUnit.Centimeters => "см",
+        LengthUnit.Millimeters => PrintText.Get("UnitMm"),
+        LengthUnit.Centimeters => PrintText.Get("UnitCm"),
         LengthUnit.Inches => "″",
-        _ => "пт",
+        _ => PrintText.Get("UnitPt"),
     };
 }
 

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using MuPDF.NET;
 using FileInfo = System.IO.FileInfo;
 using NexusPdf.Pdf.Abstractions;
@@ -6,20 +6,30 @@ using NexusPdf.Pdf.Abstractions;
 namespace NexusPdf.Pdf.MuPdf;
 
 /// <summary>
-/// Сжатие через MuPDF (Artifex). Взят вместо собственного пересжатия на PDFium
-/// по итогам замера на реальном документе: при одинаковых настройках даёт
-/// меньший файл и работает втрое быстрее, а главное — умеет то, чего публичный
-/// API PDFium не умеет вовсе:
+/// Сжатие через MuPDF (Artifex): структура, шрифты и дедупликация — движком
+/// (garbage=4, SubsetFonts), а изображения — СВОИМ конвейером по одному.
 ///
-/// - переписывать 1-битные (bitonal) сканы, не разрушая их;
-/// - выбирать между потерями и без потерь внутри самого движка;
-/// - собирать мусор с ДЕДУПЛИКАЦИЕЙ объектов (garbage=4);
-/// - урезать встроенные шрифты до используемых глифов.
+/// Прежняя версия отдавала изображения RewriteImage самого MuPDF, и на
+/// реальных сканах он молча не уменьшал их вовсе: файл из JPEG 171 DPI при
+/// цели 100 DPI выходил с теми же 2000 пикселями ширины, только пережатыми
+/// низким качеством. Получалось худшее из двух миров — мыло без выигрыша.
+/// Теперь каждое изображение решается отдельно, и у каждого решения есть
+/// откат: замена принимается только когда новый поток ощутимо меньше старого.
 ///
-/// Лицензия MuPDF — AGPL-3.0 (см. docs/LICENSES.md).
+/// Правила конвейера:
+///  - плотность считается по ФАКТИЧЕСКОМУ размещению на страницах, а не по
+///    заголовку изображения: скан «2000 пикселей на всю A4» — это 171 DPI;
+///  - заметно плотнее цели — уменьшение до цели и кодирование в JPEG;
+///  - уже JPEG и примерно в цели — НЕ ТРОГАЕТСЯ: повторное кодирование без
+///    уменьшения даёт потерю качества при копеечном выигрыше;
+///  - несжатые и Flate-изображения в цели — пробуем JPEG без уменьшения;
+///  - 1-битные, CCITT, JBIG2, JPX и изображения с прозрачностью (SMask) не
+///    трогаются вовсе;
+///  - замена засчитывается, только если новый поток меньше старого минимум
+///    на 15 %.
 ///
-/// Нативная библиотека не потокобезопасна для одновременных документов, поэтому
-/// все вызовы выстроены в очередь одним семафором.
+/// Лицензия MuPDF — AGPL-3.0 (см. docs/LICENSES.md). Нативная библиотека не
+/// потокобезопасна для одновременных документов: все вызовы под семафором.
 /// </summary>
 public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
 {
@@ -28,10 +38,16 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
     private readonly Lazy<string?> _probe = new(Probe);
 
     /// <summary>
-    /// Результат считается годным, только если файл стал заметно меньше:
-    /// выигрыш в полпроцента не стоит пересобранного документа.
+    /// Файл считается годным, только если стал заметно меньше: выигрыш в
+    /// полпроцента не стоит пересобранного документа.
     /// </summary>
-    private const double WorthwhileRatio = 0.985;
+    private const double WorthwhileFileRatio = 0.985;
+
+    /// <summary>Замена одного изображения должна экономить хотя бы 15 % его потока.</summary>
+    private const double WorthwhileImageRatio = 0.85;
+
+    /// <summary>Плотность выше цели на треть — уменьшаем; меньше — не выдумываем пиксели.</summary>
+    private const double DownsampleTrigger = 1.30;
 
     public bool IsAvailable => _probe.Value == null;
 
@@ -74,6 +90,8 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
     {
         var before = new FileInfo(sourcePath).Length;
         var work = targetPath + ".mupdf";
+        var recompressed = 0;
+        var skipped = 0;
         try
         {
             ct.ThrowIfCancellationRequested();
@@ -84,16 +102,7 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
                         "Документ защищён паролем: пересохранение сняло бы защиту.");
 
                 if (!request.StructureOnly)
-                {
-                    // Порог чуть выше цели: картинку, которая уже почти в цель,
-                    // трогать незачем — потеряем качество без выигрыша.
-                    doc.RewriteImage(
-                        dpiThreshold: (int)Math.Max(request.TargetDpi + 8, 55),
-                        dpiTarget: (int)request.TargetDpi,
-                        quality: request.Quality,
-                        lossy: true, lossless: true, bitonal: true,
-                        color: true, gray: true, setToGray: false);
-                }
+                    (recompressed, skipped) = RecompressImages(doc, request, ct);
 
                 ct.ThrowIfCancellationRequested();
                 if (request.SubsetFonts)
@@ -117,22 +126,194 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
                     useObjstms: 1, preserveMetadata: 1);
             }
 
+            // Пересобранный документ обязан открываться и держать все страницы:
+            // молча отдать битый файл — хуже, чем не сжать вовсе.
+            using (var check = new Document(work))
+            {
+                if (check.PageCount <= 0)
+                    throw new PdfEngineException("Пересобранный документ не читается.");
+            }
+
             var after = new FileInfo(work).Length;
-            if (after >= before * WorthwhileRatio)
+            if (after >= before * WorthwhileFileRatio)
             {
                 // Файл не стал меньше — отдаём исходник как есть. Пересобранный
                 // документ без выигрыша в размере это только риск и потеря
                 // качества.
                 File.Copy(sourcePath, targetPath, overwrite: true);
-                return new PdfCompressionResult(before, before, 0, 0, KeptOriginal: true);
+                return new PdfCompressionResult(before, before, 0, recompressed + skipped, KeptOriginal: true);
             }
 
             File.Move(work, targetPath, overwrite: true);
-            return new PdfCompressionResult(before, after, 0, 0, KeptOriginal: false);
+            return new PdfCompressionResult(before, after, recompressed, skipped, KeptOriginal: false);
         }
         finally
         {
             try { if (File.Exists(work)) File.Delete(work); } catch { /* лучшая попытка */ }
+        }
+    }
+
+    // ----- Пер-картиночный конвейер -----
+
+    private static (int Recompressed, int Skipped) RecompressImages(
+        Document doc, PdfCompressionRequest request, CancellationToken ct)
+    {
+        var recompressed = 0;
+        var skipped = 0;
+
+        // Одна картинка может стоять на многих страницах: решение принимается
+        // один раз по САМОМУ ПЛОТНОМУ размещению, иначе уменьшенная под обложку
+        // копия расползётся там, где её печатают крупно.
+        var plan = new Dictionary<int, ImagePlacement>();
+        for (var pageIndex = 0; pageIndex < doc.PageCount; pageIndex++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var page = doc[pageIndex];
+            foreach (var entry in doc.GetPageImages(pageIndex, false))
+            {
+                if (entry.Xref <= 0) continue;
+                if (!plan.TryGetValue(entry.Xref, out var placement))
+                    plan[entry.Xref] = placement = new ImagePlacement(entry, pageIndex);
+
+                try
+                {
+                    foreach (var rect in page.GetImageRects((object)entry.Xref))
+                    {
+                        placement.MaxShownWidthPt = Math.Max(placement.MaxShownWidthPt, Math.Abs(rect.Width));
+                        placement.MaxShownHeightPt = Math.Max(placement.MaxShownHeightPt, Math.Abs(rect.Height));
+                    }
+                }
+                catch (Exception)
+                {
+                    // Размещение не прочиталось (картинка внутри формы и т.п.) —
+                    // плотность останется неизвестной, решение будет осторожным.
+                }
+            }
+        }
+
+        foreach (var placement in plan.Values)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (ProcessImage(doc, placement, request))
+                recompressed++;
+            else
+                skipped++;
+        }
+
+        return (recompressed, skipped);
+    }
+
+    private sealed class ImagePlacement
+    {
+        public ImagePlacement(Entry entry, int firstPageIndex)
+        {
+            Entry = entry;
+            FirstPageIndex = firstPageIndex;
+        }
+
+        public Entry Entry { get; }
+        public int FirstPageIndex { get; }
+        public double MaxShownWidthPt { get; set; }
+        public double MaxShownHeightPt { get; set; }
+    }
+
+    /// <summary>true — изображение заменено меньшим; false — оставлено как было.</summary>
+    private static bool ProcessImage(Document doc, ImagePlacement placement, PdfCompressionRequest request)
+    {
+        var entry = placement.Entry;
+
+        // Прозрачность, битональные и «особые» кодеки не трогаем: JPEG их
+        // только испортит, а CCITT/JBIG2 и так плотнее любого JPEG.
+        if (entry.Smask > 0) return false;
+        if (entry.Bpc <= 1) return false;
+        var filter = entry.Filter ?? "";
+        if (filter.Contains("CCITT", StringComparison.OrdinalIgnoreCase) ||
+            filter.Contains("JBIG2", StringComparison.OrdinalIgnoreCase) ||
+            filter.Contains("JPX", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var isJpeg = filter.Contains("DCT", StringComparison.OrdinalIgnoreCase);
+
+        // Плотность по размещению. Безразмерное размещение (не нашли) — плотность
+        // неизвестна: уменьшать нельзя, пережать без потерь размера можно.
+        double scale = 1.0;
+        if (placement.MaxShownWidthPt > 1 && entry.Width > 16)
+        {
+            var dpiX = entry.Width / (placement.MaxShownWidthPt / 72.0);
+            var dpiY = placement.MaxShownHeightPt > 1
+                ? entry.Height / (placement.MaxShownHeightPt / 72.0)
+                : dpiX;
+            var dpi = Math.Max(dpiX, dpiY);
+            if (dpi > request.TargetDpi * DownsampleTrigger)
+                scale = request.TargetDpi / dpi;
+        }
+
+        // Уже JPEG в целевой плотности: не перекодируем. Именно этот случай
+        // прежний движок «мылил без выигрыша».
+        if (isJpeg && scale >= 0.999) return false;
+
+        long oldLength = ReadStreamLength(doc, entry.Xref);
+        if (oldLength <= 2048) return false; // мелочь не окупает ни риска, ни времени
+
+        try
+        {
+            var extracted = doc.ExtractImage(entry.Xref);
+            if (extracted?.Image is not { Length: > 0 } bytes) return false;
+
+            using var source = new Pixmap(bytes);
+            var pix = source;
+            var owned = false;
+            try
+            {
+                // CMYK и прочие небазовые пространства приводим к RGB: JPEG
+                // с четырьмя компонентами читается не всеми просмотрщиками.
+                if (pix.N - pix.Alpha > 3)
+                {
+                    pix = new Pixmap(Colorspace.Rgb, pix);
+                    owned = true;
+                }
+
+                if (scale < 0.999)
+                {
+                    var newW = Math.Max(16, (int)Math.Round(entry.Width * scale));
+                    var newH = Math.Max(16, (int)Math.Round(entry.Height * scale));
+                    var shrunk = new Pixmap(pix, newW, newH, null!);
+                    if (owned) pix.Dispose();
+                    pix = shrunk;
+                    owned = true;
+                }
+
+                var jpeg = pix.ToBytes("jpeg", request.Quality);
+                if (jpeg.Length >= oldLength * WorthwhileImageRatio)
+                    return false; // выигрыш не стоит потери качества
+
+                var page = doc[placement.FirstPageIndex];
+                page.ReplaceImage(entry.Xref, null!, null!, jpeg);
+                return true;
+            }
+            finally
+            {
+                if (owned) pix.Dispose();
+            }
+        }
+        catch (Exception)
+        {
+            // Одна несговорчивая картинка не должна срывать сжатие документа:
+            // она просто остаётся как была.
+            return false;
+        }
+    }
+
+    private static long ReadStreamLength(Document doc, int xref)
+    {
+        try
+        {
+            var (_, value) = doc.XrefGetKey(xref, "Length");
+            return long.TryParse(value, out var length) ? length : 0;
+        }
+        catch (Exception)
+        {
+            return 0;
         }
     }
 }

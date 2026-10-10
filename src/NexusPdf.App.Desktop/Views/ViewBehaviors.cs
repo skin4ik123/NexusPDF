@@ -26,13 +26,17 @@ public static class ViewBehaviors
         if (d is not FrameworkElement element || e.NewValue is not true) return;
         element.Loaded += (_, _) =>
         {
-            if (element.DataContext is PageViewModel page)
-                page.EnsureImage(VisualTreeHelper.GetDpi(element).DpiScaleX);
+            if (element.DataContext is not PageViewModel page) return;
+            // Плотность экрана модель узнаёт отсюда: карточка уже в дереве и
+            // знает свой монитор.
+            var dpi = VisualTreeHelper.GetDpi(element).DpiScaleX;
+            page.Owner.SetDpiScale(dpi);
+            page.Attach(dpi);
         };
         element.Unloaded += (_, _) =>
         {
             if (element.DataContext is PageViewModel page)
-                page.ReleaseImage();
+                page.Detach();
         };
     }
 

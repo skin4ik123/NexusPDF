@@ -10,11 +10,14 @@ public enum OutputFacing
     FaceUp,
 }
 
-/// <summary>Как пользователь возвращает стопку в лоток.</summary>
+/// <summary>
+/// Как пользователь возвращает стопку в лоток: ключи текстов, которые окно
+/// переводит на язык интерфейса (слой печати языков не знает).
+/// </summary>
 public sealed record ManualDuplexInstructions(
-    string Headline,
-    IReadOnlyList<string> Steps,
-    string EdgeHint);
+    string HeadlineKey,
+    IReadOnlyList<string> StepKeys,
+    string EdgeHintKey);
 
 /// <summary>
 /// Разбиение задания на два прохода для принтера без автоматического дуплекса.
@@ -30,23 +33,29 @@ public static class ManualDuplex
     /// <summary>Первый проход: лицевые стороны (чётные индексы листов плана).</summary>
     public static PrintJobPlan FirstPass(PrintJobPlan plan)
     {
-        var sheets = SelectSides(plan, front: true);
+        var sheets = Fronts(plan);
         return plan with
         {
             Sheets = Renumber(sheets),
             Duplex = DuplexMode.Simplex,
-            JobName = plan.JobName + " — сторона 1",
+            JobName = PrintText.Get("MdJobSide1", plan.JobName),
         };
     }
 
     /// <summary>
-    /// Второй проход: обороты. Порядок зависит от того, как принтер выкладывает
-    /// бумагу: при выводе лицом вниз стопка сохраняет порядок, при выводе лицом
-    /// вверх — переворачивается, и второй проход надо развернуть.
+    /// Второй проход: обороты. На КАЖДЫЙ лицевой лист приходится ровно один
+    /// оборот — у последнего листа нечётного задания он пустой. Без пустого
+    /// листа принтер при выводе лицом вверх (подача в обратном порядке)
+    /// напечатал бы оборот второго листа на третьем, третьего — на четвёртом и
+    /// так далее; при выводе лицом вниз последний лист остался бы в лотке и
+    /// попал бы в чужое следующее задание.
+    /// Порядок зависит от того, как принтер выкладывает бумагу: при выводе
+    /// лицом вниз стопка сохраняет порядок, при выводе лицом вверх —
+    /// переворачивается, и второй проход надо развернуть.
     /// </summary>
     public static PrintJobPlan SecondPass(PrintJobPlan plan, OutputFacing facing)
     {
-        var sheets = SelectSides(plan, front: false).ToList();
+        var sheets = BacksPerFront(plan);
         if (facing == OutputFacing.FaceUp)
             sheets.Reverse();
 
@@ -54,21 +63,51 @@ public static class ManualDuplex
         {
             Sheets = Renumber(sheets),
             Duplex = DuplexMode.Simplex,
-            JobName = plan.JobName + " — сторона 2",
+            JobName = PrintText.Get("MdJobSide2", plan.JobName),
         };
     }
 
     /// <summary>Есть ли вообще что печатать на обороте.</summary>
-    public static bool HasSecondPass(PrintJobPlan plan) => SelectSides(plan, front: false).Any();
+    public static bool HasSecondPass(PrintJobPlan plan) => plan.Sheets.Count >= 2;
 
-    private static IEnumerable<SheetPlan> SelectSides(PrintJobPlan plan, bool front)
+    /// <summary>Пройдёт ли во втором проходе пустой лист (нечётное число сторон).</summary>
+    public static bool AddsBlankBack(PrintJobPlan plan) =>
+        HasSecondPass(plan) && plan.Sheets.Count % 2 == 1;
+
+    /// <summary>
+    /// Переворачивать стопку вокруг короткой стороны: так читают альбомные
+    /// листы — и буклет, где лист альбомный и складывается пополам. Для
+    /// книжных листов переворот — вокруг длинной стороны, как страницу книги.
+    /// </summary>
+    public static bool FlipsOnShortEdge(PrintJobPlan plan) =>
+        plan.Sheets.Count(s => s.PaperSizePt.IsLandscape) * 2 > plan.Sheets.Count;
+
+    private static List<SheetPlan> Fronts(PrintJobPlan plan)
     {
         // Листы плана идут парами «лицо, оборот»: чётный индекс — лицо.
-        for (var i = 0; i < plan.Sheets.Count; i++)
+        var result = new List<SheetPlan>();
+        for (var i = 0; i < plan.Sheets.Count; i += 2)
+            result.Add(plan.Sheets[i]);
+        return result;
+    }
+
+    private static List<SheetPlan> BacksPerFront(PrintJobPlan plan)
+    {
+        var result = new List<SheetPlan>();
+        for (var i = 0; i < plan.Sheets.Count; i += 2)
         {
-            if (i % 2 == (front ? 0 : 1))
-                yield return plan.Sheets[i];
+            result.Add(i + 1 < plan.Sheets.Count
+                ? plan.Sheets[i + 1]
+                : plan.Sheets[i] with
+                {
+                    // Пустой оборот последнего листа: бумага проходит через
+                    // принтер, ничего на ней не печатается.
+                    IsFront = false,
+                    Pages = Array.Empty<PlacedPage>(),
+                    Marks = Array.Empty<SheetMark>(),
+                });
         }
+        return result;
     }
 
     private static IReadOnlyList<SheetPlan> Renumber(IEnumerable<SheetPlan> sheets)
@@ -89,36 +128,22 @@ public static class ManualDuplex
 
     /// <summary>
     /// Указания пользователю: что именно сделать со стопкой. Текст зависит и от
-    /// вывода принтера, и от края переплёта — «переверните» без уточнения края
+    /// вывода принтера, и от края переворота — «переверните» без уточнения края
     /// приводит к перевёрнутым оборотам ровно в половине случаев.
     /// </summary>
-    public static ManualDuplexInstructions Explain(OutputFacing facing, DuplexMode binding)
+    public static ManualDuplexInstructions Explain(OutputFacing facing, bool flipOnShortEdge, bool addsBlankBack = false)
     {
-        var longEdge = binding != DuplexMode.ShortEdge;
-
-        var steps = new List<string>
-        {
-            "Дождитесь, пока принтер закончит первую сторону.",
-            "Заберите стопку из выходного лотка целиком, не меняя порядок листов.",
-        };
-
-        if (facing == OutputFacing.FaceDown)
-            steps.Add("Листы вышли лицом вниз — порядок стопки уже правильный, перекладывать не нужно.");
-        else
-            steps.Add("Листы вышли лицом вверх — программа сама напечатает обороты в обратном порядке.");
-
-        steps.Add(longEdge
-            ? "Переверните стопку вокруг ДЛИННОЙ стороны, как переворачивают страницу книги."
-            : "Переверните стопку вокруг КОРОТКОЙ стороны, как переворачивают лист блокнота.");
-
-        steps.Add("Положите стопку в лоток подачи так же, как лежала чистая бумага.");
-        steps.Add("Напечатайте одну проверочную страницу, если печатаете так впервые.");
+        var steps = new List<string> { "MdStepWait", "MdStepTake" };
+        steps.Add(facing == OutputFacing.FaceDown ? "MdStepFaceDown" : "MdStepFaceUp");
+        steps.Add(flipOnShortEdge ? "MdStepFlipShort" : "MdStepFlipLong");
+        steps.Add("MdStepLoad");
+        if (addsBlankBack)
+            steps.Add("MdStepBlankBack");
+        steps.Add("MdStepTest");
 
         return new ManualDuplexInstructions(
-            "Переверните стопку и верните её в лоток",
+            "MdFlipHeadline",
             steps,
-            longEdge
-                ? "Переплёт по длинной стороне"
-                : "Переплёт по короткой стороне");
+            flipOnShortEdge ? "MdEdgeShort" : "MdEdgeLong");
     }
 }

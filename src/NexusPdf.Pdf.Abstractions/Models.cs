@@ -485,13 +485,35 @@ public sealed record PdfComboInfo(
 /// Value — /V для виджетов форм. RectPt — рамка на странице, по ней экспорт
 /// понимает, к какому месту текста относится примечание.
 /// </summary>
+/// <summary>Вид поля формы (коды FPDF_FORMFIELD_*).</summary>
+public enum PdfFormFieldKind
+{
+    Unknown = 0,
+    PushButton = 1,
+    CheckBox = 2,
+    RadioButton = 3,
+    ComboBox = 4,
+    ListBox = 5,
+    Text = 6,
+    Signature = 7,
+}
+
+/// <summary>Поле формы на странице: рамка в отображаемых пунктах и вид — чтобы щелчок по полю сразу начинал ввод.</summary>
+public sealed record PdfFormFieldArea(
+    double XPt, double YPt, double WidthPt, double HeightPt, PdfFormFieldKind Kind, bool IsReadOnly)
+{
+    public bool Contains(double x, double y) =>
+        x >= XPt && x <= XPt + WidthPt && y >= YPt && y <= YPt + HeightPt;
+}
+
 public sealed record PdfAnnotationInfo(
     int AnnotIndex,
     int Subtype,
     string Contents,
     string Author,
     string Value = "",
-    PdfTextRect? RectPt = null);
+    PdfTextRect? RectPt = null,
+    string Subject = "");
 
 /// <summary>Метаданные документа: версия PDF, шифрование и строки словаря /Info (пустые, если не заданы).</summary>
 public sealed record PdfDocumentMetadata(

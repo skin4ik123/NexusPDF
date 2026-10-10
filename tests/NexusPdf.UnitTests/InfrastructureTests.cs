@@ -76,16 +76,63 @@ public sealed class InfrastructureTests : IDisposable
         var target = Path.Combine(_dir, "doc.pdf");
         await File.WriteAllTextAsync(target, "OLD");
 
-        await Assert.ThrowsAsync<InvalidDataException>(() =>
+        // Неудачная проверка называется проверкой (а не безликой ошибкой
+        // записи), исходная причина — внутри.
+        var error = await Assert.ThrowsAsync<SaveFailedException>(() =>
             SafeFileReplace.WriteAndReplaceAsync(
                 target,
                 tmp => File.WriteAllTextAsync(tmp, "BROKEN"),
                 _ => throw new InvalidDataException("проверка не пройдена"),
                 keepBackup: false,
                 CancellationToken.None));
+        Assert.Equal(SaveFailure.Validation, error.Failure);
+        Assert.IsType<InvalidDataException>(error.InnerException);
 
         Assert.Equal("OLD", await File.ReadAllTextAsync(target));
         Assert.Empty(Directory.GetFiles(_dir, "*.nexustmp-*"));
+    }
+
+    [Fact]
+    public async Task SafeReplace_Works_While_The_Target_Is_Held_Open_With_Delete_Sharing()
+    {
+        // Открытый документ держит свой файл (с разрешением на удаление) и
+        // больше не закрывает его перед подменой: при неудаче вкладка
+        // оставалась без файла. Переименование такого файла обязано работать.
+        var target = Path.Combine(_dir, "held.pdf");
+        await File.WriteAllTextAsync(target, "OLD");
+        using var held = new FileStream(target, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+
+        var outcome = await SafeFileReplace.WriteAndReplaceRetainingAsync(
+            target, tmp => File.WriteAllTextAsync(tmp, "NEW"), _ => Task.CompletedTask,
+            backupPath: null, beforeReplace: null, CancellationToken.None);
+
+        Assert.Equal("NEW", await File.ReadAllTextAsync(target));
+        Assert.NotNull(outcome.RetiredPath);
+        // Прежнее содержимое по-прежнему читается через открытый дескриптор.
+        using var reader = new StreamReader(held);
+        Assert.Equal("OLD", await reader.ReadToEndAsync());
+    }
+
+    [Fact]
+    public async Task SafeReplace_Refuses_A_Read_Only_Target_Before_Writing()
+    {
+        var target = Path.Combine(_dir, "ro.pdf");
+        await File.WriteAllTextAsync(target, "OLD");
+        File.SetAttributes(target, FileAttributes.ReadOnly);
+        try
+        {
+            var error = await Assert.ThrowsAsync<SaveFailedException>(() =>
+                SafeFileReplace.WriteAndReplaceAsync(
+                    target, tmp => File.WriteAllTextAsync(tmp, "NEW"), _ => Task.CompletedTask,
+                    keepBackup: false, CancellationToken.None));
+            Assert.Equal(SaveFailure.ReadOnly, error.Failure);
+            Assert.Equal("OLD", await File.ReadAllTextAsync(target));
+        }
+        finally
+        {
+            File.SetAttributes(target, FileAttributes.Normal);
+        }
     }
 
     [Fact]

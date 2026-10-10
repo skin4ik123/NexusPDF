@@ -24,6 +24,14 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
     private const int RenderFlagAnnot = 0x01;
     private const int RenderFlagLcdText = 0x02;
 
+    /// <summary>
+    /// FPDF_PRINTING: отрисовка «для печати». Без него pdfium рисует экранный
+    /// вариант: водяные знаки и аннотации «только для печати» пропадали с
+    /// бумаги, а слои «только для экрана» на неё попадали. Субпиксельный текст
+    /// (LCD) на печати не нужен вовсе — он даёт цветную кайму у букв.
+    /// </summary>
+    private const int RenderFlagPrinting = 0x800;
+
     internal PdfiumDocumentHandle(
         PdfiumRenderEngine engine,
         PdfiumThread thread,
@@ -44,6 +52,45 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
     public string FilePath { get; }
     public PdfDocumentInfo Info { get; }
     internal FpdfDocumentT NativeDoc { get; }
+
+    /// <summary>Рамки и собственный поворот страницы: для пустой копии той же геометрии.</summary>
+    internal readonly record struct PageBoxes(
+        float MediaLeft, float MediaBottom, float MediaRight, float MediaTop,
+        bool HasCrop, float CropLeft, float CropBottom, float CropRight, float CropTop,
+        int Rotation);
+
+    /// <summary>
+    /// Рамки страницы. Только на pdfium-потоке. Активная страница формы
+    /// используется как есть — открывать её вторым экземпляром незачем.
+    /// </summary>
+    internal PageBoxes ReadPageBoxes(int pageIndex)
+    {
+        var active = _forms?.TryGetActivePage(pageIndex);
+        var page = active ?? fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
+        if (page == null || page.__Instance == IntPtr.Zero)
+            throw new PdfEngineException($"Page {pageIndex + 1} did not open.");
+        try
+        {
+            float ml = 0, mb = 0, mr = 0, mt = 0;
+            if (fpdf_transformpage.FPDFPageGetMediaBox(page, ref ml, ref mb, ref mr, ref mt) == 0)
+            {
+                ml = 0;
+                mb = 0;
+                mr = (float)fpdfview.FPDF_GetPageWidthF(page);
+                mt = (float)fpdfview.FPDF_GetPageHeightF(page);
+                if (fpdf_edit.FPDFPageGetRotation(page) % 2 != 0)
+                    (mr, mt) = (mt, mr);
+            }
+            float cl = 0, cb = 0, cr = 0, ct = 0;
+            var hasCrop = fpdf_transformpage.FPDFPageGetCropBox(page, ref cl, ref cb, ref cr, ref ct) != 0;
+            return new PageBoxes(ml, mb, mr, mt, hasCrop, cl, cb, cr, ct, fpdf_edit.FPDFPageGetRotation(page));
+        }
+        finally
+        {
+            if (active == null)
+                fpdfview.FPDF_ClosePage(page);
+        }
+    }
 
     public Task<RenderedPageImage> RenderPageAsync(int pageIndex, int pixelWidth, int pixelHeight, int extraQuarterTurns, CancellationToken ct)
     {
@@ -75,13 +122,12 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
             if (!options.IncludeAnnotations)
             {
                 return _thread.InvokeAsync(
-                    () => RenderCore(pageIndex, pixelWidth, pixelHeight, extraQuarterTurns, contentOnly: true), ct);
+                    () => RenderCore(pageIndex, pixelWidth, pixelHeight, extraQuarterTurns,
+                        contentOnly: true, forOutput: true), ct);
             }
-            if (!options.NeedsFiltering)
-            {
-                return _thread.InvokeAsync(
-                    () => RenderCore(pageIndex, pixelWidth, pixelHeight, extraQuarterTurns, contentOnly: false), ct);
-            }
+            // Аннотации на печати решаются всегда через фильтр флагов: и «только
+            // печатные», и «все видимые» (тем, что видны на экране, но не помечены
+            // к печати, флаг Print ставится на время отрисовки).
             return _thread.InvokeAsync(
                 () => RenderFiltered(pageIndex, pixelWidth, pixelHeight, extraQuarterTurns, options), ct);
         }
@@ -90,6 +136,7 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
     // Флаги аннотации PDF (таблица 8.16 спецификации).
     private const int AnnotFlagHidden = 1 << 1;
     private const int AnnotFlagPrint = 1 << 2;
+    private const int AnnotFlagNoView = 1 << 5;
 
     /// <summary>
     /// Окружение форм к рендеру: обычный FPDF_ANNOT-рендер pdfium вообще не
@@ -146,13 +193,28 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
                     if ((flags & AnnotFlagHidden) != 0) continue; // и так не рисуется
 
                     var isWidget = fpdf_annot.FPDFAnnotGetSubtype(annot) == AnnotSubtypeWidget;
+                    var printable = (flags & AnnotFlagPrint) != 0;
+                    // Кнопки «Печать», «Очистить», «Отправить» в бланках помечены
+                    // как непечатаемые — на бумаге им не место. Раньше поля формы
+                    // шли на печать все подряд, вместе с такими кнопками.
                     var hide = isWidget
-                        ? !options.IncludeFormFields
-                        : options.OnlyPrintableAnnotations && (flags & AnnotFlagPrint) == 0;
-                    if (!hide) continue;
+                        ? !options.IncludeFormFields || (options.OnlyPrintableAnnotations && !printable)
+                        : options.OnlyPrintableAnnotations && !printable;
+                    if (hide)
+                    {
+                        restore.Add((i, flags));
+                        fpdf_annot.FPDFAnnotSetFlags(annot, flags | AnnotFlagHidden);
+                        continue;
+                    }
 
-                    restore.Add((i, flags));
-                    fpdf_annot.FPDFAnnotSetFlags(annot, flags | AnnotFlagHidden);
+                    // «Все видимые»: то, что видно на экране, но не помечено к
+                    // печати, печатный режим pdfium пропустил бы — помечаем на
+                    // время отрисовки.
+                    if (!printable && (flags & AnnotFlagNoView) == 0)
+                    {
+                        restore.Add((i, flags));
+                        fpdf_annot.FPDFAnnotSetFlags(annot, flags | AnnotFlagPrint);
+                    }
                 }
                 finally
                 {
@@ -161,7 +223,7 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
             }
 
             return RenderLoadedPage(page, width, height, extraQuarterTurns,
-                drawFormFields: options.IncludeFormFields);
+                drawFormFields: options.IncludeFormFields, forOutput: true);
         }
         finally
         {
@@ -183,7 +245,7 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
 
     /// <summary>Отрисовка УЖЕ открытой страницы: общая часть обычного и фильтрованного рендера.</summary>
     private RenderedPageImage RenderLoadedPage(
-        FpdfPageT page, int width, int height, int extraQuarterTurns, bool drawFormFields)
+        FpdfPageT page, int width, int height, int extraQuarterTurns, bool drawFormFields, bool forOutput)
     {
         if (width < 1 || height < 1)
             throw new ArgumentOutOfRangeException(nameof(width), "Размер растра должен быть положительным.");
@@ -200,11 +262,16 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
                 throw new PdfEngineException("Не удалось создать растровый буфер.");
             try
             {
-                var flags = RenderFlagAnnot | RenderFlagLcdText;
+                var flags = forOutput
+                    ? RenderFlagAnnot | RenderFlagPrinting
+                    : RenderFlagAnnot | RenderFlagLcdText;
                 fpdfview.FPDFBitmapFillRect(bitmap, 0, 0, width, height, 0xFFFFFFFFUL);
                 fpdfview.FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, rotate, flags);
                 if (drawFormFields)
-                    _forms?.DrawFields(bitmap, page, width, height, rotate, flags);
+                {
+                    if (forOutput) _forms?.DrawFieldsForOutput(bitmap, page, width, height, rotate, flags);
+                    else _forms?.DrawFields(bitmap, page, width, height, rotate, flags);
+                }
             }
             finally
             {
@@ -225,7 +292,8 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
     /// contentOnly — рендер БЕЗ аннотаций и полей форм (растр для OCR: текст
     /// штампов/полей не является содержимым страницы и не должен запекаться).
     /// </summary>
-    private RenderedPageImage RenderCore(int pageIndex, int width, int height, int extraQuarterTurns, bool contentOnly)
+    private RenderedPageImage RenderCore(
+        int pageIndex, int width, int height, int extraQuarterTurns, bool contentOnly, bool forOutput = false)
     {
         if (width < 1 || height < 1)
             throw new ArgumentOutOfRangeException(nameof(width), "Размер растра должен быть положительным.");
@@ -253,11 +321,16 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
                     throw new PdfEngineException("Не удалось создать растровый буфер.");
                 try
                 {
-                    var flags = contentOnly ? RenderFlagLcdText : RenderFlagAnnot | RenderFlagLcdText;
+                    var flags = forOutput
+                        ? (contentOnly ? RenderFlagPrinting : RenderFlagAnnot | RenderFlagPrinting)
+                        : (contentOnly ? RenderFlagLcdText : RenderFlagAnnot | RenderFlagLcdText);
                     fpdfview.FPDFBitmapFillRect(bitmap, 0, 0, width, height, 0xFFFFFFFFUL);
                     fpdfview.FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, rotate, flags);
                     if (!contentOnly)
-                        _forms?.DrawFields(bitmap, page, width, height, rotate, flags);
+                    {
+                        if (forOutput) _forms?.DrawFieldsForOutput(bitmap, page, width, height, rotate, flags);
+                        else _forms?.DrawFields(bitmap, page, width, height, rotate, flags);
+                    }
                 }
                 finally
                 {
@@ -471,18 +544,36 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
         }
     }
 
-    public Task FormClickAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct)
+    public Task<PdfFormFieldKind> FormClickAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct)
     {
         lock (_admissionGate)
         {
             ThrowIfDisposed();
             return _thread.InvokeAsync(() =>
             {
-                if (_forms == null) return;
+                if (_forms == null) return PdfFormFieldKind.Unknown;
                 var size = Info.Pages[pageIndex];
                 var displayedW = extraQuarterTurns % 2 == 0 ? size.WidthPoints : size.HeightPoints;
                 var displayedH = extraQuarterTurns % 2 == 0 ? size.HeightPoints : size.WidthPoints;
-                _forms.Click(pageIndex, extraQuarterTurns, xPt, yPt, displayedW, displayedH);
+                return _forms.Click(pageIndex, extraQuarterTurns, xPt, yPt, displayedW, displayedH);
+            }, ct);
+        }
+    }
+
+    public Task<IReadOnlyList<PdfFormFieldArea>> GetFormFieldAreasAsync(
+        int pageIndex, int extraQuarterTurns, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync<IReadOnlyList<PdfFormFieldArea>>(() =>
+            {
+                EnsureFormsForRender();
+                if (_forms == null) return Array.Empty<PdfFormFieldArea>();
+                var size = Info.Pages[pageIndex];
+                var displayedW = extraQuarterTurns % 2 == 0 ? size.WidthPoints : size.HeightPoints;
+                var displayedH = extraQuarterTurns % 2 == 0 ? size.HeightPoints : size.WidthPoints;
+                return _forms.GetFieldAreas(pageIndex, extraQuarterTurns, displayedW, displayedH);
             }, ct);
         }
     }
@@ -530,12 +621,12 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
         }
     }
 
-    public Task FormKeyDownAsync(int virtualKeyCode, CancellationToken ct)
+    public Task FormKeyDownAsync(int virtualKeyCode, bool shift, CancellationToken ct)
     {
         lock (_admissionGate)
         {
             ThrowIfDisposed();
-            return _thread.InvokeAsync(() => _forms?.KeyDown(virtualKeyCode), ct);
+            return _thread.InvokeAsync(() => _forms?.KeyDown(virtualKeyCode, shift), ct);
         }
     }
 
@@ -562,7 +653,10 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
         }
     }
 
-    public Task SaveCurrentAsync(string targetPath, CancellationToken ct)
+    public Task SaveCurrentAsync(string targetPath, CancellationToken ct) =>
+        SaveCurrentAsync(targetPath, incremental: false, ct);
+
+    public Task SaveCurrentAsync(string targetPath, bool incremental, CancellationToken ct)
     {
         lock (_admissionGate)
         {
@@ -570,10 +664,14 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
             return _thread.InvokeAsync(() =>
             {
                 _forms?.KillFocus(); // зафиксировать значение редактируемого поля
-                PdfiumRenderEngine.SaveDocument(NativeDoc, targetPath);
+                PdfiumRenderEngine.SaveDocument(NativeDoc, targetPath, incremental ? 1 : 0);
             }, ct);
         }
     }
+
+    public bool HasUnsavedFormChanges => _forms?.IsModified == true;
+
+    public long FormChangeStamp => _forms?.ChangeStamp ?? 0;
 
     public Task SaveWithOverlaysAsync(
         IReadOnlyDictionary<int, IReadOnlyList<PageOverlay>> overlaysByPage,
@@ -1530,7 +1628,8 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
                             GetAnnotString(annot, "Contents"),
                             GetAnnotString(annot, "T"),
                             GetAnnotString(annot, "V"),
-                            rect));
+                            rect,
+                            GetAnnotString(annot, "Subj")));
                     }
                     finally
                     {

@@ -11,6 +11,9 @@ namespace NexusPdf.Printing;
 /// </summary>
 public sealed record PrintProfile
 {
+    /// <summary>Для экранного диктора: имя, а не все поля записи.</summary>
+    public override string ToString() => Name;
+
     /// <summary>
     /// Имя профиля. У пользовательских — то, что он ввёл; у встроенных это
     /// неизменяемый опознаватель, а на экран идёт перевод по <see cref="NameKey"/>.
@@ -56,7 +59,20 @@ public sealed record PrintProfile
     public AnnotationPolicy Annotations { get; init; } = AnnotationPolicy.PrintableAnnotations;
     public FormPolicy Forms { get; init; } = FormPolicy.WithValues;
     public LayerPolicy Layers { get; init; } = LayerPolicy.CurrentView;
+
+    /// <summary>
+    /// Устаревшее «печатать как изображение»: печать и так всегда идёт растром,
+    /// и флаг ничего не менял. Поле оставлено, чтобы читались профили прежних
+    /// версий; в окне печати его больше нет.
+    /// </summary>
     public bool PrintAsImage { get; init; }
+
+    /// <summary>
+    /// Высокое качество: листы уходят на принтер с разрешением 600 точек на
+    /// дюйм вместо 300. Тонкие линии чертежей и мелкий текст чётче, задание
+    /// больше и готовится дольше.
+    /// </summary>
+    public bool HighQuality { get; init; }
 
     public PrinterMarks Marks { get; init; } = PrinterMarks.None;
     public double BleedPt { get; init; }
@@ -165,8 +181,10 @@ public static class BuiltInPrintProfiles
         },
         new PrintProfile
         {
+            // Буклет — альбомный лист, сложенный пополам: оборот переворачивается
+            // вокруг КОРОТКОГО края. С длинным краем все обороты выходили вверх ногами.
             Name = "Booklet", NameKey = "PrintProfileBooklet", IsBuiltIn = true,
-            Imposition = ImpositionMode.Booklet, Duplex = DuplexMode.LongEdge,
+            Imposition = ImpositionMode.Booklet, Duplex = DuplexMode.ShortEdge,
         },
         new PrintProfile
         {
@@ -185,8 +203,8 @@ public static class BuiltInPrintProfiles
         },
         new PrintProfile
         {
-            Name = "AsImage", NameKey = "PrintProfileAsImage", IsBuiltIn = true,
-            PrintAsImage = true,
+            Name = "HighQuality", NameKey = "PrintProfileHighQuality", IsBuiltIn = true,
+            HighQuality = true,
         },
         new PrintProfile
         {

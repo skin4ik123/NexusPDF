@@ -14,6 +14,12 @@ public sealed class AppServices : IAsyncDisposable
         Engine = engine;
         Settings = settings;
         SettingsStore = store;
+        // Слой печати сам языков не знает: проверку перед печатью, ошибки
+        // диапазона и шаги ручного дуплекса он отдаёт ключами словаря.
+        NexusPdf.Printing.PrintText.Resolver = (key, args) =>
+            args.Length == 0
+                ? NexusPdf.App.Desktop.Localization.Loc.Get(key)
+                : NexusPdf.App.Desktop.Localization.Loc.F(key, args);
         Cache = new RenderCache(settings.RenderCacheMegabytes);
         SaveService = new SaveService(engine);
         Qpdf = new QpdfEngine();

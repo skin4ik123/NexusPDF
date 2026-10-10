@@ -14,7 +14,6 @@ namespace NexusPdf.App.Desktop.ViewModels;
 public sealed partial class PageViewModel : ObservableObject
 {
     private const double PtToDiu = 96.0 / 72.0;
-    private const int ThumbPixelWidth = 150;
 
     private readonly DocumentViewModel _owner;
     private CancellationTokenSource? _renderCts;
@@ -25,6 +24,8 @@ public sealed partial class PageViewModel : ObservableObject
     private int _thumbOverlays = -1;
     private string? _lastStoredKey;
     private int _lastStoredFormVersion = -1;
+    /// <summary>Ключ растра, который рисуется прямо сейчас.</summary>
+    private string? _pendingKey;
 
     public PageViewModel(DocumentViewModel owner, int logicalIndex, PageRef pageRef, PdfPageDescriptor sizePt)
     {
@@ -50,8 +51,15 @@ public sealed partial class PageViewModel : ObservableObject
     /// </summary>
     public string AccessibleName => Localization.Loc.F("A11yPageItem", PageNumber);
 
-    public double WidthDiu => SizePt.WidthPoints * PtToDiu * _owner.Zoom;
-    public double HeightDiu => SizePt.HeightPoints * PtToDiu * _owner.Zoom;
+    /// <summary>
+    /// Размер карточки в DIU, выровненный по пикселям экрана: карточка и растр
+    /// считаются от одного и того же целого числа пикселей, поэтому растр
+    /// ложится 1:1 и не растягивается на доли пикселя.
+    /// </summary>
+    public double WidthDiu => NexusPdf.Ux.ZoomFitting.SnapToPixels(
+        SizePt.WidthPoints * PtToDiu * _owner.Zoom, _owner.DpiScale);
+    public double HeightDiu => NexusPdf.Ux.ZoomFitting.SnapToPixels(
+        SizePt.HeightPoints * PtToDiu * _owner.Zoom, _owner.DpiScale);
 
     /// <summary>Масштаб пункты → DIU при текущем зуме (для слоя предпросмотра оверлеев).</summary>
     public double DisplayScale => PtToDiu * _owner.Zoom;
@@ -75,6 +83,16 @@ public sealed partial class PageViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _isRendering;
+
+    /// <summary>
+    /// Фильтр, которым растр ложится на карточку. Когда растр совпадает с ней
+    /// пиксель в пиксель, он копируется без фильтра — ни одна точка не
+    /// размазывается. Пока после смены масштаба показывается прежний растр,
+    /// растянутый на новый размер, работает качественный фильтр.
+    /// </summary>
+    [ObservableProperty]
+    private System.Windows.Media.BitmapScalingMode _scalingMode =
+        System.Windows.Media.BitmapScalingMode.HighQuality;
 
     /// <summary>Прямоугольники подсветки в DIU при текущем масштабе.</summary>
     [ObservableProperty]
@@ -102,6 +120,55 @@ public sealed partial class PageViewModel : ObservableObject
     public IReadOnlyList<Rect> TextAreas { get; set; } = Array.Empty<Rect>();
 
     public bool TextAreasLoaded { get; set; }
+
+    /// <summary>
+    /// Поля формы страницы в пунктах: по ним щелчок в обычном просмотре сразу
+    /// попадает в поле, а курсор над полем показывает, что туда можно писать.
+    /// </summary>
+    public IReadOnlyList<NexusPdf.Pdf.Abstractions.PdfFormFieldArea> FormAreas { get; set; } =
+        Array.Empty<NexusPdf.Pdf.Abstractions.PdfFormFieldArea>();
+
+    public bool FormAreasLoaded { get; set; }
+    public bool FormAreasLoading { get; set; }
+
+    /// <summary>
+    /// Выбрана ли карточка в организаторе. Живёт в модели, а не в списке:
+    /// любая правка пересобирает страницы, и выбор, хранившийся только в
+    /// списке, слетал после каждого поворота.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isOrganizeSelected;
+
+    partial void OnIsOrganizeSelectedChanged(bool value) => _owner.OnOrganizeSelectionChanged();
+
+    /// <summary>
+    /// Лист миниатюры той же формы, что и страница, вписанный в ячейку
+    /// организатора. Раньше любой лист рисовался портретной карточкой, и
+    /// альбомная страница выглядела фотографией на белом листе, а поворот на
+    /// четверть было не отличить от исходного.
+    /// </summary>
+    public double OrganizeCardWidth => FitCard().Width;
+    public double OrganizeCardHeight => FitCard().Height;
+
+    /// <summary>Миниатюра в боковой панели: высота известна до загрузки, и список не прыгает.</summary>
+    public double SideThumbHeight =>
+        Math.Round(SideThumbWidth * SizePt.HeightPoints / Math.Max(1, SizePt.WidthPoints)) + 2; // + рамка
+
+    public const double SideThumbWidth = 138;
+
+    private (double Width, double Height) FitCard()
+    {
+        var boxWidth = _owner.OrganizeThumbWidth - 2;
+        var boxHeight = _owner.OrganizeThumbHeight - 2;
+        var scale = Math.Min(boxWidth / Math.Max(1, SizePt.WidthPoints), boxHeight / Math.Max(1, SizePt.HeightPoints));
+        return (Math.Max(8, Math.Round(SizePt.WidthPoints * scale)), Math.Max(8, Math.Round(SizePt.HeightPoints * scale)));
+    }
+
+    public void NotifyThumbSizeChanged()
+    {
+        OnPropertyChanged(nameof(OrganizeCardWidth));
+        OnPropertyChanged(nameof(OrganizeCardHeight));
+    }
 
     // ----- Живая рамка при drag-размещении аннотации (в пунктах страницы) -----
 
@@ -157,6 +224,72 @@ public sealed partial class PageViewModel : ObservableObject
 
     public bool HasDrawPreview => DrawPreview is { Count: > 1 };
 
+    // ----- Измерение: ведущаяся ломаная, точка привязки и живая величина -----
+
+    /// <summary>Поставленные точки плюс точка под курсором, в пунктах страницы.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasMeasurePreview))]
+    private System.Windows.Media.PointCollection? _measureGuide;
+
+    /// <summary>Замыкающий отрезок площади: от курсора к первой точке.</summary>
+    [ObservableProperty]
+    private System.Windows.Media.PointCollection? _measureClosing;
+
+    /// <summary>Квадратики в уже поставленных точках (пункты страницы).</summary>
+    [ObservableProperty]
+    private IReadOnlyList<Rect> _measureVertices = Array.Empty<Rect>();
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasMeasureSnap))]
+    [NotifyPropertyChangedFor(nameof(SnapIsBox))]
+    [NotifyPropertyChangedFor(nameof(SnapIsRound))]
+    [NotifyPropertyChangedFor(nameof(SnapIsDiamond))]
+    private NexusPdf.Pdf.Abstractions.SnapKind _measureSnapKind;
+
+    /// <summary>Рамка маркера привязки в пунктах страницы.</summary>
+    [ObservableProperty]
+    private Rect _measureSnapRect;
+
+    public bool HasMeasureSnap => MeasureSnapKind != NexusPdf.Pdf.Abstractions.SnapKind.None;
+    public bool SnapIsBox => MeasureSnapKind is NexusPdf.Pdf.Abstractions.SnapKind.Endpoint
+        or NexusPdf.Pdf.Abstractions.SnapKind.OwnVertex;
+    public bool SnapIsRound => MeasureSnapKind is NexusPdf.Pdf.Abstractions.SnapKind.OnSegment
+        or NexusPdf.Pdf.Abstractions.SnapKind.Midpoint;
+    public bool SnapIsDiamond => MeasureSnapKind == NexusPdf.Pdf.Abstractions.SnapKind.Intersection;
+
+    /// <summary>Текст живой величины у курсора («L = 33,12 м …»).</summary>
+    [ObservableProperty]
+    private string _measureReadoutText = "";
+
+    /// <summary>Якорь подписи величины в пунктах страницы; на экран переводится при текущем масштабе.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(MeasureReadoutX))]
+    [NotifyPropertyChangedFor(nameof(MeasureReadoutY))]
+    private Point _measureReadoutAnchorPt;
+
+    public double MeasureReadoutX => MeasureReadoutAnchorPt.X * DisplayScale + 14;
+    public double MeasureReadoutY => MeasureReadoutAnchorPt.Y * DisplayScale + 14;
+
+    public bool HasMeasurePreview => MeasureGuide is { Count: > 0 };
+
+    [ObservableProperty]
+    private System.Windows.Media.Brush _measureBrush = System.Windows.Media.Brushes.Red;
+
+    /// <summary>Толщина линии предпросмотра в пунктах — на экране всегда ~1,25 px.</summary>
+    public double HairlinePt => 1.25 / Math.Max(DisplayScale, 0.01);
+
+    /// <summary>Сторона маркера привязки в пунктах — на экране всегда ~9 px.</summary>
+    public double MarkerPt => 9 / Math.Max(DisplayScale, 0.01);
+
+    public void ClearMeasurePreview()
+    {
+        MeasureGuide = null;
+        MeasureClosing = null;
+        MeasureVertices = Array.Empty<Rect>();
+        MeasureSnapKind = NexusPdf.Pdf.Abstractions.SnapKind.None;
+        MeasureReadoutText = "";
+    }
+
     /// <summary>Толщина линии предпросмотра в пунктах (масштаб накладывается канвой).</summary>
     [ObservableProperty]
     private double _drawPreviewWidth = 2;
@@ -170,6 +303,44 @@ public sealed partial class PageViewModel : ObservableObject
         OnPropertyChanged(nameof(WidthDiu));
         OnPropertyChanged(nameof(HeightDiu));
         OnPropertyChanged(nameof(DisplayScale));
+        OnPropertyChanged(nameof(HairlinePt));
+        OnPropertyChanged(nameof(MarkerPt));
+        OnPropertyChanged(nameof(MeasureReadoutX));
+        OnPropertyChanged(nameof(MeasureReadoutY));
+        // Старый растр до перерисовки растягивается на новый размер — без
+        // фильтра он выглядел бы зубчатым.
+        if (_renderedPixelWidth != TargetPixelWidth())
+            ScalingMode = System.Windows.Media.BitmapScalingMode.HighQuality;
+    }
+
+    private int TargetPixelWidth() => Math.Max(16, (int)Math.Round(WidthDiu * _owner.DpiScale));
+
+    /// <summary>Карточка сейчас в визуальном дереве — на экране или рядом с ним.</summary>
+    private bool _shown;
+
+    /// <summary>Карточка появилась на экране — нужен растр под её размер.</summary>
+    public void Attach(double dpiScale)
+    {
+        _shown = true;
+        EnsureImage(dpiScale);
+    }
+
+    /// <summary>Карточка ушла с экрана — растр отпускается (хранить ли его, решает кэш).</summary>
+    public void Detach()
+    {
+        _shown = false;
+        ReleaseImage();
+    }
+
+    /// <summary>
+    /// Масштаб или плотность экрана сменились. Перерисовываются только
+    /// карточки, которые на экране: раньше после подгонки по ширине страница
+    /// так и оставалась со старым растром, растянутым на новый размер, — это и
+    /// было «размытие PDF» на ноутбуках.
+    /// </summary>
+    public void RefreshIfShown()
+    {
+        if (_shown) EnsureImage(_owner.DpiScale);
     }
 
     /// <summary>
@@ -194,21 +365,33 @@ public sealed partial class PageViewModel : ObservableObject
         var overlays = _owner.Document.GetOverlaySignature(LogicalIndex);
         if (_renderedPixelWidth == pixelWidth && _renderedFormVersion == formVersion
             && _renderedOverlays == overlays && Image != null)
+        {
+            ScalingMode = System.Windows.Media.BitmapScalingMode.NearestNeighbor;
             return;
+        }
 
         var key = RenderCache.MakeKey(PageRef.SourceId, PageRef.SourcePageIndex, PageRef.RotationOffset, pixelWidth)
                   + ":f" + formVersion + ":o" + overlays;
+        // Ровно этот растр уже рисуется — повторный запрос только отменил бы
+        // почти готовую работу и начал её заново.
+        if (IsRendering && _pendingKey == key)
+            return;
         if (_owner.Cache.TryGet(key) is { } cached)
         {
+            _renderCts?.Cancel();
             Image = cached;
             _renderedPixelWidth = pixelWidth;
             _renderedFormVersion = formVersion;
+            _renderedOverlays = overlays;
+            ScalingMode = System.Windows.Media.BitmapScalingMode.NearestNeighbor;
+            IsRendering = false;
             return;
         }
 
         _renderCts?.Cancel();
         var cts = new CancellationTokenSource();
         _renderCts = cts;
+        _pendingKey = key;
         IsRendering = true;
         var started = System.Diagnostics.Stopwatch.StartNew();
         try
@@ -236,6 +419,11 @@ public sealed partial class PageViewModel : ObservableObject
                 _renderedPixelWidth = pixelWidth;
                 _renderedFormVersion = formVersion;
                 _renderedOverlays = overlays;
+                // Растр совпадает с карточкой пиксель в пиксель — если за время
+                // отрисовки масштаб не ушёл дальше.
+                ScalingMode = pixelWidth == TargetPixelWidth()
+                    ? System.Windows.Media.BitmapScalingMode.NearestNeighbor
+                    : System.Windows.Media.BitmapScalingMode.HighQuality;
             }
         }
         catch (OperationCanceledException)
@@ -249,9 +437,16 @@ public sealed partial class PageViewModel : ObservableObject
         finally
         {
             if (_renderCts == cts)
+            {
                 IsRendering = false;
+                _pendingKey = null;
+            }
         }
     }
+
+    /// <summary>Ширина растра, в которой миниатюра нарисована (или рисуется).</summary>
+    private int _thumbRenderedWidth;
+    private int _thumbPendingWidth;
 
     public async void EnsureThumbnail()
     {
@@ -263,28 +458,43 @@ public sealed partial class PageViewModel : ObservableObject
             ThumbImage = null;
             _thumbOverlays = overlays;
         }
-        if (ThumbImage != null || _thumbCts is { IsCancellationRequested: false })
+        // Размер карточки в организаторе меняется ползунком: миниатюра,
+        // нарисованная под маленькую карточку, на большой расплывается —
+        // такую перерисовываем, а не оставляем «уже есть».
+        var wanted = _owner.ThumbPixelWidth;
+        if (ThumbImage != null && _thumbRenderedWidth == wanted)
+            return;
+        if (_thumbCts is { IsCancellationRequested: false } && _thumbPendingWidth == wanted)
             return;
 
-        var scale = ThumbPixelWidth / Math.Max(1.0, SizePt.WidthPoints);
+        var scale = wanted / Math.Max(1.0, SizePt.WidthPoints);
         var pixelHeight = Math.Max(16, (int)(SizePt.HeightPoints * scale));
 
-        var key = RenderCache.MakeKey(PageRef.SourceId, PageRef.SourcePageIndex, PageRef.RotationOffset, ThumbPixelWidth)
+        var key = RenderCache.MakeKey(PageRef.SourceId, PageRef.SourcePageIndex, PageRef.RotationOffset, wanted)
                   + ":f" + _owner.FormRenderVersion + ":o" + overlays;
         if (_owner.Cache.TryGet(key) is { } cached)
         {
+            _thumbCts?.Cancel();
+            _thumbCts = null;
             ThumbImage = cached;
+            _thumbRenderedWidth = wanted;
             return;
         }
 
+        _thumbCts?.Cancel();
         var cts = new CancellationTokenSource();
         _thumbCts = cts;
+        _thumbPendingWidth = wanted;
         try
         {
-            var raw = await _owner.Document.RenderLogicalPageAsync(LogicalIndex, ThumbPixelWidth, pixelHeight, cts.Token);
+            var raw = await _owner.Document.RenderLogicalPageAsync(LogicalIndex, wanted, pixelHeight, cts.Token);
             var bitmap = BitmapFactory.ToBitmapSource(raw);
             _owner.Cache.Store(key, bitmap);
-            ThumbImage = bitmap;
+            if (!cts.IsCancellationRequested)
+            {
+                ThumbImage = bitmap;
+                _thumbRenderedWidth = wanted;
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -293,8 +503,16 @@ public sealed partial class PageViewModel : ObservableObject
         }
         finally
         {
-            _thumbCts = null;
+            if (_thumbCts == cts)
+                _thumbCts = null;
         }
+    }
+
+    /// <summary>Миниатюра есть, но под другой размер карточки — перерисовать; не было — не трогать (её закажет показ).</summary>
+    public void RefreshThumbnailIfStale()
+    {
+        if (ThumbImage != null && _thumbRenderedWidth != _owner.ThumbPixelWidth)
+            EnsureThumbnail();
     }
 
     /// <summary>Принудительный ре-рендер (ввод в поле формы): кэш-ключ уже сменился версией формы.</summary>
@@ -319,6 +537,7 @@ public sealed partial class PageViewModel : ObservableObject
         _renderCts?.Cancel();
         Image = null;
         _renderedPixelWidth = 0;
+        ScalingMode = System.Windows.Media.BitmapScalingMode.HighQuality;
     }
 
     public void CancelAll()

@@ -56,12 +56,17 @@ public sealed record DocumentImageProfile(
 public readonly record struct CompressionSettings(double Dpi, int Quality, bool StructureOnly);
 
 /// <summary>
-/// Пресеты сжатия. Числа не выдуманы: это режимы Nexus Optimizer, проверенные
-/// на реальных файлах — там они давали лучший результат при приемлемом виде.
+/// Пресеты сжатия.
+///
+/// Прежние числа (качество 35–56) были подобраны при движке, который молча НЕ
+/// уменьшал изображения: низкое качество было единственным источником
+/// выигрыша, и документы выходили мыльными. Теперь плотность честно приводится
+/// к цели, и качество можно держать человеческое: основной выигрыш даёт
+/// уменьшение лишних пикселей, а не растаптывание оставшихся.
 ///
 /// Разница между «умным» и остальными не в движке, а в смелости: скан
-/// переживает 100 DPI и качество 42 незаметно, а вёрстка с тонкими линиями от
-/// того же режима рассыпается. Поэтому «умное» сначала смотрит на документ.
+/// переживает 130 DPI незаметно, а вёрстка с тонкими линиями требует больше.
+/// Поэтому «умное» сначала смотрит на документ.
 /// </summary>
 public static class CompressionPresets
 {
@@ -75,15 +80,17 @@ public static class CompressionPresets
         double customDpi = 150, int customQuality = 75) => kind switch
     {
         CompressionPresetKind.Smart => profile.LooksScanned
-            // У скана с высоким разрешением запас больше: 100 DPI на глаз не
-            // отличить от 150, а весит он вдвое меньше.
-            ? (profile.AverageImageDpi > 140
-                ? new CompressionSettings(100, 42, false)
-                : new CompressionSettings(120, 48, false))
-            : new CompressionSettings(135, 56, false),
-        CompressionPresetKind.Quality => new CompressionSettings(165, 68, false),
-        CompressionPresetKind.Balanced => new CompressionSettings(118, 50, false),
-        CompressionPresetKind.Aggressive => new CompressionSettings(85, 35, false),
+            // У скана с высоким разрешением запас больше: 130 DPI на экране и
+            // в офисной печати не отличить от 170, а весит он вдвое меньше.
+            // Скан, который УЖЕ около 120 DPI, резать не из чего — цель выше
+            // его плотности означает «не трогать», и это честно.
+            ? (profile.AverageImageDpi > 160
+                ? new CompressionSettings(130, 68, false)
+                : new CompressionSettings(150, 70, false))
+            : new CompressionSettings(150, 76, false),
+        CompressionPresetKind.Quality => new CompressionSettings(220, 85, false),
+        CompressionPresetKind.Balanced => new CompressionSettings(120, 60, false),
+        CompressionPresetKind.Aggressive => new CompressionSettings(96, 45, false),
         CompressionPresetKind.Structure => new CompressionSettings(130, 60, true),
         _ => new CompressionSettings(
             Math.Clamp(customDpi, MinDpi, MaxDpi),

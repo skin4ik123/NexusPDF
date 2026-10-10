@@ -92,10 +92,10 @@ public sealed partial class DocumentToolsService
 
             var current = stem + "-0.pdf";
             intermediates.Add(current);
-            if (SaveService.CanSaveDirect(document))
-                await document.PrimaryHandle.SaveCurrentAsync(current, ct).ConfigureAwait(false);
-            else
-                await _renderEngine.ComposeAsync(composition, current, ct).ConfigureAwait(false);
+            // Исходное состояние — правкой копии документа, а не пересборкой:
+            // закладки, форма и вложения доходят до обработанного файла.
+            await new SaveService(_renderEngine).WriteCurrentStateAsync(
+                document, composition, current, default, ct).ConfigureAwait(false);
             var bytesBefore = new FileInfo(current).Length;
 
             // ---- 1. Чистка сканов ----

@@ -56,7 +56,12 @@ public sealed partial class DocumentToolsService
                 var plainPath = tempPath + ".plain";
                 try
                 {
-                    await _renderEngine.ComposeAsync(composition, plainPath, ct).ConfigureAwait(false);
+                    // Копия правится на месте, а не собирается заново: закладки,
+                    // форма и вложения остаются; старое шифрование снимается —
+                    // его заменит новое.
+                    await new SaveService(_renderEngine).WriteCurrentStateAsync(
+                        document, composition, plainPath, new InPlaceSaveOptions(RemoveSecurity: true), ct)
+                        .ConfigureAwait(false);
                     await _security.EncryptAsync(plainPath, tempPath, userPassword, ownerPassword, ct).ConfigureAwait(false);
                 }
                 finally
@@ -141,12 +146,11 @@ public sealed partial class DocumentToolsService
                 var normalized = tempPath + ".qdf";
                 try
                 {
-                    // С видимой отметкой прямой путь невозможен: оверлеи
-                    // запекаются только компоновкой.
-                    if (!visibleStamp && SaveService.CanSaveDirect(document))
-                        await document.PrimaryHandle.SaveCurrentAsync(plain, ct).ConfigureAwait(false);
-                    else
-                        await _renderEngine.ComposeAsync(composition, plain, ct).ConfigureAwait(false);
+                    // Копия правится на месте (и видимая отметка ложится на
+                    // страницу там же): структура документа переносится в
+                    // подписанный файл целиком.
+                    await new SaveService(_renderEngine).WriteCurrentStateAsync(
+                        document, composition, plain, default, ct).ConfigureAwait(false);
                     await _structure.NormalizeAsync(plain, normalized, ct).ConfigureAwait(false);
                     PdfIncrementalSigner.Sign(normalized, tempPath, certificate, reason, location);
                 }
@@ -208,10 +212,8 @@ public sealed partial class DocumentToolsService
                 var plain = tempPath + ".plain";
                 try
                 {
-                    if (SaveService.CanSaveDirect(document))
-                        await document.PrimaryHandle.SaveCurrentAsync(plain, ct).ConfigureAwait(false);
-                    else
-                        await _renderEngine.ComposeAsync(composition, plain, ct).ConfigureAwait(false);
+                    await new SaveService(_renderEngine).WriteCurrentStateAsync(
+                        document, composition, plain, default, ct).ConfigureAwait(false);
                     bytesBefore = new FileInfo(plain).Length;
 
                     if (_compression?.IsAvailable == true)
@@ -287,10 +289,8 @@ public sealed partial class DocumentToolsService
                 var plain = tempPath + ".plain";
                 try
                 {
-                    if (SaveService.CanSaveDirect(document))
-                        await document.PrimaryHandle.SaveCurrentAsync(plain, ct).ConfigureAwait(false);
-                    else
-                        await _renderEngine.ComposeAsync(composition, plain, ct).ConfigureAwait(false);
+                    await new SaveService(_renderEngine).WriteCurrentStateAsync(
+                        document, composition, plain, default, ct).ConfigureAwait(false);
                     stats = await _renderEngine.EnhanceScansAsync(
                         plain, null, tempPath, options, progress, ct).ConfigureAwait(false);
                 }
@@ -357,7 +357,8 @@ public sealed partial class DocumentToolsService
                 var plainPath = tempPath + ".plain";
                 try
                 {
-                    await _renderEngine.ComposeAsync(composition, plainPath, ct).ConfigureAwait(false);
+                    await new SaveService(_renderEngine).WriteCurrentStateAsync(
+                        document, composition, plainPath, default, ct).ConfigureAwait(false);
                     bytesBefore = new FileInfo(plainPath).Length;
                     await _structure.OptimizeAsync(plainPath, tempPath, linearize: true, ct).ConfigureAwait(false);
                 }

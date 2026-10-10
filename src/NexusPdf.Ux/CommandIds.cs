@@ -80,6 +80,12 @@ public static class CommandIds
     public const string StraightenStroke = "comments.straighten";
     public const string RestoreStroke = "comments.restoreStroke";
 
+    // Измерение
+    public const string MeasureDistance = "measure.distance";
+    public const string MeasurePerimeter = "measure.perimeter";
+    public const string MeasureArea = "measure.area";
+    public const string MeasureCalibrate = "measure.calibrate";
+
     // Формы
     public const string ToggleFormMode = "forms.toggleMode";
     public const string PreviewField = "forms.previewField";

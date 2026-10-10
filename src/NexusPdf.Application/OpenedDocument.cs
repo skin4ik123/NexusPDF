@@ -32,6 +32,41 @@ public sealed class OpenedDocument : IAsyncDisposable
 
     public IPdfDocumentHandle PrimaryHandle => Handles[PrimarySourceId];
 
+    /// <summary>
+    /// Резервная копия исходного файла уже сделана в этой сессии. Копия
+    /// делается один раз — до ПЕРВОГО сохранения: раньше каждое сохранение
+    /// перезаписывало «.bak», и после второго в нём лежала первая сохранённая
+    /// версия, а не исходный файл.
+    /// </summary>
+    public bool BackupTaken { get; set; }
+
+    // Дескрипторы, чей файл на диске уже заменён сохранением, которое документ
+    // не переоткрыло (человек правил, пока шла запись): их содержимое — прежняя
+    // версия, и брать «их файл» с диска для следующего сохранения нельзя.
+    private readonly HashSet<IPdfDocumentHandle> _staleHandles = new(ReferenceEqualityComparer.Instance);
+
+    // Прежние версии файлов, отодвинутые сохранением: удаляются, когда их
+    // перестают читать дескрипторы документа.
+    private readonly List<string> _retiredFiles = new();
+
+    /// <summary>Файл дескриптора на диске совпадает с тем, что дескриптор читает.</summary>
+    public bool IsHandleCurrent(IPdfDocumentHandle handle) => !_staleHandles.Contains(handle);
+
+    /// <summary>Сохранение заменило файлы этих дескрипторов, а документ остался на прежних данных.</summary>
+    public void MarkHandlesStale(IEnumerable<IPdfDocumentHandle> handles)
+    {
+        foreach (var handle in handles)
+            _staleHandles.Add(handle);
+    }
+
+    /// <summary>Прежняя версия файла: удалить, как только её отпустят дескрипторы.</summary>
+    public void AddRetiredFile(string path) => _retiredFiles.Add(path);
+
+    private void DeleteRetiredFiles()
+    {
+        _retiredFiles.RemoveAll(Infrastructure.SafeFileReplace.TryDelete);
+    }
+
     public string DisplayName =>
         Session.FilePath is { } p ? Path.GetFileName(p) : "Без имени";
 
@@ -63,22 +98,60 @@ public sealed class OpenedDocument : IAsyncDisposable
             : new PdfPageDescriptor(descriptor.HeightPoints, descriptor.WidthPoints);
     }
 
-    public Task<RenderedPageImage> RenderLogicalPageAsync(int logicalIndex, int pixelWidth, int pixelHeight, CancellationToken ct)
+    public async Task<RenderedPageImage> RenderLogicalPageAsync(int logicalIndex, int pixelWidth, int pixelHeight, CancellationToken ct)
     {
         var page = Session.Model.Pages[logicalIndex];
         var handle = Handles[page.SourceId];
 
-        // Страница с несохранёнными правками рисуется ВМЕСТЕ с ними — тем же
-        // кодом запекания, что и при сохранении. Иначе экран показывает не то,
-        // что окажется в файле (а часть правок не показывает вообще).
-        if (page.OverlayList.Count > 0)
+        if (page.OverlayList.Count == 0)
         {
-            return _engine.RenderPageWithOverlaysAsync(
-                handle, page.SourcePageIndex, page.RotationOffset,
-                page.OverlayList, pixelWidth, pixelHeight, ct);
+            return await handle.RenderPageAsync(
+                page.SourcePageIndex, pixelWidth, pixelHeight, page.RotationOffset, ct).ConfigureAwait(false);
         }
 
-        return handle.RenderPageAsync(page.SourcePageIndex, pixelWidth, pixelHeight, page.RotationOffset, ct);
+        // Пометки поверх страницы (заметки, фигуры, рисунки, измерения,
+        // надписи, вымарки) рисуются отдельным прозрачным слоем над обычным
+        // растром — тем же кодом запекания, что и при сохранении, поэтому
+        // экран совпадает с будущим файлом. Содержимое страницы при этом не
+        // копируется в промежуточный документ: на тяжёлом чертеже именно это
+        // занимало секунды после каждого щелчка. И поля формы остаются на
+        // месте: растр берётся из живого документа, где они нарисованы.
+        if (OverlayLayers.CanDrawAsLayer(page.OverlayList))
+        {
+            var content = await handle.RenderPageAsync(
+                page.SourcePageIndex, pixelWidth, pixelHeight, page.RotationOffset, ct).ConfigureAwait(false);
+            var layer = await RenderOverlayLayerAsync(logicalIndex, pixelWidth, pixelHeight, ct).ConfigureAwait(false);
+            return OverlayCompositor.BlendOver(content, layer);
+        }
+
+        // Правка самого содержимого (замена текста или картинки на странице)
+        // видна только в перерисованной странице — она и рисуется целиком.
+        return await _engine.RenderPageWithOverlaysAsync(
+            handle, page.SourcePageIndex, page.RotationOffset,
+            page.OverlayList, pixelWidth, pixelHeight, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Все правки страницы можно показать слоем поверх её обычного растра.</summary>
+    public bool CanDrawOverlaysAsLayer(int logicalIndex) =>
+        OverlayLayers.CanDrawAsLayer(Session.Model.Pages[logicalIndex].OverlayList);
+
+    /// <summary>Растр страницы без несохранённых правок — основа для слоя правок.</summary>
+    public Task<RenderedPageImage> RenderLogicalPageContentAsync(
+        int logicalIndex, int pixelWidth, int pixelHeight, CancellationToken ct)
+    {
+        var page = Session.Model.Pages[logicalIndex];
+        return Handles[page.SourceId].RenderPageAsync(
+            page.SourcePageIndex, pixelWidth, pixelHeight, page.RotationOffset, ct);
+    }
+
+    /// <summary>Только правки страницы, на прозрачном фоне, в рамке её обычного растра.</summary>
+    public Task<RenderedPageImage> RenderOverlayLayerAsync(
+        int logicalIndex, int pixelWidth, int pixelHeight, CancellationToken ct)
+    {
+        var page = Session.Model.Pages[logicalIndex];
+        return _engine.RenderOverlayLayerAsync(
+            Handles[page.SourceId], page.SourcePageIndex, page.RotationOffset,
+            page.OverlayList, pixelWidth, pixelHeight, ct);
     }
 
     // Испечённые страницы: по одной на логическую страницу с правками.
@@ -96,7 +169,12 @@ public sealed class OpenedDocument : IAsyncDisposable
         int logicalIndex, CancellationToken ct)
     {
         var page = Session.Model.Pages[logicalIndex];
-        var signature = GetOverlaySignature(logicalIndex);
+        // Испечённая копия нужна только правкам, которые меняют ТЕКСТ страницы.
+        // Заметка, фигура или измерение текста не добавляют — и раньше ради них
+        // каждый раз копировалась вся страница, на чертеже это секунды.
+        var signature = page.OverlayList.Any(OverlayLayers.ChangesText)
+            ? GetOverlaySignature(logicalIndex)
+            : 0;
         if (signature == 0)
             return (Handles[page.SourceId], page.SourcePageIndex);
 
@@ -186,6 +264,12 @@ public sealed class OpenedDocument : IAsyncDisposable
     {
         ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp",
     };
+
+    /// <summary>Файл, который вставляется страницей-картинкой.</summary>
+    public static bool IsImageFile(string path) => ImageExtensions.Contains(Path.GetExtension(path));
+
+    public static bool IsPdfFile(string path) =>
+        string.Equals(Path.GetExtension(path), ".pdf", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Вставка ФАЙЛОВ (перетащенных из Проводника) на заданную позицию.
@@ -461,7 +545,10 @@ public sealed class OpenedDocument : IAsyncDisposable
     /// </summary>
     public async Task RebaseToSavedFileAsync(IPdfRenderEngine engine, string savedPath, string? password, CancellationToken ct)
     {
-        var newHandle = await engine.OpenAsync(savedPath, password, ct).ConfigureAwait(false);
+        // Без ConfigureAwait(false): модель документа меняется ниже, и делать
+        // это надо в потоке вызывающего (интерфейса), а не в фоновом — иначе
+        // перестройка списка страниц шла бы параллельно с его чтением.
+        var newHandle = await engine.OpenAsync(savedPath, password, ct);
         Password = password;
         var oldHandles = Handles.Values.ToList();
 
@@ -489,6 +576,8 @@ public sealed class OpenedDocument : IAsyncDisposable
             // остался бы заблокированным до конца работы приложения.
             foreach (var handle in oldHandles)
                 await handle.DisposeAsync().ConfigureAwait(false);
+            _staleHandles.Clear();
+            DeleteRetiredFiles();
         }
     }
 
@@ -497,5 +586,7 @@ public sealed class OpenedDocument : IAsyncDisposable
         foreach (var handle in Handles.Values)
             await handle.DisposeAsync().ConfigureAwait(false);
         Handles.Clear();
+        _staleHandles.Clear();
+        DeleteRetiredFiles();
     }
 }

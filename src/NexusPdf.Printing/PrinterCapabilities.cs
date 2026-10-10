@@ -28,7 +28,14 @@ public enum PrinterConnection
 }
 
 /// <summary>Поддерживаемый принтером размер бумаги.</summary>
-public sealed record PaperSizeOption(string Name, SizePt SizePt, string? DriverValue = null);
+public sealed record PaperSizeOption(string Name, SizePt SizePt, string? DriverValue = null)
+{
+    /// <summary>
+    /// Имя для экранного диктора: элемент списка без шаблона читается через
+    /// ToString, и по умолчанию у записи это была бы строка со всеми полями.
+    /// </summary>
+    public override string ToString() => Name;
+}
 
 /// <summary>Лоток подачи.</summary>
 public sealed record PaperSourceOption(string Name, string? DriverValue = null, bool IsManualFeed = false);
@@ -58,6 +65,13 @@ public sealed record PrinterCapabilities
     public bool IsVirtual { get; init; }
 
     public IReadOnlyList<PaperSizeOption> PaperSizes { get; init; } = Array.Empty<PaperSizeOption>();
+
+    /// <summary>
+    /// Бумага, которую принтер выбирает сам (код dmPaperSize из его настроек
+    /// по умолчанию). null — драйвер не сообщил. Именно с неё окно печати
+    /// начинает, а не с жёстко заданного «A4».
+    /// </summary>
+    public string? DefaultPaperDriverValue { get; init; }
     public IReadOnlyList<PaperSourceOption> PaperSources { get; init; } = Array.Empty<PaperSourceOption>();
     public IReadOnlyList<MediaTypeOption> MediaTypes { get; init; } = Array.Empty<MediaTypeOption>();
     public IReadOnlyList<OutputBinOption> OutputBins { get; init; } = Array.Empty<OutputBinOption>();
@@ -127,6 +141,9 @@ public sealed record PrinterCapabilities
         }
         return best;
     }
+
+    /// <summary>Имя для списка принтеров и экранного диктора.</summary>
+    public override string ToString() => PrinterName;
 
     /// <summary>Заглушка возможностей для тестов и для документа без выбранного принтера.</summary>
     public static PrinterCapabilities Unknown(string name = "") => new()
