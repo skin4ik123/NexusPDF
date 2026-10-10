@@ -9,7 +9,12 @@ namespace NexusPdf.PdfEngineTests;
 /// </summary>
 public static class PdfFixture
 {
-    public sealed record PageSpec(double Width, double Height, int Rotate = 0, string Text = "Hello NexusPDF");
+    /// <param name="RawContent">
+    /// Готовый поток содержимого вместо текста — для страниц с линиями и
+    /// фигурами (проверка геометрии); null — обычный текст.
+    /// </param>
+    public sealed record PageSpec(
+        double Width, double Height, int Rotate = 0, string Text = "Hello NexusPDF", string? RawContent = null);
 
     public static byte[] Build(params PageSpec[] pages)
     {
@@ -34,7 +39,7 @@ public static class PdfFixture
                 $"/Contents {contentObj} 0 R /Resources << /Font << /F1 {fontObjNumber} 0 R >> >> >>");
 
             var text = p.Text.Replace("\\", "\\\\").Replace("(", "\\(").Replace(")", "\\)");
-            var stream = $"BT /F1 24 Tf 72 72 Td ({text}) Tj ET";
+            var stream = p.RawContent ?? $"BT /F1 24 Tf 72 72 Td ({text}) Tj ET";
             objects.Add($"<< /Length {stream.Length} >>\nstream\n{stream}\nendstream");
         }
 

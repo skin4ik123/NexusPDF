@@ -134,6 +134,17 @@ public static class OverlayDisplayMapper
                 }
                 return (markup with { Rects = rects }, 0);
             }
+            case MeasurementDraft measurement:
+            {
+                // Длины и площадь от поворота не меняются, переносятся только точки.
+                var points = new List<InkPoint>(measurement.Points.Count);
+                foreach (var point in measurement.Points)
+                {
+                    var (x, y) = RemapPoint(point.XPt, point.YPt, delta, finalWidth, finalHeight);
+                    points.Add(new InkPoint(x, y));
+                }
+                return (measurement with { Points = points }, 0);
+            }
             case InkAnnotationDraft ink:
             {
                 // У рисунка нет рамки — переносится каждая точка штриха.

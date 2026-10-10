@@ -44,6 +44,9 @@ public partial class DocumentView : UserControl
             _vm.FormComboRequested -= OnFormComboRequested;
             _vm.ExternalLinkRequested -= OnExternalLinkRequested;
             _vm.InlineEditRequested -= OnInlineEditRequested;
+            _vm.CalibrationRequested -= OnCalibrationRequested;
+            _vm.PagesRebuilding -= OnPagesRebuilding;
+            _vm.PagesRebuilt -= OnPagesRebuilt;
         }
         CloseComboPopup();
         _vm = e.NewValue as DocumentViewModel;
@@ -54,10 +57,18 @@ public partial class DocumentView : UserControl
             _vm.FormComboRequested += OnFormComboRequested;
             _vm.ExternalLinkRequested += OnExternalLinkRequested;
             _vm.InlineEditRequested += OnInlineEditRequested;
+            _vm.CalibrationRequested += OnCalibrationRequested;
+            _vm.PagesRebuilding += OnPagesRebuilding;
+            _vm.PagesRebuilt += OnPagesRebuilt;
             UpdatePlacementCursor();
             // Оглавление читается сразу: без него не видно, есть ли у документа
             // вкладка «Оглавление» вообще.
             _ = _vm.EnsureBookmarksAsync();
+            // Переключение вкладок переиспользует это же представление: новому
+            // документу область просмотра уже известна, и ждать прокрутки,
+            // чтобы подогнать его, не нужно.
+            HookScroller();
+            FitToViewport();
         }
     }
 
@@ -451,23 +462,58 @@ public partial class DocumentView : UserControl
             return;
         }
 
-        // Режим заполнения формы: клик уходит в поле PDF.
-        if (_vm.IsFormMode && _vm.PendingOverlay == null)
+        // Режим заполнения формы: щелчок по полю уходит в поле PDF. Мимо полей
+        // документ ведёт себя как при чтении — выделяется текст, работают
+        // ссылки и рука, — а набранное в поле фиксируется. Раньше любой
+        // щелчок в этом режиме уходил в pdfium, и выделить текст или
+        // подвинуть страницу было нельзя, пока не найдёшь, как выйти.
+        if (_vm.IsFormMode && _vm.PendingOverlay == null &&
+            e.ChangedButton == MouseButton.Left && FindPageAt(e.OriginalSource) is { } formHit)
         {
-            var formHit = FindPageAt(e.OriginalSource);
-            if (formHit != null)
+            var (formPage, formElement) = formHit;
+            var formScale = formPage.DisplayScale;
+            if (formScale > 0)
             {
-                var (formPage, formElement) = formHit.Value;
-                var formScale = formPage.DisplayScale;
-                if (formScale > 0)
+                var formPos = e.GetPosition(formElement);
+                var xPt = formPos.X / formScale;
+                var yPt = formPos.Y / formScale;
+                var dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+                // Пока поля страницы не прочитаны, решает pdfium: так первый
+                // щелчок после включения режима не промахивается.
+                if (!formPage.FormAreasLoaded || _vm.FormFieldAt(formPage, xPt, yPt) != null)
                 {
-                    var formPos = e.GetPosition(formElement);
-                    var dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
-                    _ = _vm.FormClickAsync(formPage, formPos.X / formScale, formPos.Y / formScale, dpi);
+                    _ = _vm.EnsureFormAreasAsync(formPage);
+                    _ = _vm.FormClickAsync(formPage, xPt, yPt, dpi);
                     PagesList.Focus(); // клавиатура должна идти в поле
                     e.Handled = true;
+                    return;
                 }
+                if (_vm.HasActiveFormPage)
+                    _ = _vm.ReleaseFormFieldAsync(dpi);
             }
+        }
+
+        // Измерение: каждый щелчок — точка; двойной щелчок заканчивает ломаную.
+        // Мимо страницы — обычное поведение (рука), чтобы можно было подвинуть лист.
+        if (_vm.IsMeasuring && _vm.PendingOverlay == null && e.ChangedButton == MouseButton.Left &&
+            FindPageAt(e.OriginalSource) is { } measureHit)
+        {
+            var (measurePage, measureElement) = measureHit;
+            var measureScale = measurePage.DisplayScale;
+            if (measureScale <= 0) return;
+            var measurePos = e.GetPosition(measureElement);
+            if (e.ClickCount >= 2)
+            {
+                _vm.FinishMeasurement();
+            }
+            else
+            {
+                _vm.MeasureClick(measurePage, measurePos.X / measureScale, measurePos.Y / measureScale,
+                    (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift,
+                    (Keyboard.Modifiers & ModifierKeys.Alt) == ModifierKeys.Alt);
+            }
+            PagesList.Focus(); // Enter, Backspace и Esc должны дойти до измерения
+            e.Handled = true;
             return;
         }
 
@@ -535,6 +581,16 @@ public partial class DocumentView : UserControl
             // Клик мимо объектов снимает выделение: рамка не должна висеть
             // на объекте, о котором пользователь уже забыл.
             _vm.ClearObjectSelection();
+
+            // Поле формы: заполнение включается само, и этот же щелчок ставит
+            // курсор в поле. Отдельно включать режим больше не нужно.
+            if (_vm.FormFieldAt(readPage, readPt.X, readPt.Y) != null)
+            {
+                _ = _vm.FillFieldAtAsync(readPage, readPt.X, readPt.Y, VisualTreeHelper.GetDpi(this).DpiScaleX);
+                PagesList.Focus(); // клавиатура должна идти в поле
+                e.Handled = true;
+                return;
+            }
 
             if (_vm.LinkAt(readPage, readPos.X, readPos.Y) is { } link)
             {
@@ -790,6 +846,30 @@ public partial class DocumentView : UserControl
             return;
         }
 
+        // Измерение: точка под курсором (с привязкой) и живая величина.
+        if (_vm is { IsMeasuring: true } && _dragPage == null)
+        {
+            if (FindPageAt(e.OriginalSource) is { } measureHit)
+            {
+                var (measurePage, measureElement) = measureHit;
+                var measureScale = measurePage.DisplayScale;
+                if (measureScale > 0)
+                {
+                    var measurePos = e.GetPosition(measureElement);
+                    _vm.MeasureHover(measurePage, measurePos.X / measureScale, measurePos.Y / measureScale,
+                        (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift,
+                        (Keyboard.Modifiers & ModifierKeys.Alt) == ModifierKeys.Alt);
+                }
+            }
+            else
+            {
+                _vm.MeasureHoverLeave();
+            }
+            if (PagesList.Cursor != Cursors.Cross)
+                PagesList.Cursor = Cursors.Cross;
+            return;
+        }
+
         // Курсор-рука над ссылкой (попадание проверяется по кэшу, без вызовов движка).
         if (_vm != null && _dragPage == null)
         {
@@ -807,10 +887,18 @@ public partial class DocumentView : UserControl
                 _ = _vm.EnsureLinksAsync(hoverPage);
                 var hoverPos = e.GetPosition(hoverElement);
                 _ = _vm.EnsureTextAreasAsync(hoverPage);
+                _ = _vm.EnsureFormAreasAsync(hoverPage);
                 var overLink = _vm.LinkAt(hoverPage, hoverPos.X, hoverPos.Y) != null;
+                var hoverScale = hoverPage.DisplayScale;
+                var field = _vm.PendingOverlay == null && hoverScale > 0
+                    ? _vm.FormFieldAt(hoverPage, hoverPos.X / hoverScale, hoverPos.Y / hoverScale)
+                    : null;
                 // Текстовый курсор — ТОЛЬКО над текстом. Раньше он стоял над всей
                 // страницей, и программа выглядела так, будто везде можно печатать.
-                wanted = overLink ? Cursors.Hand
+                // Над полем формы курсор говорит, что туда можно писать или нажать.
+                wanted = field != null
+                        ? field.Kind is NexusPdf.Pdf.Abstractions.PdfFormFieldKind.Text ? Cursors.IBeam : Cursors.Hand
+                    : overLink ? Cursors.Hand
                     : _vm.PendingOverlay != null ? Cursors.Cross
                     : _vm.HasTextAt(hoverPage, hoverPos.X, hoverPos.Y) ? Cursors.IBeam
                     // Пустое место страницы, которая не влезла в окно: отсюда
@@ -936,18 +1024,95 @@ public partial class DocumentView : UserControl
         {
             if (_vm == null) return;
             _vm.UpdateCurrentPage(args.VerticalOffset, args.ViewportHeight);
-            // Размер окна становится известен только здесь, поэтому первая
-            // подгонка страницы по ширине делается в этот момент: открывать
-            // документ в 100 %, когда лист шире окна, — плохая встреча.
-            _vm.ApplyInitialFit(args.ViewportWidth);
-            // И дальше на каждое изменение ширины: открылась панель справа —
+            // На каждое изменение размера области: открылась панель справа —
             // документ обязан вписаться в остаток окна сам, а не уехать под неё.
+            // Вертикальная полоса прокрутки у списка страниц ПОСТОЯННАЯ (не
+            // Auto) намеренно: автоматическая появлялась после первой подгонки
+            // по ширине, съедала 17 px, и первый же жест прокрутки пересчитывал
+            // масштаб — на 1366×768 документ заметно «дёргался», прежде чем
+            // поехать.
             _vm.ApplyViewport(args.ViewportWidth, args.ViewportHeight);
         };
+        FitToViewport();
+    }
+
+    /// <summary>
+    /// Подгонка по ТЕКУЩЕМУ размеру области просмотра, не дожидаясь события
+    /// прокрутки. Раньше первая подгонка жила только в ScrollChanged, а оно при
+    /// открытии успевало отработать ДО подписки (раскладка завершается раньше
+    /// Loaded): документ показывался в 100 %, и подгонка срабатывала на первом
+    /// движении колеса — это и был «скачок масштаба при прокрутке». Если
+    /// область ещё не разложена, подписка выше поймает её первое измерение.
+    /// </summary>
+    private void FitToViewport()
+    {
+        if (_vm == null || _scroller == null) return;
+        _vm.SetDpiScale(VisualTreeHelper.GetDpi(this).DpiScaleX);
+        if (_scroller.ViewportWidth > 0)
+            _vm.ApplyViewport(_scroller.ViewportWidth, _scroller.ViewportHeight);
+    }
+
+    /// <summary>Окно переехало на монитор с другой плотностью — растры нужны в его пикселях.</summary>
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+        _vm?.SetDpiScale(newDpi.DpiScaleX);
+    }
+
+    // ----- Пересборка страниц: прокрутка и фокус остаются на месте -----
+
+    private double _organizeOffsetBeforeRebuild = -1;
+    private double _readingOffsetBeforeRebuild = -1;
+    private bool _organizeHadFocus;
+    private int _explicitScrolls;
+
+    /// <summary>
+    /// Любая правка пересобирает карточки страниц. Список при этом мог
+    /// отпрыгнуть к началу, а фокус клавиатуры — пропасть вместе с карточкой,
+    /// и после поворота страницы переставали слушаться Delete и стрелки.
+    /// Здесь запоминается, где были, а после пересборки — возвращается.
+    /// </summary>
+    private void OnPagesRebuilding(object? sender, EventArgs e)
+    {
+        _organizeOffsetBeforeRebuild = FindDescendant<ScrollViewer>(OrganizeList)?.VerticalOffset ?? -1;
+        _readingOffsetBeforeRebuild = _scroller?.VerticalOffset ?? -1;
+        _organizeHadFocus = OrganizeList.IsKeyboardFocusWithin;
+    }
+
+    private void OnPagesRebuilt(object? sender, EventArgs e)
+    {
+        var organizeOffset = _organizeOffsetBeforeRebuild;
+        var readingOffset = _readingOffsetBeforeRebuild;
+        var hadFocus = _organizeHadFocus;
+        var scrollsBefore = _explicitScrolls;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(() =>
+        {
+            if (_vm == null) return;
+            if (organizeOffset >= 0 && FindDescendant<ScrollViewer>(OrganizeList) is { } organizeScroller &&
+                Math.Abs(organizeScroller.VerticalOffset - organizeOffset) > 0.5)
+                organizeScroller.ScrollToVerticalOffset(organizeOffset);
+            // Команда, которая сама перевела к странице, важнее прежнего места.
+            if (scrollsBefore == _explicitScrolls && readingOffset >= 0 && _scroller != null &&
+                Math.Abs(_scroller.VerticalOffset - readingOffset) > 0.5)
+                _scroller.ScrollToVerticalOffset(readingOffset);
+            if (hadFocus && _vm.IsOrganizeMode)
+                FocusOrganizer();
+        }));
+    }
+
+    /// <summary>Фокус — на первую выбранную карточку, чтобы стрелки шли от неё; иначе на список.</summary>
+    private void FocusOrganizer()
+    {
+        var first = _vm?.OrganizeSelectedPages.FirstOrDefault();
+        if (first != null && OrganizeList.ItemContainerGenerator.ContainerFromItem(first) is ListBoxItem item)
+            item.Focus();
+        else
+            OrganizeList.Focus();
     }
 
     private void OnScrollToPage(object? sender, int pageIndex)
     {
+        _explicitScrolls++;
         HookScroller();
         if (_vm == null || _scroller == null) return;
         if (_vm.IsOrganizeMode)
@@ -996,8 +1161,45 @@ public partial class DocumentView : UserControl
 
     private void OnPagesRightClick(object sender, MouseButtonEventArgs e)
     {
+        // Правая кнопка посреди измерения заканчивает ломаную, как в чертёжных
+        // программах; меню здесь только мешало бы.
+        if (_vm is { IsMeasuring: true, HasMeasureInProgress: true })
+        {
+            _vm.FinishMeasurement();
+            e.Handled = true;
+            return;
+        }
         if (ShowPageContextMenu(e.GetPosition(PagesList)))
             e.Handled = true;
+    }
+
+    /// <summary>
+    /// Калибровка: человек указал отрезок, теперь называет его настоящую длину.
+    /// Число можно ввести с единицей («22080 мм», «22,08 m»); без неё берётся
+    /// единица, выбранная на панели.
+    /// </summary>
+    private void OnCalibrationRequested(object? sender, DocumentViewModel.CalibrationRequest request)
+    {
+        if (_vm == null) return;
+        var paperMm = request.PaperLengthPt * NexusPdf.Pdf.Abstractions.MeasurementMath.PtToMm;
+        var answer = TextPromptDialog.Ask(Window.GetWindow(this),
+            Loc.Get("MeasureCalibrateTitle"),
+            Loc.F("MeasureCalibratePrompt", paperMm.ToString("0.0", System.Globalization.CultureInfo.CurrentCulture),
+                DocumentViewModel.UnitSymbol(_vm.MeasureUnit)),
+            "");
+        if (answer == null)
+        {
+            _vm.CancelCalibration();
+            return;
+        }
+        if (!NexusPdf.Pdf.Abstractions.MeasurementMath.TryParseLength(answer, _vm.MeasureUnit, out var value, out var unit) || value <= 0)
+        {
+            ErrorDialog.Show(Window.GetWindow(this), Loc.Get("MeasureCalibrateTitle"),
+                Loc.Get("MeasureCalibrateBadNumber"), answer);
+            _vm.CancelCalibration();
+            return;
+        }
+        _vm.ApplyCalibration(request.PaperLengthPt, value, unit);
     }
 
     /// <summary>
@@ -1269,90 +1471,10 @@ public partial class DocumentView : UserControl
         ToolsSearch.Clear();
     }
 
-    // ----- Перетаскивание файлов из Проводника в организатор -----
-
-    private InsertionLineAdorner? _insertLine;
-
-    /// <summary>
-    /// Куда лягут страницы: индекс ближайшего промежутка между миниатюрами.
-    /// Считается по СЕРЕДИНЕ страницы — правее середины значит «после неё».
-    /// </summary>
-    private int InsertIndexAt(Point position)
-    {
-        var index = OrganizeList.Items.Count;
-        for (var i = 0; i < OrganizeList.Items.Count; i++)
-        {
-            if (OrganizeList.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement container)
-                continue;
-            if (!container.IsVisible) continue;
-            var origin = container.TransformToAncestor(OrganizeList).Transform(new Point(0, 0));
-            var bounds = new Rect(origin, new Size(container.ActualWidth, container.ActualHeight));
-            if (position.Y < bounds.Bottom && position.X < bounds.X + bounds.Width / 2)
-                return i;
-            if (position.Y < bounds.Bottom)
-                index = i + 1;
-        }
-        return index;
-    }
-
-    private void ShowInsertionLine(int index)
-    {
-        var layer = AdornerLayer.GetAdornerLayer(OrganizeList);
-        if (layer == null) return;
-        if (_insertLine == null)
-        {
-            _insertLine = new InsertionLineAdorner(OrganizeList);
-            layer.Add(_insertLine);
-        }
-
-        var count = OrganizeList.Items.Count;
-        var anchorIndex = Math.Clamp(index < count ? index : count - 1, 0, Math.Max(0, count - 1));
-        if (OrganizeList.ItemContainerGenerator.ContainerFromIndex(anchorIndex) is not FrameworkElement container)
-            return;
-        var origin = container.TransformToAncestor(OrganizeList).Transform(new Point(0, 0));
-        var bounds = new Rect(origin, new Size(container.ActualWidth, container.ActualHeight));
-        // Перед страницей — по её левому краю, в самый конец — по правому.
-        var x = index < count ? bounds.X : bounds.Right;
-        _insertLine.Target = new Rect(x, bounds.Y, 1, bounds.Height);
-    }
-
-    private void HideInsertionLine()
-    {
-        if (_insertLine == null) return;
-        AdornerLayer.GetAdornerLayer(OrganizeList)?.Remove(_insertLine);
-        _insertLine = null;
-    }
-
-    private static bool HasDroppableFiles(IDataObject data) =>
-        data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0;
-
-    private void OnOrganizeFileDragOver(object sender, DragEventArgs e)
-    {
-        if (!HasDroppableFiles(e.Data))
-        {
-            // Не файлы — это перетаскивание страниц внутри списка, им
-            // занимается своя библиотека: мешать нельзя.
-            HideInsertionLine();
-            return;
-        }
-        e.Effects = DragDropEffects.Copy;
-        e.Handled = true;
-        ShowInsertionLine(InsertIndexAt(e.GetPosition(OrganizeList)));
-    }
-
-    private void OnOrganizeFileDragLeave(object sender, DragEventArgs e) => HideInsertionLine();
-
-    private void OnOrganizeFileDrop(object sender, DragEventArgs e)
-    {
-        HideInsertionLine();
-        if (!HasDroppableFiles(e.Data)) return;
-        if (e.Data.GetData(DataFormats.FileDrop) is not string[] files) return;
-
-        e.Handled = true;
-        var index = InsertIndexAt(e.GetPosition(OrganizeList));
-        if (Window.GetWindow(this) is MainWindow main && _vm != null)
-            _ = main.ViewModel.InsertDroppedFilesAsync(_vm, files, index);
-    }
+    // Файлы из Проводника принимает та же библиотека перетаскивания, что и
+    // страницы (DocumentViewModel как IDropTarget): она первой получает
+    // событие и помечает его обработанным, так что собственные обработчики
+    // списка до файлов не дотягивались, и место вставки она рисует сама.
 
     // ----- Выделение рамкой в режиме систематизации -----
 
@@ -1406,6 +1528,15 @@ public partial class DocumentView : UserControl
     }
 
     private void OnOrganizeMouseUp(object sender, MouseButtonEventArgs e) => EndMarquee();
+
+    /// <summary>Ctrl+колесо над организатором меняет размер миниатюр; без Ctrl — обычная прокрутка.</summary>
+    private void OnOrganizeMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (_vm == null || (Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
+        _vm.OrganizeThumbWidth = NexusPdf.Ux.ThumbnailSizing.Clamp(
+            _vm.OrganizeThumbWidth * (e.Delta > 0 ? 1.1 : 1 / 1.1));
+        e.Handled = true;
+    }
 
     /// <summary>Страницы, задетые рамкой, попадают в выбор; остальные — нет.</summary>
     private void ApplyMarqueeSelection(Rect rect)
@@ -1521,6 +1652,30 @@ public partial class DocumentView : UserControl
             return;
         }
 
+        // Измерение: Enter заканчивает ломаную, Backspace убирает точку, Esc
+        // отменяет начатое, а без начатого — убирает линейку из рук.
+        if (_vm.IsMeasuring)
+        {
+            switch (e.Key)
+            {
+                case Key.Enter:
+                    _vm.FinishMeasurement();
+                    e.Handled = true;
+                    return;
+                case Key.Back:
+                    _vm.UndoMeasurePoint();
+                    e.Handled = true;
+                    return;
+                case Key.Escape:
+                    if (_vm.HasMeasureInProgress)
+                        _vm.CancelMeasurement();
+                    else
+                        _vm.StopMeasurement();
+                    e.Handled = true;
+                    return;
+            }
+        }
+
         // Выбранный объект: Delete удаляет, Esc снимает выделение, стрелки
         // двигают точнее мыши (с Ctrl — по одному пункту).
         if (_vm.HasObjectSelection)
@@ -1551,12 +1706,27 @@ public partial class DocumentView : UserControl
             }
         }
 
+        // Esc при заполнении: сначала отпускается поле, второй Esc выключает
+        // заполнение — так же, как у линейки.
+        if (_vm.IsFormMode && e.Key == Key.Escape)
+        {
+            _ = _vm.EscapeFormAsync(VisualTreeHelper.GetDpi(this).DpiScaleX);
+            e.Handled = true;
+            return;
+        }
+
         // Дальше — ввод в поля формы; до первого клика в поле клавиатура
         // остаётся у прокрутки и навигации.
         if (_vm is not { IsFormMode: true, HasActiveFormPage: true }) return;
         var dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
         switch (e.Key)
         {
+            case Key.Tab:
+                // Tab — к следующему полю, Shift+Tab — к предыдущему, как в
+                // любой анкете. Без перехвата WPF увёл бы фокус из документа.
+                _ = _vm.FormKeyAsync(0x09, dpi, (Keyboard.Modifiers & ModifierKeys.Shift) != 0);
+                e.Handled = true;
+                break;
             case Key.Back:
                 _ = _vm.FormCharAsync((char)8, dpi);
                 e.Handled = true;
@@ -1584,12 +1754,33 @@ public partial class DocumentView : UserControl
         }
     }
 
+    /// <summary>
+    /// Клавиши организатора: Delete — удалить, Ctrl+R / Ctrl+L — повернуть
+    /// вправо / влево, Ctrl+D — дублировать, Esc — снять выбор. Ctrl+A и
+    /// стрелки с Shift выбирают страницы средствами самого списка.
+    /// </summary>
     private void OnOrganizeKeyDown(object sender, KeyEventArgs e)
     {
         if (_vm == null) return;
-        if (e.Key == Key.Delete)
+        var ctrl = Keyboard.Modifiers == ModifierKeys.Control;
+        System.Windows.Input.ICommand? command = e.Key switch
         {
-            _vm.DeleteSelectedCommand.Execute(OrganizeList.SelectedItems);
+            Key.Delete when Keyboard.Modifiers == ModifierKeys.None => _vm.DeleteSelectedCommand,
+            Key.R when ctrl => _vm.RotateSelectedCommand,
+            Key.L when ctrl => _vm.RotateSelectedLeftCommand,
+            Key.D when ctrl => _vm.DuplicateSelectedCommand,
+            _ => null,
+        };
+        if (command != null)
+        {
+            if (command.CanExecute(null))
+                command.Execute(null);
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == Key.Escape && _vm.HasOrganizeSelection)
+        {
+            _vm.SelectOrganizePages(Array.Empty<int>());
             e.Handled = true;
         }
     }

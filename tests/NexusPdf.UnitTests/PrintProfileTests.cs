@@ -141,6 +141,68 @@ public sealed class PrintProfileTests : IDisposable
     }
 
     [Fact]
+    public void Zero_Valued_Settings_Survive_A_Reload()
+    {
+        // Прежнее хранилище не писало значения, равные нулю своего типа, а при
+        // чтении подставляло инициализаторы записи: «Фактический размер»
+        // возвращался «Уменьшать крупные», а «Только документ» — с аннотациями.
+        var store = NewStore();
+        var settings = new LayoutSettings
+        {
+            Size = SizeMode.ActualSize,
+            Annotations = AnnotationPolicy.DocumentOnly,
+            Poster = new PosterSettings { Scale = 1, OverlapPt = 0 },
+        };
+        store.Save(PrintProfile.FromSettings("Чертёж", settings) with { HighQuality = true });
+
+        var loaded = NewStore().LoadAll().Single(p => p.Name == "Чертёж");
+        Assert.Equal(SizeMode.ActualSize, loaded.Size);
+        Assert.Equal(AnnotationPolicy.DocumentOnly, loaded.Annotations);
+        Assert.Equal(0, loaded.PosterOverlapPt, 3);
+        Assert.True(loaded.HighQuality);
+    }
+
+    [Fact]
+    public void Old_Format_File_Reads_Omitted_Fields_As_Type_Defaults()
+    {
+        // Файл прежней версии: поля со значением по умолчанию своего типа в нём
+        // просто отсутствуют — и значат именно это значение, а не инициализатор.
+        Directory.CreateDirectory(_dir);
+        var path = Path.Combine(_dir, "profiles.json");
+        File.WriteAllText(path, """
+            [
+              {
+                "Name": "Старый",
+                "NameKey": "",
+                "PrinterName": "",
+                "PaperName": "",
+                "Imposition": "NUp",
+                "CustomScale": 1,
+                "NUpRows": 2,
+                "NUpColumns": 2,
+                "PosterScale": 1
+              }
+            ]
+            """);
+
+        var loaded = new PrintProfileStore(path).LoadAll().Single(p => p.Name == "Старый");
+        Assert.Equal(ImpositionMode.NUp, loaded.Imposition);
+        Assert.Equal(SizeMode.ActualSize, loaded.Size);                 // было бы ShrinkOversized
+        Assert.Equal(AnnotationPolicy.DocumentOnly, loaded.Annotations); // было бы PrintableAnnotations
+        Assert.Equal(0, loaded.PosterOverlapPt, 3);                      // было бы 14,17
+        Assert.Equal(DuplexMode.Simplex, loaded.Duplex);
+    }
+
+    [Fact]
+    public void Built_In_Booklet_Flips_On_The_Short_Edge()
+    {
+        // Буклет — альбомный лист, сложенный пополам: с длинным краем все
+        // обороты выходили вверх ногами.
+        var booklet = BuiltInPrintProfiles.All.Single(p => p.Name == "Booklet");
+        Assert.Equal(DuplexMode.ShortEdge, booklet.Duplex);
+    }
+
+    [Fact]
     public void Profile_Without_A_Name_Is_Rejected()
     {
         var store = NewStore();

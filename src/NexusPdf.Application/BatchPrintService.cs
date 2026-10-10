@@ -42,6 +42,30 @@ public sealed class BatchPrintService
 
     public BatchPrintService(IPdfRenderEngine engine) => _engine = engine;
 
+    /// <summary>
+    /// Настройки профиля под возможности принтера — те же правила, что в
+    /// центре печати: буклет только с переворотом по короткому краю; цвет на
+    /// чёрно-белом принтере — оттенками серого; двусторонняя печать на
+    /// принтере без дуплекса — односторонней (ручной дуплекс в пакете
+    /// невозможен: он требует человека у лотка после каждого файла).
+    /// </summary>
+    public static LayoutSettings FitToPrinter(LayoutSettings settings, PrinterCapabilities printer)
+    {
+        var duplex = settings.Imposition == ImpositionMode.Booklet &&
+                     settings.Duplex is DuplexMode.Simplex or DuplexMode.LongEdge
+            ? DuplexMode.ShortEdge
+            : settings.Duplex;
+        var known = printer.PaperSizes.Count > 0;
+        if (known && !printer.SupportsAnyDuplex && duplex is DuplexMode.LongEdge or DuplexMode.ShortEdge)
+            duplex = DuplexMode.Simplex;
+        if (duplex == DuplexMode.Manual)
+            duplex = DuplexMode.Simplex;
+        var color = known && !printer.SupportsColor && settings.Color == ColorMode.Color
+            ? ColorMode.Grayscale
+            : settings.Color;
+        return settings with { Duplex = duplex, Color = color };
+    }
+
     public async Task<BatchPrintResult> RunAsync(
         IReadOnlyList<BatchPrintItem> items,
         PrintProfile profile,
@@ -53,7 +77,7 @@ public sealed class BatchPrintService
     {
         var outcomes = new List<BatchPrintOutcome>();
         var engine = new PrintLayoutEngine();
-        var settings = profile.ToSettings();
+        var settings = FitToPrinter(profile.ToSettings(), capabilities);
 
         for (var i = 0; i < items.Count; i++)
         {
@@ -74,7 +98,7 @@ public sealed class BatchPrintService
                     if (!permissions.AllowPrint)
                     {
                         outcomes.Add(new BatchPrintOutcome(item.Path, false, 0,
-                            "Документ запрещает печать."));
+                            PrintText.Get("PfPrintForbidden")));
                         continue;
                     }
 
@@ -99,6 +123,7 @@ public sealed class BatchPrintService
                         Capabilities = capabilities,
                         Sheets = sheets,
                         Duplex = settings.Duplex,
+                        OutputDpi = profile.HighQuality ? 600 : 300,
                     };
 
                     var sent = await submit(document, plan, ct).ConfigureAwait(false);

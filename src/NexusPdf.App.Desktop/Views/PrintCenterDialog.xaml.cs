@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using Microsoft.Win32;
@@ -29,6 +29,9 @@ public partial class PrintCenterDialog : Window
         _services = services;
         _model = new PrintCenterViewModel(document, services, preselectedPages);
         DataContext = _model;
+        // Принтеры опрашиваются ПОСЛЕ показа окна: человек сразу видит
+        // предпросмотр, а список и возможности приходят фоном.
+        Loaded += async (_, _) => await _model.InitializeAsync();
     }
 
     /// <param name="preselectedPages">
@@ -106,6 +109,10 @@ public partial class PrintCenterDialog : Window
         }
     }
 
+    /// <summary>Щелчок в поле диапазона — это выбор «Диапазона», как в окне печати Windows.</summary>
+    private void OnRangeBoxPressed(object sender, MouseButtonEventArgs e) =>
+        _model.Scope = PageScope.Range;
+
     private void OnSaveProfile(object sender, RoutedEventArgs e)
     {
         var name = TextPromptDialog.Ask(this,
@@ -133,7 +140,7 @@ public partial class PrintCenterDialog : Window
         {
             var progress = new Progress<(int Done, int Total)>(p => _model.ReportSubmit(p.Done, p.Total));
             var result = await new PrintToFileService(_services.Engine)
-                .SaveAsync(_document.Document, plan, dialog.FileName, 300, progress, ct);
+                .SaveAsync(_document.Document, plan, dialog.FileName, plan.OutputDpi, progress, ct);
 
             InfoDialog.Show(this, Loc.Get("PrintSaveToFile"),
                 Loc.F("PrintSavedToFile", result.SheetsWritten, Math.Round(result.EffectiveDpi)));
@@ -142,13 +149,15 @@ public partial class PrintCenterDialog : Window
         catch (OperationCanceledException)
         {
             // Остановка — не ошибка: окно остаётся открытым, чтобы можно было
-            // поправить настройки и попробовать снова.
-            InfoDialog.Show(this, Loc.Get("PrintSaveToFile"), Loc.F("PrintCancelled", 0));
+            // поправить настройки и попробовать снова. Файл при этом не создан:
+            // запись идёт через временный файл.
+            InfoDialog.Show(this, Loc.Get("PrintSaveToFile"), Loc.Get("PrintToFileCancelled"));
         }
         catch (Exception ex)
         {
             Serilog.Log.Error(ex, "Не удалось сохранить печатную раскладку");
-            ErrorDialog.Show(this, Loc.Get("ErrorTitle"), Loc.Get("PrintFailed"), ex.ToString());
+            ErrorDialog.Show(this, Loc.Get("ErrorTitle"),
+                Loc.F("PrintToFileFailed", PrintCenterViewModel.DescribeSubmitFailure(ex)), ex.ToString());
         }
         finally
         {
@@ -163,7 +172,11 @@ public partial class PrintCenterDialog : Window
         // Ручной дуплекс идёт своим путём: два задания с остановкой между ними.
         if (plan.Duplex == DuplexMode.Manual)
         {
-            ManualDuplexDialog.Run(this, _document, _services, plan);
+            if (ManualDuplexDialog.Run(this, _document, _services, plan))
+            {
+                _model.RememberPrinterUsed();
+                DialogResult = true;
+            }
             return;
         }
 
@@ -174,21 +187,31 @@ public partial class PrintCenterDialog : Window
                 p => _model.ReportSubmit(p.SheetsDone, p.SheetsTotal));
             var job = await _services.PrintJobs.SubmitAsync(_document.Document, plan, progress, ct);
             _services.PrintQueue.Track(job.PrinterName, job.JobIds, _document.Title);
+            _model.RememberPrinterUsed();
 
             InfoDialog.Show(this, Loc.Get("Print"),
                 Loc.F("PrintJobQueued", job.SheetsSent, plan.PrinterName));
             DialogResult = true;
         }
-        catch (OperationCanceledException)
+        catch (Services.Printing.PrintCancelledException cancelled)
         {
             // Часть листов уже могла уйти в очередь — говорим об этом прямо,
-            // а не делаем вид, что ничего не произошло.
-            InfoDialog.Show(this, Loc.Get("Print"), Loc.F("PrintCancelled", 0));
+            // и ушедшие части остаются в очереди программы, где их можно отменить.
+            if (cancelled.JobIds.Count > 0)
+                _services.PrintQueue.Track(cancelled.PrinterName, cancelled.JobIds, _document.Title);
+            InfoDialog.Show(this, Loc.Get("Print"), cancelled.SheetsSent > 0
+                ? Loc.F("PrintCancelled", cancelled.SheetsSent)
+                : Loc.Get("PrintCancelledNothingSent"));
+        }
+        catch (OperationCanceledException)
+        {
+            InfoDialog.Show(this, Loc.Get("Print"), Loc.Get("PrintCancelledNothingSent"));
         }
         catch (Exception ex)
         {
             Serilog.Log.Error(ex, "Ошибка отправки задания печати");
-            ErrorDialog.Show(this, Loc.Get("ErrorTitle"), Loc.Get("PrintFailed"), ex.ToString());
+            ErrorDialog.Show(this, Loc.Get("ErrorTitle"),
+                Loc.F("PrintFailedReason", PrintCenterViewModel.DescribeSubmitFailure(ex)), ex.ToString());
         }
         finally
         {

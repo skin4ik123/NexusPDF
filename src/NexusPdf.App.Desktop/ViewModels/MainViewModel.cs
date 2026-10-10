@@ -68,10 +68,12 @@ public sealed partial class MainViewModel : ObservableObject
     private const double MinPanelWidth = 180;
     private const double MaxPanelWidth = 640;
 
+    // Правые панели ужаты до того, что их содержимое ещё вмещает без обрезки:
+    // на 1366 точках ширины каждый десяток пикселей — это документ.
     [ObservableProperty] private double _sidePanelWidth = 176;
-    [ObservableProperty] private double _toolsPanelWidth = 270;
-    [ObservableProperty] private double _commentsPanelWidth = 270;
-    [ObservableProperty] private double _propertiesPanelWidth = 250;
+    [ObservableProperty] private double _toolsPanelWidth = 240;
+    [ObservableProperty] private double _commentsPanelWidth = 240;
+    [ObservableProperty] private double _propertiesPanelWidth = 230;
 
     public double PanelWidth(string? name) => name switch
     {
@@ -190,6 +192,8 @@ public sealed partial class MainViewModel : ObservableObject
                 0, target.Document.Session.Model.Pages.Count);
             var inserted = await target.Document.InsertPagesFromAsync(
                 _services.Engine, source.Document, logicalIndices, at, CancellationToken.None);
+            // Принесённые страницы выбраны: видно, что и куда легло.
+            target.SelectOrganizePages(Enumerable.Range(at, inserted));
             ActiveDocument = target;
             target.StatusText = Loc.F("DropPagesDone", inserted, source.Title);
             Log.Information("Перенос страниц: {Count} из {Source} в {Target}",
@@ -257,6 +261,9 @@ public sealed partial class MainViewModel : ObservableObject
             doc.StatusText = result.PagesAdded > 0
                 ? Loc.F("DropFilesDone", result.PagesAdded, result.FilesUsed)
                 : Loc.Get("DropFilesNothing");
+            if (result.PagesAdded > 0)
+                doc.SelectOrganizePages(Enumerable.Range(
+                    Math.Clamp(insertIndex, 0, doc.PageCount), result.PagesAdded));
             if (result.Skipped.Count > 0)
             {
                 // Пропущенное не прячем: молчание здесь читается как «всё
@@ -282,6 +289,103 @@ public sealed partial class MainViewModel : ObservableObject
         {
             doc.Busy.Finish();
             doc.IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Файлы, брошенные на окно, а не между карточками организатора. PDF
+    /// открываются вкладками. Картинки и документы Office становятся
+    /// страницами открытого документа — в конец, раз место не указано; когда
+    /// открыть некуда, из них собирается новый PDF, как по команде «Создать из
+    /// изображений». Раньше всё, кроме PDF, молча пропадало.
+    /// </summary>
+    public async Task DropFilesOnWindowAsync(IReadOnlyList<string> dropped)
+    {
+        var files = dropped.Where(File.Exists).ToList();
+        var pdfs = files.Where(OpenedDocument.IsPdfFile).ToList();
+        var pages = files.Where(f => !OpenedDocument.IsPdfFile(f) &&
+            (OpenedDocument.IsImageFile(f) || NexusPdf.Office.OfficeToPdfConverter.IsOfficeFile(f))).ToList();
+
+        // Цель для страниц — документ, который был открыт ДО броска: человек
+        // смотрел на него, когда тащил картинки.
+        var target = ActiveDocument;
+        if (pdfs.Count > 0)
+            await OpenFilesAsync(pdfs);
+        if (pages.Count == 0) return;
+
+        target ??= ActiveDocument;
+        if (target != null)
+            await InsertDroppedFilesAsync(target, pages, target.Pages.Count);
+        else
+            await CreatePdfFromDroppedAsync(pages);
+    }
+
+    /// <summary>
+    /// Новый PDF из брошенных картинок и документов Office, когда вставлять
+    /// их некуда. Порядок страниц — порядок файлов: подряд идущие картинки
+    /// собираются в одну часть, каждый документ Office — в свою, части
+    /// склеиваются.
+    /// </summary>
+    private async Task CreatePdfFromDroppedAsync(IReadOnlyList<string> files)
+    {
+        if (_convertBusy) return;
+        var save = new SaveFileDialog
+        {
+            Filter = Loc.Get("PdfFilter"),
+            FileName = Path.GetFileNameWithoutExtension(files[0]) + ".pdf",
+            DefaultExt = ".pdf",
+        };
+        if (save.ShowDialog(OwnerWindow) != true) return;
+        if (RejectIfTargetOpenAnywhere(save.FileName)) return;
+
+        _convertBusy = true;
+        try
+        {
+            var temp = NexusPdf.Infrastructure.AppPaths.DroppedFilesFolder;
+            Directory.CreateDirectory(temp);
+            var parts = new List<string>();
+            var run = new List<string>();
+
+            async Task FlushImagesAsync()
+            {
+                if (run.Count == 0) return;
+                var batch = run.ToList();
+                run.Clear();
+                var specs = await Task.Run(() => batch.Select(ImageEncoder.DecodeAsPageSpec).ToList());
+                var part = Path.Combine(temp, $"images-{Guid.NewGuid():N}.pdf");
+                await _services.Convert.CreateFromImagesAsync(specs, part, CancellationToken.None);
+                parts.Add(part);
+            }
+
+            foreach (var file in files)
+            {
+                if (OpenedDocument.IsImageFile(file))
+                {
+                    run.Add(file);
+                    continue;
+                }
+                await FlushImagesAsync();
+                parts.Add(await ConvertOfficeToPdfAsync(file, temp, CancellationToken.None));
+            }
+            await FlushImagesAsync();
+
+            if (parts.Count == 1)
+                File.Copy(parts[0], save.FileName, overwrite: true);
+            else
+                await _services.Convert.MergeAsync(parts, save.FileName, CancellationToken.None);
+
+            Log.Information("Создан PDF из {Count} брошенных файлов: {Path}", files.Count, save.FileName);
+            await OpenFilesAsync(new[] { save.FileName });
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Ошибка сборки PDF из брошенных файлов");
+            ErrorDialog.Show(OwnerWindow, Loc.Get("ErrorTitle"),
+                Loc.F("ErrorSaveFile", Path.GetFileName(save.FileName)), ex.ToString());
+        }
+        finally
+        {
+            _convertBusy = false;
         }
     }
 
@@ -540,11 +644,23 @@ public sealed partial class MainViewModel : ObservableObject
                 {
                     if (e.PropertyName is nameof(DocumentViewModel.Title) or nameof(DocumentViewModel.IsDirty))
                         OnPropertyChanged(nameof(WindowTitle));
+                    if (e.PropertyName is nameof(DocumentViewModel.IsOrganizeMode)
+                            or nameof(DocumentViewModel.IsFormMode)
+                            or nameof(DocumentViewModel.IsMeasuring)
+                        && ReferenceEquals(vm, ActiveDocument))
+                        SyncRailWithDocument(vm);
                 };
                 // Страницы, принесённые из другого документа и брошенные между
                 // карточками: место указано человеком, туда и ставим.
                 vm.PagesDroppedFromOtherDocument += (_, drop) =>
                     _ = DropPagesOnDocumentAsync(vm, drop.Source, drop.Indices, drop.InsertIndex);
+                // Файлы из Проводника, брошенные между карточками организатора.
+                vm.FilesDropped += (_, drop) =>
+                    _ = InsertDroppedFilesAsync(vm, drop.Files, drop.InsertIndex);
+                ConnectMeasureSettings(vm);
+                ConnectOrganizeSettings(vm);
+                // Страницы, утащенные в Проводник, уезжают готовым PDF-файлом.
+                vm.DragFileFactory = indices => BuildDragFile(vm, indices);
                 // Диалоги и запуск распознавания живут здесь, а промах по тексту
                 // ловит представление — отдаём ему объяснение как обработчик.
                 vm.ExplainNothingToEdit = page => ExplainNothingToEdit(vm, page);
@@ -677,24 +793,18 @@ public sealed partial class MainViewModel : ObservableObject
         doc.StatusText = Loc.Get("SavingStatus");
         try
         {
-            // Форма переживает и прямое сохранение, и наложение правок на месте.
-            // Теряется она только при перекомпоновке — когда менялся состав или
-            // порядок страниц.
-            var savedDirect = SaveService.CanSaveDirect(doc.Document) ||
-                              SaveService.CanSaveDirectWithOverlays(doc.Document);
+            // Сохранение правит копию файла на месте: форма, закладки, вложения
+            // и пароль переживают любые правки страниц.
             var hadRedactions = doc.Document.Session.Model.Pages
                 .Any(p => p.OverlayList.Any(o => o is NexusPdf.Pdf.Abstractions.RedactionDraft));
-            await _services.SaveService.SaveAsAsync(
+            var result = await _services.SaveService.SaveAsAsync(
                 doc.Document, targetPath, _services.Settings.KeepBackupOnSave, CancellationToken.None);
-            var hadForms = doc.HasAcroForm;
-            doc.ResetFormStateAfterSave();
+            if (result.Reopened)
+                doc.ResetFormStateAfterSave();
             _ = doc.LoadSignaturesAsync();
-            // Перекомпоновка не переносит AcroForm: поля становятся статикой.
             doc.StatusText = hadRedactions
                 ? Loc.Get("RedactionApplied")
-                : hadForms && !savedDirect
-                    ? Loc.Get("FormFlattenedWarning")
-                    : Loc.F("SavedStatus", Path.GetFileName(targetPath));
+                : Loc.F("SavedStatus", Path.GetFileName(targetPath));
             _services.Settings.TouchRecent(targetPath);
             _services.SaveSettings();
             SyncRecent();
@@ -824,7 +934,7 @@ public sealed partial class MainViewModel : ObservableObject
             var heightPt = widthPt * image.Aspect;
             return new NexusPdf.Pdf.Abstractions.ImageOverlay(
                 image.Bgra, image.PixelWidth, image.PixelHeight,
-                xPt - widthPt / 2, yPt - heightPt / 2, widthPt, heightPt);
+                xPt - widthPt / 2, yPt - heightPt / 2, widthPt, heightPt, image.EncodedJpeg);
         });
     }
 
@@ -1387,13 +1497,14 @@ public sealed partial class MainViewModel : ObservableObject
     /// ВЫБРАННОЙ группы: раньше все двадцать кнопок и палитра рисования жили
     /// в одной строке и не помещались.
     /// </summary>
-    public enum ToolGroup { None, Pages, Comment, Edit, Forms, Protect }
+    public enum ToolGroup { None, Pages, Comment, Edit, Measure, Forms, Protect }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasToolGroup))]
     [NotifyPropertyChangedFor(nameof(IsGroupPages))]
     [NotifyPropertyChangedFor(nameof(IsGroupComment))]
     [NotifyPropertyChangedFor(nameof(IsGroupEdit))]
+    [NotifyPropertyChangedFor(nameof(IsGroupMeasure))]
     [NotifyPropertyChangedFor(nameof(IsGroupForms))]
     [NotifyPropertyChangedFor(nameof(IsGroupProtect))]
     private ToolGroup _activeToolGroup = ToolGroup.None;
@@ -1402,22 +1513,215 @@ public sealed partial class MainViewModel : ObservableObject
     public bool IsGroupPages => ActiveToolGroup == ToolGroup.Pages;
     public bool IsGroupComment => ActiveToolGroup == ToolGroup.Comment;
     public bool IsGroupEdit => ActiveToolGroup == ToolGroup.Edit;
+    public bool IsGroupMeasure => ActiveToolGroup == ToolGroup.Measure;
     public bool IsGroupForms => ActiveToolGroup == ToolGroup.Forms;
     public bool IsGroupProtect => ActiveToolGroup == ToolGroup.Protect;
+
+    /// <summary>Рельс переключает режимы сам — синхронизация с документом в это время молчит.</summary>
+    private bool _railChanging;
 
     [RelayCommand]
     private void SelectToolGroup(string? name)
     {
         if (!Enum.TryParse<ToolGroup>(name, out var group))
             return;
-        ActiveToolGroup = ActiveToolGroup == group ? ToolGroup.None : group;
+        var chosen = ActiveToolGroup == group ? ToolGroup.None : group;
 
-        if (ActiveDocument is not { } doc) return;
-        // «Страницы» — это режим просмотра, а не набор кнопок, поэтому рельс
-        // переключает его напрямую.
-        doc.IsOrganizeMode = ActiveToolGroup == ToolGroup.Pages;
-        if (ActiveToolGroup != ToolGroup.Comment)
+        _railChanging = true;
+        try
+        {
+            ActiveToolGroup = chosen;
+            if (ActiveDocument is not { } doc) return;
+            // «Страницы» — это режим просмотра, а не набор кнопок, поэтому рельс
+            // переключает его напрямую.
+            doc.IsOrganizeMode = chosen == ToolGroup.Pages;
+            if (chosen != ToolGroup.Comment)
+                doc.SelectDrawTool(DocumentViewModel.DrawTool.None);
+            if (chosen == ToolGroup.Measure)
+            {
+                // Открыли группу — линейка уже в руке, второй щелчок не нужен.
+                if (!doc.IsMeasuring)
+                    doc.SelectMeasureTool(DocumentViewModel.MeasureTool.Distance);
+            }
+            else
+            {
+                doc.StopMeasurement();
+            }
+            // «Формы» — тоже режим: открыли группу, и поля уже заполняются. Раньше
+            // после неё приходилось искать и нажимать ещё одну кнопку наверху.
+            if (chosen == ToolGroup.Forms)
+                _ = EnterFormsFromRailAsync(doc);
+            else if (doc.IsFormMode)
+                _ = doc.ExitFormModeAsync();
+        }
+        finally
+        {
+            _railChanging = false;
+        }
+    }
+
+    private async Task EnterFormsFromRailAsync(DocumentViewModel doc)
+    {
+        await doc.EnterFormModeAsync();
+        // Не включилось (документ занят) — рельс не должен обещать режим, которого нет.
+        if (!doc.IsFormMode && ReferenceEquals(doc, ActiveDocument) && ActiveToolGroup == ToolGroup.Forms)
+            ActiveToolGroup = ToolGroup.None;
+    }
+
+    /// <summary>
+    /// Рельс показывает режим ТЕКУЩЕГО документа. Режим включается не только
+    /// рельсом: щелчком по полю формы, кнопкой организатора на быстрой панели,
+    /// переключением вкладки — и подсвеченная группа обязана это отражать, иначе
+    /// следующий щелчок по рельсу делает противоположное ожидаемому.
+    /// </summary>
+    private void SyncRailWithDocument(DocumentViewModel? doc)
+    {
+        if (_railChanging) return;
+        // Заполнение, включённое щелчком по полю, панель группы НЕ открывает:
+        // панель встаёт над документом и сдвигает страницу вниз — курсор
+        // оказывался уже не над тем полем, по которому щёлкнули. Подсветка
+        // полей и строка состояния и так показывают, что идёт заполнение.
+        var modal = doc == null ? ToolGroup.None
+            : doc.IsOrganizeMode ? ToolGroup.Pages
+            : doc.IsFormMode && ActiveToolGroup == ToolGroup.Forms ? ToolGroup.Forms
+            : doc.IsMeasuring ? ToolGroup.Measure
+            : ToolGroup.None;
+        if (modal != ToolGroup.None)
+            ActiveToolGroup = modal;
+        else if (ActiveToolGroup is ToolGroup.Pages or ToolGroup.Forms or ToolGroup.Measure)
+            ActiveToolGroup = ToolGroup.None;
+    }
+
+    partial void OnActiveDocumentChanged(DocumentViewModel? value) => SyncRailWithDocument(value);
+
+    // ----- Измерение -----
+
+    public sealed record MeasureUnitOption(NexusPdf.Pdf.Abstractions.MeasureUnit Unit, string Name);
+
+    /// <summary>Единицы для выпадающего списка: символ и полное название.</summary>
+    public IReadOnlyList<MeasureUnitOption> MeasureUnitOptions { get; } =
+        Enum.GetValues<NexusPdf.Pdf.Abstractions.MeasureUnit>()
+            .Select(u => new MeasureUnitOption(u,
+                DocumentViewModel.UnitSymbol(u) + " — " + Loc.Get("MeasureUnitName" + u)))
+            .ToList();
+
+    public IReadOnlyList<int> MeasureDecimalsOptions { get; } = new[] { 0, 1, 2, 3, 4 };
+
+    private void SelectMeasureTool(DocumentViewModel.MeasureTool tool)
+    {
+        if (ActiveDocument is not { } doc || doc.PageCount == 0) return;
+        // Инструмент вызван из палитры или меню: панель масштаба обязана быть
+        // на виду, иначе человек измеряет, не видя, в каком масштабе.
+        if (ActiveToolGroup != ToolGroup.Measure)
+        {
+            ActiveToolGroup = ToolGroup.Measure;
+            doc.IsOrganizeMode = false;
             doc.SelectDrawTool(DocumentViewModel.DrawTool.None);
+        }
+        doc.SelectMeasureTool(tool);
+    }
+
+    [RelayCommand]
+    private void MeasureDistance() => SelectMeasureTool(DocumentViewModel.MeasureTool.Distance);
+
+    [RelayCommand]
+    private void MeasurePerimeter() => SelectMeasureTool(DocumentViewModel.MeasureTool.Perimeter);
+
+    [RelayCommand]
+    private void MeasureArea() => SelectMeasureTool(DocumentViewModel.MeasureTool.Area);
+
+    [RelayCommand]
+    private void MeasureCalibrate() => SelectMeasureTool(DocumentViewModel.MeasureTool.Calibrate);
+
+    [RelayCommand]
+    private void SetMeasureColor(string? argb)
+    {
+        if (ActiveDocument is not { } doc || argb == null) return;
+        if (uint.TryParse(argb.TrimStart('#'),
+                System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture, out var value))
+            doc.MeasureColorArgb = value;
+    }
+
+    /// <summary>Размер миниатюр организатора — общий для всех документов и запоминается.</summary>
+    private void ConnectOrganizeSettings(DocumentViewModel vm)
+    {
+        vm.OrganizeThumbWidth = NexusPdf.Ux.ThumbnailSizing.Clamp(_services.Settings.OrganizeThumbWidth);
+        vm.ThumbSizeSettled += (_, _) =>
+        {
+            if (Math.Abs(_services.Settings.OrganizeThumbWidth - vm.OrganizeThumbWidth) < 0.5) return;
+            _services.Settings.OrganizeThumbWidth = vm.OrganizeThumbWidth;
+            _services.SaveSettings();
+            // Остальные открытые документы подхватывают тот же размер.
+            foreach (var other in Documents)
+            {
+                if (!ReferenceEquals(other, vm))
+                    other.OrganizeThumbWidth = vm.OrganizeThumbWidth;
+            }
+        };
+    }
+
+    /// <summary>
+    /// PDF из выбранных страниц для переноса в папку Проводника. Собирается
+    /// синхронно, пока мышь только начинает тащить: Проводник копирует файл в
+    /// момент броска, и он обязан быть готов заранее. Обычно это доли секунды;
+    /// если за 15 секунд не успели (сотни страниц с вымарыванием) — страницы
+    /// тащатся только внутри программы, а причина уходит в журнал.
+    /// </summary>
+    private string? BuildDragFile(DocumentViewModel doc, IReadOnlyList<int> indices)
+    {
+        if (doc.IsBusy || indices.Count == 0) return null;
+        try
+        {
+            var folder = NexusPdf.Infrastructure.AppPaths.DragOutFolder;
+            Directory.CreateDirectory(folder);
+            var baseName = Path.GetFileNameWithoutExtension(doc.Title);
+            foreach (var bad in Path.GetInvalidFileNameChars())
+                baseName = baseName.Replace(bad, '_');
+            var name = Loc.F("DragOutFileName", baseName, NexusPdf.Ux.PageRanges.Format(indices));
+            var path = Path.Combine(folder, name);
+
+            var task = _services.SaveService.ExtractAsync(doc.Document, indices, path, CancellationToken.None);
+            if (!task.Wait(TimeSpan.FromSeconds(15)))
+            {
+                Log.Warning("Файл для переноса страниц {Pages} не успел собраться за 15 с", NexusPdf.Ux.PageRanges.Format(indices));
+                return null;
+            }
+            Log.Information("Страницы {Pages} подготовлены к переносу: {Path}", NexusPdf.Ux.PageRanges.Format(indices), path);
+            return path;
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Не удалось собрать файл для переноса страниц");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Настройки измерения живут в настройках программы: новый документ
+    /// открывается с масштабом и единицей прошлого, а изменения запоминаются.
+    /// </summary>
+    private void ConnectMeasureSettings(DocumentViewModel vm)
+    {
+        var settings = _services.Settings;
+        var unit = Enum.TryParse<NexusPdf.Pdf.Abstractions.MeasureUnit>(settings.MeasureUnit, out var parsed)
+            ? parsed
+            : NexusPdf.Pdf.Abstractions.MeasureUnit.Meter;
+        vm.ApplyMeasureSettings(settings.MeasureScaleRatio, unit, settings.MeasureDecimals, settings.MeasureSnap);
+
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is not (nameof(DocumentViewModel.MeasureScaleRatio)
+                or nameof(DocumentViewModel.MeasureUnit)
+                or nameof(DocumentViewModel.MeasureDecimals)
+                or nameof(DocumentViewModel.MeasureSnap)))
+                return;
+            settings.MeasureScaleRatio = vm.MeasureScaleRatio;
+            settings.MeasureUnit = vm.MeasureUnit.ToString();
+            settings.MeasureDecimals = vm.MeasureDecimals;
+            settings.MeasureSnap = vm.MeasureSnap;
+            _services.SaveSettings();
+        };
     }
 
     // ----- Профили рабочих пространств -----
@@ -1447,7 +1751,7 @@ public sealed partial class MainViewModel : ObservableObject
             _services.SaveSettings();
         }
 
-        ActiveToolGroup = profile.Rail switch
+        var rail = profile.Rail switch
         {
             NexusPdf.Ux.ToolRail.Pages => ToolGroup.Pages,
             NexusPdf.Ux.ToolRail.Comment => ToolGroup.Comment,
@@ -1457,15 +1761,31 @@ public sealed partial class MainViewModel : ObservableObject
             _ => ToolGroup.None,
         };
 
-        if (ActiveDocument is not { } doc) return;
+        DocumentViewModel? doc;
+        _railChanging = true;
+        try
+        {
+            ActiveToolGroup = rail;
+            doc = ActiveDocument;
+            if (doc == null) return;
 
-        doc.IsOrganizeMode = profile.Organize;
-        doc.IsCommentsVisible = profile.CommentsPanel;
-        // Оглавление показывается только если оно у документа есть: пустая
-        // вкладка вместо миниатюр была бы хуже, чем миниатюры.
-        doc.IsOutlineVisible = profile.Outline && doc.HasBookmarks;
-        if (profile.Rail != NexusPdf.Ux.ToolRail.Comment)
-            doc.SelectDrawTool(DocumentViewModel.DrawTool.None);
+            doc.IsOrganizeMode = profile.Organize;
+            doc.IsCommentsVisible = profile.CommentsPanel;
+            // Оглавление показывается только если оно у документа есть: пустая
+            // вкладка вместо миниатюр была бы хуже, чем миниатюры.
+            doc.IsOutlineVisible = profile.Outline && doc.HasBookmarks;
+            if (profile.Rail != NexusPdf.Ux.ToolRail.Comment)
+                doc.SelectDrawTool(DocumentViewModel.DrawTool.None);
+            doc.StopMeasurement();
+            if (rail == ToolGroup.Forms)
+                _ = EnterFormsFromRailAsync(doc);
+            else if (doc.IsFormMode)
+                _ = doc.ExitFormModeAsync();
+        }
+        finally
+        {
+            _railChanging = false;
+        }
 
         if (!changeZoom)
             return;

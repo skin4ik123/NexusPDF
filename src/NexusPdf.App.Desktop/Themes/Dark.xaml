@@ -19,4 +19,5 @@
   <SolidColorBrush x:Key="TabActiveBg" Color="#2A2B2F"/>
   <SolidColorBrush x:Key="TabInactiveBg" Color="#232428"/>
   <Color x:Key="ShadowColor">#A0000000</Color>
+  <SolidColorBrush x:Key="ShadowBrush" Color="#A0000000"/>
 </ResourceDictionary>

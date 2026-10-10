@@ -257,19 +257,21 @@
         </StackPanel>
 
         <!-- Формы -->
+        <!-- Группа сама включает заполнение, поэтому вместо второго
+             переключателя здесь подсказка и «Готово» — выход из заполнения. -->
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
                     Visibility="{Binding IsGroupForms, Converter={StaticResource BoolToVis}}">
-          <ToggleButton Style="{StaticResource ToolButton}"
-                        IsChecked="{Binding ActiveDocument.IsFormMode, Mode=OneWay}"
-                        Command="{Binding ToggleFormModeActiveCommand}"
-                        ToolTip="{l:Loc FormMode}">
-            <StackPanel Orientation="Horizontal">
-              <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE762;"/>
-              <TextBlock Text="{l:Loc FormModeShort}" Margin="6,0,0,0"/>
-            </StackPanel>
-          </ToggleButton>
-          <TextBlock Text="{l:Loc FormHint}" VerticalAlignment="Center" Margin="12,0,0,0"
+          <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE762;" VerticalAlignment="Center"
+                     Foreground="{DynamicResource Accent}"/>
+          <TextBlock Text="{l:Loc FormHint}" VerticalAlignment="Center" Margin="8,0,12,0"
                      FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
+          <Button Style="{StaticResource ToolButton}" Command="{Binding SelectToolGroupCommand}"
+                  CommandParameter="Forms" ToolTip="{l:Loc FormDoneHint}">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE73E;"/>
+              <TextBlock Text="{l:Loc FormDone}" Margin="6,0,0,0"/>
+            </StackPanel>
+          </Button>
         </StackPanel>
 
         <!-- Защита -->
@@ -293,9 +295,113 @@
           </Button>
         </StackPanel>
 
-        <!-- Страницы: подсказка режима систематизации -->
+        <!-- Измерение: инструмент, масштаб, единицы, точность, привязка -->
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                    Visibility="{Binding IsGroupMeasure, Converter={StaticResource BoolToVis}}">
+          <ToggleButton Style="{StaticResource ToolButton}" Command="{Binding MeasureDistanceCommand}"
+                        IsChecked="{Binding ActiveDocument.IsMeasureDistanceActive, Mode=OneWay, FallbackValue=False}"
+                        IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc MeasureDistanceTool}">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="↔" FontSize="15"/>
+              <TextBlock Text="{l:Loc MeasureDistanceShort}" Margin="6,0,0,0"/>
+            </StackPanel>
+          </ToggleButton>
+          <ToggleButton Style="{StaticResource ToolButton}" Command="{Binding MeasurePerimeterCommand}"
+                        IsChecked="{Binding ActiveDocument.IsMeasurePerimeterActive, Mode=OneWay, FallbackValue=False}"
+                        IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc MeasurePerimeterTool}">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="⌐┘" FontSize="12" VerticalAlignment="Center"/>
+              <TextBlock Text="{l:Loc MeasurePerimeterShort}" Margin="6,0,0,0"/>
+            </StackPanel>
+          </ToggleButton>
+          <ToggleButton Style="{StaticResource ToolButton}" Command="{Binding MeasureAreaCommand}"
+                        IsChecked="{Binding ActiveDocument.IsMeasureAreaActive, Mode=OneWay, FallbackValue=False}"
+                        IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc MeasureAreaTool}">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="▱" FontSize="14"/>
+              <TextBlock Text="{l:Loc MeasureAreaShort}" Margin="6,0,0,0"/>
+            </StackPanel>
+          </ToggleButton>
+          <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
+
+          <TextBlock Text="{l:Loc MeasureScaleLabel}" VerticalAlignment="Center" Margin="4,0,6,0"
+                     FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
+          <!-- Масштаб вводится как на штампе чертежа: «1 : 200». Принимается и
+               «200», и «1/200»; непонятное поле возвращает к прежнему. -->
+          <TextBox Width="78" Style="{StaticResource ThemedTextBox}" FontSize="12" Padding="4,2"
+                   AutomationProperties.Name="{l:Loc MeasureScaleLabel}"
+                   ToolTip="{l:Loc MeasureScaleHint}"
+                   IsEnabled="{Binding HasDocuments}"
+                   KeyDown="OnMeasureScaleKeyDown"
+                   Text="{Binding ActiveDocument.MeasureScaleText, Mode=TwoWay,
+                          UpdateSourceTrigger=LostFocus, FallbackValue='1 : 100'}"/>
+          <ToggleButton Style="{StaticResource ToolButton}" Command="{Binding MeasureCalibrateCommand}"
+                        IsChecked="{Binding ActiveDocument.IsMeasureCalibrateActive, Mode=OneWay, FallbackValue=False}"
+                        IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc MeasureCalibrateTool}" Margin="4,0,0,0">
+            <TextBlock Text="{l:Loc MeasureCalibrateShort}"/>
+          </ToggleButton>
+
+          <ComboBox Width="118" Margin="10,0,0,0" FontSize="12"
+                    AutomationProperties.Name="{l:Loc MeasureUnitLabel}"
+                    ToolTip="{l:Loc MeasureUnitLabel}"
+                    IsEnabled="{Binding HasDocuments}"
+                    ItemsSource="{Binding MeasureUnitOptions}"
+                    DisplayMemberPath="Name" SelectedValuePath="Unit"
+                    SelectedValue="{Binding ActiveDocument.MeasureUnit, Mode=TwoWay}"/>
+          <TextBlock Text="{l:Loc MeasureDecimalsLabel}" VerticalAlignment="Center" Margin="10,0,6,0"
+                     FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
+          <ComboBox Width="48" FontSize="12"
+                    AutomationProperties.Name="{l:Loc MeasureDecimalsLabel}"
+                    IsEnabled="{Binding HasDocuments}"
+                    ItemsSource="{Binding MeasureDecimalsOptions}"
+                    SelectedItem="{Binding ActiveDocument.MeasureDecimals, Mode=TwoWay}"/>
+          <CheckBox VerticalAlignment="Center" Margin="12,0,0,0"
+                    Foreground="{DynamicResource TextBrush}" FontSize="12"
+                    IsChecked="{Binding ActiveDocument.MeasureSnap, Mode=TwoWay}"
+                    IsEnabled="{Binding HasDocuments}"
+                    Content="{l:Loc MeasureSnapLabel}" ToolTip="{l:Loc MeasureSnapHint}"/>
+
+          <ItemsControl ItemsSource="{Binding DrawPalette}" VerticalAlignment="Center" Margin="10,0,0,0">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Button Width="18" Height="18" Margin="2,0" Cursor="Hand"
+                        Command="{Binding DataContext.SetMeasureColorCommand,
+                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                        CommandParameter="{Binding Argb}"
+                        AutomationProperties.Name="{Binding Name}" ToolTip="{Binding Name}">
+                  <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                      <Border Background="{Binding Brush}" CornerRadius="9"
+                              BorderThickness="2" BorderBrush="{DynamicResource PanelBorder}"/>
+                    </ControlTemplate>
+                  </Button.Template>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <!-- Последний результат — всегда на виду, его можно прочитать не
+               целясь в подпись на листе. -->
+          <TextBlock Text="{Binding ActiveDocument.LastMeasurementText, FallbackValue=''}"
+                     VerticalAlignment="Center" Margin="14,0,0,0" FontSize="13" FontWeight="SemiBold"
+                     Foreground="{DynamicResource TextBrush}"/>
+        </StackPanel>
+
+        <!-- Страницы: размер миниатюр и подсказка режима систематизации -->
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
                     Visibility="{Binding IsGroupPages, Converter={StaticResource BoolToVis}}">
+          <TextBlock Text="{l:Loc OrganizeThumbSize}" VerticalAlignment="Center" Margin="0,0,6,0"
+                     FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
+          <Slider Width="140" VerticalAlignment="Center"
+                  Minimum="90" Maximum="420" IsSnapToTickEnabled="False"
+                  AutomationProperties.Name="{l:Loc OrganizeThumbSize}"
+                  ToolTip="{l:Loc OrganizeThumbSizeHint}"
+                  IsEnabled="{Binding HasDocuments}"
+                  Value="{Binding ActiveDocument.OrganizeThumbWidth, Mode=TwoWay, FallbackValue=150}"/>
+          <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="10,4"/>
           <TextBlock Text="{l:Loc OrganizeHint}" VerticalAlignment="Center"
                      FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
         </StackPanel>
@@ -395,6 +501,10 @@
                       Command="{Binding SelectToolGroupCommand}" CommandParameter="Forms"
                       Visibility="{Binding ActiveDocument.HasAcroForm, FallbackValue=Collapsed,
                                    Converter={StaticResource BoolToVis}}"/>
+        <ToggleButton Style="{StaticResource RailButton}" Tag="&#xED5E;" Content="{l:Loc RailMeasure}"
+                      IsChecked="{Binding IsGroupMeasure, Mode=OneWay}"
+                      Command="{Binding SelectToolGroupCommand}" CommandParameter="Measure"
+                      ToolTip="{l:Loc MeasureDistanceTool}"/>
         <ToggleButton Style="{StaticResource RailButton}" Tag="&#xE72E;" Content="{l:Loc RailProtect}"
                       IsChecked="{Binding IsGroupProtect, Mode=OneWay}"
                       Command="{Binding SelectToolGroupCommand}" CommandParameter="Protect"/>

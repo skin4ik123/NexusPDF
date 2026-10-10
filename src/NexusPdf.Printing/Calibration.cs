@@ -56,7 +56,7 @@ public static class Calibration
         // принимать её значило бы обнулить или отзеркалить всю печать.
         if (measuredWidthMm <= 1 || measuredHeightMm <= 1)
             throw new ArgumentOutOfRangeException(nameof(measuredWidthMm),
-                "Измеренная длина должна быть больше 1 мм.");
+                PrintText.Get("CalTooShort"));
 
         var scaleX = NominalMm / measuredWidthMm;
         var scaleY = NominalMm / measuredHeightMm;
@@ -65,7 +65,7 @@ public static class Calibration
         // не к той метке: такой масштаб принтеры не дают.
         if (scaleX is < 0.9 or > 1.1 || scaleY is < 0.9 or > 1.1)
             throw new ArgumentOutOfRangeException(nameof(measuredWidthMm),
-                "Поправка больше 10 % — проверьте, что измерены именно контрольные 100 мм.");
+                PrintText.Get("CalTooFar"));
 
         return new PrintCalibration
         {
@@ -109,7 +109,7 @@ public static class Calibration
             marks.Add(new SheetMark("cut", new RectPt(originX + i * 10 * mm, originY, 0, tick)));
         }
         marks.Add(new SheetMark("page-info",
-            new RectPt(originX, originY - 8 * mm, length, 5 * mm), "100 ММ ПО ГОРИЗОНТАЛИ"));
+            new RectPt(originX, originY - 8 * mm, length, 5 * mm), PrintText.Get("CalHorizontal")));
 
         // Вертикальная линейка.
         marks.Add(new SheetMark("cut", new RectPt(originX, originY, 0, length)));
@@ -121,7 +121,7 @@ public static class Calibration
         // Подпись вертикальной линейки — СПРАВА от неё, а не под: снизу она
         // налезала на заголовок квадрата.
         marks.Add(new SheetMark("page-info",
-            new RectPt(originX + 12 * mm, originY + length / 2, 60 * mm, 5 * mm), "100 ММ ПО ВЕРТИКАЛИ"));
+            new RectPt(originX + 12 * mm, originY + length / 2, 60 * mm, 5 * mm), PrintText.Get("CalVertical")));
 
         // Квадрат 100×100 мм: по нему проверяют обе стороны сразу.
         var squareY = originY + length + 20 * mm;
@@ -132,7 +132,7 @@ public static class Calibration
         marks.Add(new SheetMark("registration",
             new RectPt(originX + length / 2 - 4 * mm, squareY + length / 2 - 4 * mm, 8 * mm, 8 * mm)));
         marks.Add(new SheetMark("page-info",
-            new RectPt(originX, squareY - 7 * mm, length, 5 * mm), "КВАДРАТ 100 X 100 ММ"));
+            new RectPt(originX, squareY - 7 * mm, length, 5 * mm), PrintText.Get("CalSquare")));
 
         // Граница печатаемой области: по ней видно поля принтера.
         marks.Add(new SheetMark("cut", new RectPt(printable.XPt, printable.YPt, printable.WidthPt, 0)));
@@ -159,7 +159,7 @@ public static class Calibration
     /// <summary>Задание печати тестовой страницы.</summary>
     public static PrintJobPlan BuildTestJob(PaperSizeOption paper, PrinterCapabilities capabilities) => new()
     {
-        JobName = "Калибровочная страница",
+        JobName = PrintText.Get("CalJobName"),
         PrinterName = capabilities.PrinterName,
         Capabilities = capabilities,
         Sheets = new[] { BuildTestSheet(paper, capabilities) },

@@ -23,6 +23,14 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- Классы тестов идут друг за другом, а не параллельно: каждый класс
+       поднимает свой движок с собственным потоком pdfium, а pdfium не
+       потокобезопасен — параллельные классы изредка роняли подпись на
+       самопроверке. В программе движок один, там этой проблемы нет. -->
+  <ItemGroup>
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\NexusPdf.Office\NexusPdf.Office.csproj" />
     <ProjectReference Include="..\..\src\NexusPdf.Export\NexusPdf.Export.csproj" />

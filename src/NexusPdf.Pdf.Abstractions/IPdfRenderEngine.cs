@@ -52,6 +52,30 @@ public interface IPdfRenderEngine : IAsyncDisposable
         IPdfDocumentHandle source, int sourcePageIndex, int extraQuarterTurns,
         IReadOnlyList<PageOverlay> overlays, int pixelWidth, int pixelHeight, CancellationToken ct);
 
+    /// <summary>
+    /// ТОЛЬКО правки страницы — на прозрачном фоне, в той же рамке и том же
+    /// размере, что и обычный растр страницы. Накладывается поверх готового
+    /// растра: добавленная пометка не требует перерисовывать содержимое
+    /// страницы, которое на тяжёлом чертеже рисуется секундами.
+    /// Годится для правок, которые содержимое не меняют (см.
+    /// <see cref="OverlayLayers.IsDrawnOnTop"/>).
+    /// </summary>
+    Task<RenderedPageImage> RenderOverlayLayerAsync(
+        IPdfDocumentHandle source, int sourcePageIndex, int extraQuarterTurns,
+        IReadOnlyList<PageOverlay> overlays, int pixelWidth, int pixelHeight, CancellationToken ct);
+
+    /// <summary>
+    /// Сохранение набора страниц как ПРАВКИ копии базового документа (а не
+    /// сборкой нового): страницы базы переиспользуются, лишние удаляются,
+    /// вставленные импортируются, порядок выстраивается перестановкой. Пароль,
+    /// закладки, форма, вложения и свойства документа остаются. Копия
+    /// <paramref name="workingCopy"/> одноразовая и после вызова не годится.
+    /// </summary>
+    Task SaveCompositionInPlaceAsync(
+        IPdfDocumentHandle workingCopy, IPdfDocumentHandle baseSource,
+        IReadOnlyList<ComposedPage> composition, string targetPath,
+        InPlaceSaveOptions options, CancellationToken ct);
+
     /// <summary>Создаёт новый PDF, где каждая страница — одно изображение, растянутое на всю страницу.</summary>
     Task CreateImageDocumentAsync(IReadOnlyList<ImagePageSpec> pages, string targetPath, CancellationToken ct);
 
@@ -148,6 +172,13 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     Task<IReadOnlyList<PdfFormFieldValue>> GetFormFieldValuesAsync(int pageIndex, CancellationToken ct);
 
     /// <summary>
+    /// Все видимые отрезки векторной графики страницы (кривые разложены на
+    /// отрезки) в отображаемых пунктах — для привязки курсора при измерении.
+    /// На чертеже из САПР их сотни тысяч; читаются один раз на страницу.
+    /// </summary>
+    Task<IReadOnlyList<PdfSegment>> GetPageSegmentsAsync(int pageIndex, int extraQuarterTurns, CancellationToken ct);
+
+    /// <summary>
     /// Картинки страницы с их местом — для экспорта в Word. Крошечные
     /// отбрасываются, суммарная площадь ограничена <paramref name="maxPixels"/>.
     /// </summary>
@@ -235,8 +266,18 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     /// <summary>Включает окружение заполнения форм. false — формы отсутствуют/не поддерживаются.</summary>
     Task<bool> InitFormsAsync(CancellationToken ct);
 
-    /// <summary>Клик по странице в отображаемых координатах (пункты от левого верхнего угла).</summary>
-    Task FormClickAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct);
+    /// <summary>
+    /// Клик по странице в отображаемых координатах (пункты от левого верхнего
+    /// угла). Возвращает вид поля, по которому щёлкнули (Unknown — мимо полей):
+    /// щелчок по флажку меняет значение, а по текстовому полю — ещё нет.
+    /// </summary>
+    Task<PdfFormFieldKind> FormClickAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct);
+
+    /// <summary>
+    /// Поля формы страницы с рамками в отображаемых пунктах. Скрытые поля и
+    /// поля подписи не входят: щёлкать по ним незачем.
+    /// </summary>
+    Task<IReadOnlyList<PdfFormFieldArea>> GetFormFieldAreasAsync(int pageIndex, int extraQuarterTurns, CancellationToken ct);
 
     /// <summary>Выпадающий список/список в точке (null — обычное поле): опции для собственного попапа.</summary>
     Task<PdfComboInfo?> GetFormComboAtAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct);
@@ -247,8 +288,11 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     /// <summary>Ввод символа в сфокусированное поле (Backspace — символ 8).</summary>
     Task FormCharAsync(char character, CancellationToken ct);
 
-    /// <summary>Клавиша (Windows VK-код: стрелки, Delete, Home/End) в сфокусированное поле.</summary>
-    Task FormKeyDownAsync(int virtualKeyCode, CancellationToken ct);
+    /// <summary>
+    /// Клавиша (Windows VK-код: стрелки, Delete, Home/End, Tab) в
+    /// сфокусированное поле; shift — для Shift+Tab, перехода к предыдущему полю.
+    /// </summary>
+    Task FormKeyDownAsync(int virtualKeyCode, bool shift, CancellationToken ct);
 
     /// <summary>Снять фокус с поля (фиксирует введённое значение).</summary>
     Task FormKillFocusAsync(CancellationToken ct);
@@ -265,6 +309,22 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     /// всю неизменённую структуру) без перекомпоновки страниц.
     /// </summary>
     Task SaveCurrentAsync(string targetPath, CancellationToken ct);
+
+    /// <param name="incremental">
+    /// Дописать изменения к исходным байтам файла: так сохраняются цифровые
+    /// подписи, которые полная перезапись делает недействительными.
+    /// </param>
+    Task SaveCurrentAsync(string targetPath, bool incremental, CancellationToken ct);
+
+    /// <summary>
+    /// В открытом документе есть изменения, которых нет в его файле: значения
+    /// полей формы, введённые в этой сессии. Сохранение берёт копию документа
+    /// из памяти только тогда, когда это действительно нужно.
+    /// </summary>
+    bool HasUnsavedFormChanges { get; }
+
+    /// <summary>Растёт при каждом изменении значения поля формы в этом документе.</summary>
+    long FormChangeStamp { get; }
 
     /// <summary>
     /// То же прямое сохранение, но с наложением правок на страницы ЭТОГО

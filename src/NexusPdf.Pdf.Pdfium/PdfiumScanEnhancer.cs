@@ -263,6 +263,10 @@ internal static class PdfiumScanEnhancer
             var placedArea = Math.Abs((double)matrix.A * matrix.D - (double)matrix.B * matrix.C);
             if (placedArea < pageArea * ScanCoverage) continue;
 
+            // GetBitmap omits a separate SMask. Replacing that raster would
+            // discard genuine alpha, so cleanup leaves transparent images alone.
+            if (PdfiumImageEncoding.HasTransparency(doc, page, obj)) continue;
+
             var bitmap = fpdf_edit.FPDFImageObjGetBitmap(obj);
             if (bitmap == null || bitmap.__Instance == IntPtr.Zero) continue;
             byte[]? bgra;
@@ -283,15 +287,26 @@ internal static class PdfiumScanEnhancer
             // тянет вниз оценку фона в своих плитках. Фон выравнивается ВТОРЫМ:
             // после него порог Оцу отделяет краску от бумаги честно, а не по
             // тени. Мусор убирается ПОСЛЕДНИМ — по уже ровному листу.
+            var imageChanged = false;
             if (options.TrimDarkEdges)
-                edges += ScanCleanup.TrimDarkEdges(bgra, width, height);
+            {
+                var trimmed = ScanCleanup.TrimDarkEdges(bgra, width, height);
+                edges += trimmed;
+                imageChanged |= trimmed > 0;
+            }
             if (options.LevelBackground)
-                ScanCleanup.LevelBackground(bgra, width, height,
+                imageChanged |= ScanCleanup.LevelBackground(bgra, width, height,
                     new ScanCleanup.BackgroundOptions(options.BackgroundStrength, options.NeutralizeTint));
             if (options.Despeckle)
-                speckles += ScanCleanup.Despeckle(bgra, width, height, options.MaxSpeckleArea);
+            {
+                var removed = ScanCleanup.Despeckle(bgra, width, height, options.MaxSpeckleArea);
+                speckles += removed;
+                imageChanged |= removed > 0;
+            }
 
-            if (WriteBitmap(page, obj, bgra, width, height))
+            // A skipped photo or an already clean page keeps its encoded stream.
+            // Writing unchanged pixels as a bitmap only inflates and degrades it.
+            if (imageChanged && WriteBitmap(page, obj, bgra, width, height))
                 cleaned++;
         }
         return (cleaned, speckles, edges);
@@ -356,7 +371,7 @@ internal static class PdfiumScanEnhancer
         try
         {
             var bitmap = fpdfview.FPDFBitmapCreateEx(
-                width, height, 3, handle.AddrOfPinnedObject(), width * 4);
+                width, height, PdfiumImageEncoding.BitmapFormat(bgra), handle.AddrOfPinnedObject(), width * 4);
             if (bitmap == null || bitmap.__Instance == IntPtr.Zero) return false;
             try
             {

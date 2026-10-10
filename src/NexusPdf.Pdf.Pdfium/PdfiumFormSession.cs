@@ -29,6 +29,12 @@ internal sealed class PdfiumFormSession
 
     public bool IsActive => _formHandle != null;
 
+    /// <summary>Значение хотя бы одного поля изменилось с момента открытия документа.</summary>
+    public bool IsModified { get; private set; }
+
+    /// <summary>Растёт при каждом изменении значения поля.</summary>
+    public long ChangeStamp { get; private set; }
+
     /// <summary>Создание окружения. Вызывать на PDFium-потоке. null — формы отсутствуют.</summary>
     public static PdfiumFormSession? Create(FpdfDocumentT document)
     {
@@ -51,7 +57,13 @@ internal sealed class PdfiumFormSession
         session.Set(v => info.FFI_KillTimer = v, new Delegates.Action___IntPtr_int((_, _) => { }));
         session.Set(v => info.FFI_GetLocalTime = v,
             new Delegates.Func_PDFiumCore__FPDF_SYSTEMTIME___Internal___IntPtr(_ => default));
-        session.Set(v => info.FFI_OnChange = v, new Delegates.Action___IntPtr(_ => { }));
+        // pdfium сообщает о любом изменении значения поля: по этому признаку
+        // сохранение знает, что документ в памяти отличается от файла.
+        session.Set(v => info.FFI_OnChange = v, new Delegates.Action___IntPtr(_ =>
+        {
+            session.IsModified = true;
+            session.ChangeStamp++;
+        }));
         session.Set(v => info.FFI_GetPage = v,
             new Delegates.Func___IntPtr___IntPtr___IntPtr_int((_, _, _) => IntPtr.Zero));
         session.Set(v => info.FFI_GetCurrentPage = v,
@@ -82,9 +94,12 @@ internal sealed class PdfiumFormSession
     public void SetHighlight(bool on)
     {
         if (_formHandle == null) return;
+        IsHighlightOn = on;
         if (on)
         {
-            fpdf_formfill.FPDF_SetFormFieldHighlightColor(_formHandle, 0, 0xB5D0FF);
+            // Байты цвета pdfium кладёт в растр в порядке BGR: «0xB5D0FF» давал
+            // персиковую подсветку вместо голубой. Здесь голубой — #B5D0FF.
+            fpdf_formfill.FPDF_SetFormFieldHighlightColor(_formHandle, 0, 0xFFD0B5);
             fpdf_formfill.FPDF_SetFormFieldHighlightAlpha(_formHandle, 90);
         }
         else
@@ -139,7 +154,8 @@ internal sealed class PdfiumFormSession
         _activePageIndex = -1;
     }
 
-    public void Click(int pageIndex, int extraQuarterTurns, double displayedXPt, double displayedYPt,
+    /// <returns>Вид поля под точкой щелчка; Unknown — щелчок мимо полей.</returns>
+    public PdfFormFieldKind Click(int pageIndex, int extraQuarterTurns, double displayedXPt, double displayedYPt,
         double displayedWidthPt, double displayedHeightPt)
     {
         var page = ActivatePage(pageIndex);
@@ -150,6 +166,7 @@ internal sealed class PdfiumFormSession
             ((extraQuarterTurns % 4) + 4) % 4,
             (int)Math.Round(displayedXPt), (int)Math.Round(displayedYPt),
             ref pageX, ref pageY);
+        var kind = fpdf_formfill.FPDFPageHasFormFieldAtPoint(_formHandle!, page, pageX, pageY);
 
         // Пока в поле есть фокус, pdfium держит захват мыши на нём, и клик по
         // СОСЕДНЕМУ полю уходит в старое: перейти к следующей ячейке было
@@ -160,6 +177,66 @@ internal sealed class PdfiumFormSession
         fpdf_formfill.FORM_OnMouseMove(_formHandle!, page, 0, pageX, pageY);
         fpdf_formfill.FORM_OnLButtonDown(_formHandle!, page, 0, pageX, pageY);
         fpdf_formfill.FORM_OnLButtonUp(_formHandle!, page, 0, pageX, pageY);
+        return Enum.IsDefined(typeof(PdfFormFieldKind), kind) ? (PdfFormFieldKind)kind : PdfFormFieldKind.Unknown;
+    }
+
+    private const int AnnotSubtypeWidget = 20;
+    private const int AnnotFlagHidden = 2;
+    private const int FieldFlagReadOnly = 1;
+
+    /// <summary>
+    /// Поля страницы с рамками в отображаемых пунктах. Страница, не активная
+    /// для ввода, открывается на время чтения и сразу закрывается: активную
+    /// трогать нельзя — переключение сняло бы фокус с поля, в котором пишут.
+    /// </summary>
+    public IReadOnlyList<PdfFormFieldArea> GetFieldAreas(
+        int pageIndex, int extraQuarterTurns, double displayedWidthPt, double displayedHeightPt)
+    {
+        var transient = _activePageIndex != pageIndex || _activePage == null;
+        var page = transient ? fpdfview.FPDF_LoadPage(_document, pageIndex) : _activePage!;
+        if (page == null || page.__Instance == IntPtr.Zero)
+            return Array.Empty<PdfFormFieldArea>();
+        var rotate = ((extraQuarterTurns % 4) + 4) % 4;
+        var width = (int)Math.Round(displayedWidthPt);
+        var height = (int)Math.Round(displayedHeightPt);
+        var result = new List<PdfFormFieldArea>();
+        try
+        {
+            var count = fpdf_annot.FPDFPageGetAnnotCount(page);
+            for (var i = 0; i < count; i++)
+            {
+                var annot = fpdf_annot.FPDFPageGetAnnot(page, i);
+                if (annot == null || annot.__Instance == IntPtr.Zero) continue;
+                try
+                {
+                    if (fpdf_annot.FPDFAnnotGetSubtype(annot) != AnnotSubtypeWidget) continue;
+                    if ((fpdf_annot.FPDFAnnotGetFlags(annot) & AnnotFlagHidden) != 0) continue;
+                    var type = fpdf_annot.FPDFAnnotGetFormFieldType(_formHandle!, annot);
+                    if (!Enum.IsDefined(typeof(PdfFormFieldKind), type)) continue;
+                    var kind = (PdfFormFieldKind)type;
+                    if (kind is PdfFormFieldKind.Unknown or PdfFormFieldKind.Signature) continue;
+
+                    var rect = new FS_RECTF_();
+                    if (fpdf_annot.FPDFAnnotGetRect(annot, rect) == 0) continue;
+                    int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+                    fpdfview.FPDF_PageToDevice(page, 0, 0, width, height, rotate, rect.Left, rect.Top, ref x1, ref y1);
+                    fpdfview.FPDF_PageToDevice(page, 0, 0, width, height, rotate, rect.Right, rect.Bottom, ref x2, ref y2);
+                    var readOnly = (fpdf_annot.FPDFAnnotGetFormFieldFlags(_formHandle!, annot) & FieldFlagReadOnly) != 0;
+                    result.Add(new PdfFormFieldArea(
+                        Math.Min(x1, x2), Math.Min(y1, y2), Math.Abs(x2 - x1), Math.Abs(y2 - y1), kind, readOnly));
+                }
+                finally
+                {
+                    fpdf_annot.FPDFPageCloseAnnot(annot);
+                }
+            }
+        }
+        finally
+        {
+            if (transient)
+                fpdfview.FPDF_ClosePage(page);
+        }
+        return result;
     }
 
     public void Char(char character)
@@ -168,10 +245,15 @@ internal sealed class PdfiumFormSession
         fpdf_formfill.FORM_OnChar(_formHandle!, _activePage, character, 0);
     }
 
-    public void KeyDown(int virtualKeyCode)
+    /// <summary>FWL_EVENTFLAG_ShiftKey: модификатор для Shift+Tab.</summary>
+    private const int EventFlagShift = 1;
+
+    public void KeyDown(int virtualKeyCode, bool shift = false)
     {
         if (_activePage == null) return;
-        fpdf_formfill.FORM_OnKeyDown(_formHandle!, _activePage, virtualKeyCode, 0);
+        var modifiers = shift ? EventFlagShift : 0;
+        fpdf_formfill.FORM_OnKeyDown(_formHandle!, _activePage, virtualKeyCode, modifiers);
+        fpdf_formfill.FORM_OnKeyUp(_formHandle!, _activePage, virtualKeyCode, modifiers);
     }
 
     public void KillFocus()
@@ -274,10 +356,32 @@ internal sealed class PdfiumFormSession
         return new string(chars);
     }
 
+    /// <summary>Включена ли сейчас подсветка полей (режим заполнения).</summary>
+    public bool IsHighlightOn { get; private set; }
+
     /// <summary>Дорисовка полей формы поверх отрисованной страницы.</summary>
     public void DrawFields(FpdfBitmapT bitmap, FpdfPageT page, int width, int height, int rotate, int flags)
     {
         fpdf_formfill.FPDF_FFLDraw(_formHandle!, bitmap, page, 0, 0, width, height, rotate, flags);
+    }
+
+    /// <summary>
+    /// Дорисовка полей для бумаги и файла: подсветка режима заполнения — это
+    /// разметка экрана, и на печать она не идёт. Раньше лист, напечатанный во
+    /// время заполнения формы, выходил с голубыми прямоугольниками на каждом поле.
+    /// </summary>
+    public void DrawFieldsForOutput(FpdfBitmapT bitmap, FpdfPageT page, int width, int height, int rotate, int flags)
+    {
+        var highlighted = IsHighlightOn;
+        if (highlighted) SetHighlight(false);
+        try
+        {
+            DrawFields(bitmap, page, width, height, rotate, flags);
+        }
+        finally
+        {
+            if (highlighted) SetHighlight(true);
+        }
     }
 
     /// <summary>Является ли страница активной интерактивной страницей формы.</summary>

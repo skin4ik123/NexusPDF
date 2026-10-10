@@ -55,6 +55,9 @@ public static class OverlayGeometry
         InkAnnotationDraft => OverlayAbilities.Full,
         TextOverlay => OverlayAbilities.MoveOnly,
         NoteAnnotationDraft => OverlayAbilities.MoveOnly,
+        // Измерение растягивать нельзя: его подпись — это длина ИМЕННО этих
+        // точек, и растянутый размер врал бы. Подвинуть целиком — можно.
+        MeasurementDraft => OverlayAbilities.MoveOnly,
         // Разметка привязана к строкам текста: сдвинуть её отдельно от текста
         // нельзя — она перестанет быть разметкой этого текста. Выделить и
         // удалить можно.
@@ -84,8 +87,24 @@ public static class OverlayGeometry
 
         TextMarkupDraft markup => MarkupBounds(markup),
 
+        MeasurementDraft measurement => MeasurementBounds(measurement),
+
         _ => null,
     };
+
+    /// <summary>Рамка измерения: по точкам с запасом на засечки и подпись.</summary>
+    private static OverlayBox? MeasurementBounds(MeasurementDraft measurement)
+    {
+        if (measurement.Points.Count == 0) return null;
+        var left = measurement.Points.Min(p => p.XPt);
+        var right = measurement.Points.Max(p => p.XPt);
+        var top = measurement.Points.Min(p => p.YPt);
+        var bottom = measurement.Points.Max(p => p.YPt);
+        var pad = Math.Max(MinimumSizePt, measurement.FontSizePt * 1.5);
+        return new OverlayBox(left - pad, top - pad,
+            Math.Max(MinimumSizePt, right - left + pad * 2),
+            Math.Max(MinimumSizePt, bottom - top + pad * 2));
+    }
 
     /// <summary>Рамка по самим точкам штрихов, без запаса на толщину линии.</summary>
     private static OverlayBox? StrokeBounds(InkAnnotationDraft ink)
@@ -147,6 +166,10 @@ public static class OverlayGeometry
                     .Select(s => (IReadOnlyList<InkPoint>)s
                         .Select(p => new InkPoint(p.XPt + dx, p.YPt + dy)).ToList())
                     .ToList(),
+            },
+            MeasurementDraft measurement => measurement with
+            {
+                Points = measurement.Points.Select(p => new InkPoint(p.XPt + dx, p.YPt + dy)).ToList(),
             },
             _ => null,
         };

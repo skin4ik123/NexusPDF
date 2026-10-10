@@ -1,4 +1,6 @@
+using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using NexusPdf.Printing;
 
@@ -14,12 +16,25 @@ public sealed class PrintProfileStore
 {
     private readonly string _path;
 
+    /// <summary>
+    /// Пишутся ВСЕ поля. Прежняя запись опускала значения по умолчанию своего
+    /// типа, а при чтении на их место вставали инициализаторы записи — так
+    /// «Фактический размер» (нулевое значение перечисления) превращался в
+    /// «Уменьшать крупные», а «Только документ» — в «С печатными аннотациями».
+    /// </summary>
     private static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,
         Converters = { new JsonStringEnumConverter() },
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault,
+        DefaultIgnoreCondition = JsonIgnoreCondition.Never,
     };
+
+    /// <summary>
+    /// Метка формата в каждой записи. Её нет у файлов прежних версий — у них
+    /// отсутствующее поле значит «значение по умолчанию своего типа».
+    /// </summary>
+    private const string FormatProperty = "FormatVersion";
+    private const int FormatVersion = 2;
 
     public PrintProfileStore(string path) => _path = path;
 
@@ -51,9 +66,20 @@ public sealed class PrintProfileStore
         try
         {
             if (!File.Exists(_path)) return Array.Empty<PrintProfile>();
-            var json = File.ReadAllText(_path);
-            return JsonSerializer.Deserialize<List<PrintProfile>>(json, Options)
-                   ?? new List<PrintProfile>();
+            if (JsonNode.Parse(File.ReadAllText(_path)) is not JsonArray items)
+                return Array.Empty<PrintProfile>();
+
+            var result = new List<PrintProfile>();
+            foreach (var item in items)
+            {
+                if (item is not JsonObject record) continue;
+                if (!record.ContainsKey(FormatProperty))
+                    RestoreOmittedDefaults(record);
+                record.Remove(FormatProperty);
+                if (record.Deserialize<PrintProfile>(Options) is { } profile)
+                    result.Add(profile);
+            }
+            return result;
         }
         catch (Exception ex)
         {
@@ -88,6 +114,24 @@ public sealed class PrintProfileStore
         WriteCustom(custom);
     }
 
+    /// <summary>
+    /// Файл прежней версии: поля, равные значению по умолчанию СВОЕГО ТИПА, в
+    /// нём просто не записаны. Возвращаем их явно, иначе вместо нуля встанет
+    /// инициализатор записи и профиль молча поменяет смысл.
+    /// </summary>
+    private static void RestoreOmittedDefaults(JsonObject record)
+    {
+        foreach (var property in typeof(PrintProfile).GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (!property.CanWrite || record.ContainsKey(property.Name)) continue;
+            var type = property.PropertyType;
+            if (type == typeof(bool))
+                record[property.Name] = false;
+            else if (type.IsEnum || type == typeof(int) || type == typeof(double))
+                record[property.Name] = 0;
+        }
+    }
+
     private void WriteCustom(IReadOnlyList<PrintProfile> profiles)
     {
         try
@@ -95,7 +139,17 @@ public sealed class PrintProfileStore
             var directory = Path.GetDirectoryName(_path);
             if (!string.IsNullOrEmpty(directory))
                 Directory.CreateDirectory(directory);
-            File.WriteAllText(_path, JsonSerializer.Serialize(profiles, Options));
+
+            var items = new JsonArray();
+            foreach (var profile in profiles)
+            {
+                var record = JsonSerializer.SerializeToNode(profile, Options)!.AsObject();
+                record[FormatProperty] = FormatVersion;
+                items.Add(record);
+            }
+            var tmp = _path + ".nexustmp-" + Guid.NewGuid().ToString("N");
+            File.WriteAllText(tmp, items.ToJsonString(Options));
+            File.Move(tmp, _path, overwrite: true);
         }
         catch (Exception ex)
         {

@@ -295,6 +295,22 @@ public static class AppCommands
             Unavailable = NeedsDocument,
         };
 
+        // ---------- Измерение ----------
+        yield return Measure(CommandIds.MeasureDistance, "MeasureDistance", "MeasureDistanceTool", "",
+            new[] { "измерить", "расстояние", "длина", "линейка", "размер", "measure", "distance", "ruler" });
+        yield return Measure(CommandIds.MeasurePerimeter, "MeasurePerimeter", "MeasurePerimeterTool", "",
+            new[] { "периметр", "ломаная", "длина контура", "perimeter", "polyline" });
+        yield return Measure(CommandIds.MeasureArea, "MeasureArea", "MeasureAreaTool", "",
+            new[] { "площадь", "контур", "area", "квадратные метры" });
+        yield return new CommandDescriptor
+        {
+            Id = CommandIds.MeasureCalibrate, TitleKey = "MeasureCalibrate", DescriptionKey = "MeasureCalibrateTool",
+            Glyph = "", Category = CommandCategory.Measure, Group = MenuGroup.Special,
+            Danger = CommandDanger.Safe, OpensDialog = true,
+            Keywords = new[] { "масштаб", "калибровка", "калибровать", "1:200", "scale", "calibrate" },
+            Unavailable = NeedsDocument,
+        };
+
         // ---------- Формы ----------
         yield return new CommandDescriptor
         {
@@ -534,6 +550,15 @@ public static class AppCommands
         Id = id, TitleKey = titleKey, DescriptionKey = descriptionKey, Glyph = glyph,
         Category = CommandCategory.Comments, Group = MenuGroup.Editing, Keywords = keywords,
         Unavailable = NeedsEditableDocument,
+    };
+
+    /// <summary>Измерение не меняет документ, пока не поставлена отметка, поэтому доступно и в защищённом файле — для чтения.</summary>
+    private static CommandDescriptor Measure(
+        string id, string titleKey, string descriptionKey, string glyph, string[] keywords) => new()
+    {
+        Id = id, TitleKey = titleKey, DescriptionKey = descriptionKey, Glyph = glyph,
+        Category = CommandCategory.Measure, Group = MenuGroup.Editing,
+        Danger = CommandDanger.Safe, Keywords = keywords, Unavailable = NeedsDocument,
     };
 
     /// <summary>Разметка текста: работает только по выделению, поэтому без него бессмысленна.</summary>

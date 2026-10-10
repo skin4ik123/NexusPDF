@@ -34,12 +34,13 @@ public partial class ManualDuplexDialog : Window
         ShowStage();
     }
 
-    public static void Run(Window? owner, DocumentViewModel document, AppServices services, PrintJobPlan plan)
+    /// <returns>true — обе стороны отправлены и человек закрыл мастер кнопкой «Готово».</returns>
+    public static bool Run(Window? owner, DocumentViewModel document, AppServices services, PrintJobPlan plan)
     {
         var dialog = new ManualDuplexDialog(document, services, plan);
         if (owner is { IsLoaded: true })
             dialog.Owner = owner;
-        dialog.ShowDialog();
+        return dialog.ShowDialog() == true;
     }
 
     private void ShowStage()
@@ -61,9 +62,12 @@ public partial class ManualDuplexDialog : Window
                 FacingPanel.Visibility = Visibility.Collapsed;
                 StepsPanel.Visibility = Visibility.Visible;
 
-                var explanation = ManualDuplex.Explain(_facing, _plan.Duplex);
-                EdgeHint.Text = explanation.EdgeHint;
-                StepsList.ItemsSource = explanation.Steps;
+                // Край переворота — по самим листам: книжные переворачивают как
+                // страницу книги, альбомные и буклет — по короткому краю.
+                var explanation = ManualDuplex.Explain(_facing,
+                    ManualDuplex.FlipsOnShortEdge(_plan), ManualDuplex.AddsBlankBack(_plan));
+                EdgeHint.Text = Loc.Get(explanation.EdgeHintKey);
+                StepsList.ItemsSource = explanation.StepKeys.Select(Loc.Get).ToList();
                 ActionButton.Content = Loc.Get("MdPrintSecond");
                 break;
 
@@ -117,7 +121,8 @@ public partial class ManualDuplexDialog : Window
         {
             Serilog.Log.Error(ex, "Ошибка ручной двусторонней печати");
             StatusText.Text = "";
-            ErrorDialog.Show(this, Loc.Get("ErrorTitle"), Loc.Get("PrintFailed"), ex.ToString());
+            ErrorDialog.Show(this, Loc.Get("ErrorTitle"),
+                Loc.F("PrintFailedReason", PrintCenterViewModel.DescribeSubmitFailure(ex)), ex.ToString());
         }
         finally
         {

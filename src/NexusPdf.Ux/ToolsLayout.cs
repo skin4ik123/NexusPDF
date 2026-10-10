@@ -35,6 +35,11 @@ public static class ToolsLayout
             CommandIds.AddRect, CommandIds.AddEllipse,
             CommandIds.DrawPencil, CommandIds.DrawLine, CommandIds.DrawArrow,
         }),
+        new ToolsGroupLayout("MenuMeasure", new[]
+        {
+            CommandIds.MeasureDistance, CommandIds.MeasurePerimeter, CommandIds.MeasureArea,
+            CommandIds.MeasureCalibrate,
+        }),
         new ToolsGroupLayout("MenuSecurity", new[]
         {
             CommandIds.Redact, CommandIds.ProtectWithPassword,

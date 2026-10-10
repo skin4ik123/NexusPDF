@@ -61,36 +61,36 @@ public static class Preflight
         if (!rights.AllowPrint)
         {
             issues.Add(new PreflightIssue(PreflightLevel.Critical, CodePrintForbidden,
-                "Документ запрещает печать.",
-                "Ограничение установил автор документа; программа его соблюдает."));
+                PrintText.Get("PfPrintForbidden"),
+                PrintText.Get("PfPrintForbiddenHint")));
             return issues;
         }
         if (!rights.AllowHighQuality)
             issues.Add(new PreflightIssue(PreflightLevel.Info, CodeLowQualityOnly,
-                $"Документ разрешает только печать низкого качества: разрешение ограничено {PrintPermissions.LowQualityDpi:F0} DPI.",
-                "Ограничение установил автор документа."));
+                PrintText.Get("PfLowQualityOnly", PrintPermissions.LowQualityDpi.ToString("F0")),
+                PrintText.Get("PfLowQualityOnlyHint")));
 
         if (plan.Sheets.Count == 0 || plan.PlacedPageCount == 0)
         {
             issues.Add(new PreflightIssue(PreflightLevel.Critical, CodeEmptyJob,
-                "Печатать нечего: под выбранные параметры не попала ни одна страница.",
-                "Проверьте диапазон страниц и фильтры."));
+                PrintText.Get("PfEmptyJob"),
+                PrintText.Get("PfEmptyJobHint")));
             return issues;
         }
 
         var clipped = plan.Sheets.Where(s => s.HasClippedContent).Select(s => s.SheetIndex).ToList();
         if (clipped.Count > 0)
             issues.Add(new PreflightIssue(PreflightLevel.Warning, CodeClipped,
-                $"Содержимое обрезано на листах: {clipped.Count}.",
-                "Выберите «Вписать» или бумагу большего размера.", clipped));
+                PrintText.Get("PfClipped", clipped.Count),
+                PrintText.Get("PfClippedHint"), clipped));
 
         var outside = plan.Sheets
             .Where(s => s.Pages.Any(p => !p.TargetRectPt.IsInside(s.PrintableAreaPt)))
             .Select(s => s.SheetIndex).ToList();
         if (outside.Count > 0)
             issues.Add(new PreflightIssue(PreflightLevel.Warning, CodeOutsidePrintable,
-                $"Часть содержимого выходит за печатаемую область на листах: {outside.Count}.",
-                "Принтер физически не печатает у самого края бумаги.", outside));
+                PrintText.Get("PfOutsidePrintable", outside.Count),
+                PrintText.Get("PfOutsidePrintableHint"), outside));
 
         // Разбиение по формату — не пожелание, а необходимость: Windows задаёт
         // бумагу одним PrintTicket на всё задание.
@@ -102,44 +102,44 @@ public static class Preflight
         {
             if (scales.Min() < TinyScale)
                 issues.Add(new PreflightIssue(PreflightLevel.Warning, CodeTinyScale,
-                    $"Минимальный масштаб {scales.Min() * 100:F0}% — текст может стать нечитаемым."));
+                    PrintText.Get("PfTinyScale", (scales.Min() * 100).ToString("F0"))));
             if (scales.Max() > HugeScale)
                 issues.Add(new PreflightIssue(PreflightLevel.Warning, CodeHugeScale,
-                    $"Максимальный масштаб {scales.Max() * 100:F0}% — изображения могут стать размытыми."));
+                    PrintText.Get("PfHugeScale", (scales.Max() * 100).ToString("F0"))));
         }
 
         var blanks = plan.Sheets.Count(s => s.IsInsertedBlank);
         if (blanks > 0)
             issues.Add(new PreflightIssue(PreflightLevel.Info, CodeBlankInserted,
-                $"В задание добавлено пустых листов: {blanks}.",
-                "Так требует выбранная раскладка."));
+                PrintText.Get("PfBlankInserted", blanks),
+                PrintText.Get("PfBlankInsertedHint")));
 
         var raster = plan.Sheets.SelectMany(s => s.Pages).Count(p => p.Raster != RasterReason.None);
         if (raster > 0)
             issues.Add(new PreflightIssue(PreflightLevel.Info, CodeRasterFallback,
-                $"Страниц печатается растром: {raster}.",
-                "Растр надёжнее на проблемных драйверах, но текст в нём не векторный."));
+                PrintText.Get("PfRaster", raster),
+                PrintText.Get("PfRasterHint")));
 
         if (plan.Duplex == DuplexMode.Manual)
             issues.Add(new PreflightIssue(PreflightLevel.Info, CodeManualDuplex,
-                "Двусторонняя печать выполняется вручную в два прохода.",
-                "После первой стороны программа покажет, как вернуть бумагу в лоток."));
+                PrintText.Get("PfManualDuplex"),
+                PrintText.Get("PfManualDuplexHint")));
 
         if (plan.Duplex is DuplexMode.LongEdge or DuplexMode.ShortEdge &&
             !plan.Capabilities.SupportsAnyDuplex)
             issues.Add(new PreflightIssue(PreflightLevel.Error, CodeDuplexUnsupported,
-                "Принтер не сообщает о поддержке автоматической двусторонней печати.",
-                "Используйте ручную двустороннюю печать."));
+                PrintText.Get("PfDuplexUnsupported"),
+                PrintText.Get("PfDuplexUnsupportedHint")));
 
         if (plan.Copies > 1 && plan.CollationBy == CollationExecutor.Application)
             issues.Add(new PreflightIssue(PreflightLevel.Info, CodeCollateInApp,
-                "Копии раскладывает программа: объём задания вырастет во столько же раз.",
-                "Принтер не сообщил о собственной поддержке сортировки."));
+                PrintText.Get("PfCollateInApp"),
+                PrintText.Get("PfCollateInAppHint")));
 
         if (plan.Capabilities.State is PrinterState.Offline or PrinterState.Error)
             issues.Add(new PreflightIssue(PreflightLevel.Error, CodePrinterOffline,
-                "Принтер сейчас недоступен.",
-                "Задание встанет в очередь и напечатается, когда принтер вернётся."));
+                PrintText.Get("PfPrinterOffline"),
+                PrintText.Get("PfPrinterOfflineHint")));
 
         return issues;
     }

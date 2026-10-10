@@ -49,7 +49,8 @@ public sealed record ImageOverlay(
     double XPt,
     double YPt,
     double WidthPt,
-    double HeightPt) : PageOverlay;
+    double HeightPt,
+    byte[]? EncodedJpeg = null) : PageOverlay;
 
 /// <summary>Черновик заметки-комментария (значок с текстом). Точка — в отображаемых координатах на момент размещения.</summary>
 public sealed record NoteAnnotationDraft(
@@ -485,13 +486,35 @@ public sealed record PdfComboInfo(
 /// Value — /V для виджетов форм. RectPt — рамка на странице, по ней экспорт
 /// понимает, к какому месту текста относится примечание.
 /// </summary>
+/// <summary>Вид поля формы (коды FPDF_FORMFIELD_*).</summary>
+public enum PdfFormFieldKind
+{
+    Unknown = 0,
+    PushButton = 1,
+    CheckBox = 2,
+    RadioButton = 3,
+    ComboBox = 4,
+    ListBox = 5,
+    Text = 6,
+    Signature = 7,
+}
+
+/// <summary>Поле формы на странице: рамка в отображаемых пунктах и вид — чтобы щелчок по полю сразу начинал ввод.</summary>
+public sealed record PdfFormFieldArea(
+    double XPt, double YPt, double WidthPt, double HeightPt, PdfFormFieldKind Kind, bool IsReadOnly)
+{
+    public bool Contains(double x, double y) =>
+        x >= XPt && x <= XPt + WidthPt && y >= YPt && y <= YPt + HeightPt;
+}
+
 public sealed record PdfAnnotationInfo(
     int AnnotIndex,
     int Subtype,
     string Contents,
     string Author,
     string Value = "",
-    PdfTextRect? RectPt = null);
+    PdfTextRect? RectPt = null,
+    string Subject = "");
 
 /// <summary>Метаданные документа: версия PDF, шифрование и строки словаря /Info (пустые, если не заданы).</summary>
 public sealed record PdfDocumentMetadata(
@@ -514,7 +537,8 @@ public sealed record ImagePageSpec(
     int PixelWidth,
     int PixelHeight,
     double WidthPoints,
-    double HeightPoints);
+    double HeightPoints,
+    byte[]? EncodedJpeg = null);
 
 /// <summary>Одна страница будущего документа: источник, номер страницы в источнике, добавочный поворот (в четвертях оборота по часовой), накладываемый контент и аннотации источника, помеченные к удалению.</summary>
 public sealed record ComposedPage(
