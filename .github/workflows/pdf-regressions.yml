@@ -1,0 +1,63 @@
+name: Verify NexusPDF 0.26 PDF regressions
+
+on:
+  push:
+    branches: [codex/nexuspdf-026-fixes]
+    paths: [.github/workflows/pdf-regressions.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Retrieve the current source from the imported Drive archive
+        uses: actions/download-artifact@v4
+        with:
+          name: nexuspdf-drive-sources
+          run-id: 38086355974
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/nexuspdf-drive-source
+
+      - name: Import the actual 0.26 source into this work branch
+        shell: pwsh
+        run: |
+          $source = Join-Path $env:RUNNER_TEMP 'nexuspdf-drive-source/source'
+          Copy-Item -Path (Join-Path $source '*') -Destination . -Recurse -Force
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --all
+          if (git status --porcelain) {
+            git commit -m 'Import current NexusPDF 0.26.0 sources from the verified Drive archive'
+            git push origin HEAD:codex/nexuspdf-026-fixes
+          }
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Fetch the pinned qpdf dependency
+        shell: pwsh
+        run: |
+          $lock = Get-Content tools/qpdf.lock.json | ConvertFrom-Json
+          ./tools/fetch-qpdf.ps1 -Version $lock.version -ExpectedSha256 $lock.sha256
+
+      - name: Run the reproduction and nearby regression cases
+        shell: pwsh
+        run: |
+          dotnet test tests/NexusPdf.PdfEngineTests -c Release --logger "trx" --filter "FullyQualifiedName~ReportedPdfRegressionTests|FullyQualifiedName~ProcessInPlaceTests|FullyQualifiedName~MuPdfCompressionTests|FullyQualifiedName~SaveStructureTests|FullyQualifiedName~RecompressTests"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexuspdf-pdf-regression-results
+          path: '**/TestResults/*.trx'
+          if-no-files-found: warn
+          retention-days: 14
