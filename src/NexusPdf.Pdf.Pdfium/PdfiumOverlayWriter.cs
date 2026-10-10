@@ -20,9 +20,8 @@ internal static class PdfiumOverlayWriter
         FpdfDocumentT document, FpdfPageT page, OverlayFontCache fonts,
         IReadOnlyList<PageOverlay> overlays, int extraQuarterTurns)
     {
-        // Шрифт по умолчанию нужен слоям распознавания: у них своей гарнитуры
-        // нет, они пишут системной. Надписи выбирают шрифт сами, ниже.
-        var font = fonts.Default;
+        // Load fonts only in text branches. Image/annotation-only edits must
+        // not embed an unused full system font into an otherwise small PDF.
 
         var rotation = ((fpdf_edit.FPDFPageGetRotation(page) % 4) + 4) % 4;
 
@@ -143,7 +142,7 @@ internal static class PdfiumOverlayWriter
                     contentAdded = true;
                     break;
                 case OcrTextLayerOverlay ocrLayer:
-                    ApplyOcrLayer(document, page, font, ocrLayer, extraAngle,
+                    ApplyOcrLayer(document, page, fonts.Default, ocrLayer, extraAngle,
                         rotation, left, bottom, contentWidth, contentHeight);
                     contentAdded = true;
                     break;
@@ -1225,7 +1224,6 @@ internal static class PdfiumOverlayWriter
 
         try
         {
-            Console.WriteLine($"OVERLAY_PROBE jpegBytes={image.EncodedJpeg?.Length ?? 0}");
             if (image.EncodedJpeg is not { Length: > 0 } ||
                 !PdfiumImageEncoding.LoadJpeg(page, obj, image.EncodedJpeg))
             {

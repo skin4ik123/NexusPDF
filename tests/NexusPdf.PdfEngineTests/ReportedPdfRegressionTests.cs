@@ -166,6 +166,20 @@ public sealed class ReportedPdfRegressionTests : IAsyncLifetime
         Assert.Equal(before, pixels);
     }
 
+    [Fact]
+    public void Whitening_Leaves_A_Grayscale_Photograph_Unchanged()
+    {
+        var pixels = Pixels(320, 240);
+        for (var i = 0; i < pixels.Length; i += 4)
+        {
+            var gray = (byte)((pixels[i] * 114 + pixels[i + 1] * 587 + pixels[i + 2] * 299) / 1000);
+            pixels[i] = pixels[i + 1] = pixels[i + 2] = gray;
+        }
+        var before = pixels.ToArray();
+        Assert.False(NexusPdf.Imaging.ScanCleanup.LevelBackground(pixels, 320, 240));
+        Assert.Equal(before, pixels);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -330,6 +344,12 @@ public sealed class ReportedPdfRegressionTests : IAsyncLifetime
         var source = Path.Combine(dir, "legacy-mask.pdf");
         var target = Path.Combine(dir, "compressed.pdf");
         File.WriteAllBytes(source, Encoding.Latin1.GetBytes(pdf));
+        await using (var originalHandle = await _pdfium.OpenAsync(source, null, CancellationToken.None))
+        {
+            var originalImage = await originalHandle.RenderPageAsync(0, 120, 120, 0, CancellationToken.None);
+            _output.WriteLine($"Source mask image right centre: {originalImage.Bgra[60 * originalImage.Stride + 90 * 4]}");
+            AssertVisible(originalImage);
+        }
         var result = await _mupdf.CompressAsync(source, target,
             new PdfCompressionRequest(150, 35, false, false), CancellationToken.None);
         Assert.Equal(transparent ? 0 : 1, result.Recompressed);

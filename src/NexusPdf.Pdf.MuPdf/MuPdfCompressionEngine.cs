@@ -175,7 +175,7 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
             {
                 if (entry.Xref <= 0) continue;
                 if (!plan.TryGetValue(entry.Xref, out var placement))
-                    plan[entry.Xref] = placement = new ImagePlacement(entry, pageIndex);
+                    plan[entry.Xref] = placement = new ImagePlacement(entry);
 
                 try
                 {
@@ -207,14 +207,12 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
 
     private sealed class ImagePlacement
     {
-        public ImagePlacement(Entry entry, int firstPageIndex)
+        public ImagePlacement(Entry entry)
         {
             Entry = entry;
-            FirstPageIndex = firstPageIndex;
         }
 
         public Entry Entry { get; }
-        public int FirstPageIndex { get; }
         public double MaxShownWidthPt { get; set; }
         public double MaxShownHeightPt { get; set; }
     }
@@ -326,8 +324,14 @@ public sealed class MuPdfCompressionEngine : IPdfCompressionEngine
             // Older NexusPDF imports wrote an all-white SMask even for JPEGs.
             // Decode it before deciding: genuine alpha must never become JPEG.
             if ((long)entry.Width * entry.Height > 40_000_000) return false;
-            using var mask = new Pixmap(doc, entry.Smask);
-            return mask.N == 1 && mask.SAMPLES.All(sample => sample == 255);
+            if (doc.XrefGetKey(entry.Smask, "BitsPerComponent").Item2 != "8" ||
+                doc.XrefGetKey(entry.Smask, "ColorSpace").Item2 != "/DeviceGray" ||
+                doc.XrefGetKey(entry.Smask, "Decode").Item1 != "null") return false;
+            // Inspect the decoded PDF stream without constructing a Pixmap tied
+            // to the document's image cache. Reading an alpha mask must not mutate it.
+            var mask = doc.XrefStream(entry.Smask);
+            return mask is { Length: > 0 } && mask.Length == (long)entry.Width * entry.Height &&
+                   mask.All(sample => sample == 255);
         }
         catch (Exception)
         {

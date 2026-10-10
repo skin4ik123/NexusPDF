@@ -258,6 +258,27 @@ public static class ScanCleanup
             if (sampled > 0 && colourful > sampled * 0.20) return false;
         }
 
+        // Paper occupies a bright, nearly uniform part of each local tile.
+        // A photograph has continuous tones across most of its area, including
+        // grayscale or heavily compressed photos with little surviving chroma.
+        var paperSamples = 0;
+        var totalSamples = 0;
+        for (var y = 0; y < height; y += 8)
+        for (var x = 0; x < width; x += 8)
+        {
+            var o = ((long)y * width + x) * 4;
+            if (o + 2 >= bgra.Length) continue;
+            var tileIndex = Math.Min((int)(y / tileH), tilesY - 1) * tilesX +
+                            Math.Min((int)(x / tileW), tilesX - 1);
+            var paperLevel = channels == 1 ? background[0][tileIndex] :
+                (background[0][tileIndex] * 114 + background[1][tileIndex] * 587 +
+                 background[2][tileIndex] * 299) / 1000;
+            var luminance = (bgra[o] * 114 + bgra[o + 1] * 587 + bgra[o + 2] * 299) / 1000;
+            if (paperLevel - luminance <= 8) paperSamples++;
+            totalSamples++;
+        }
+        if (totalSamples > 0 && paperSamples < totalSamples * 0.50) return false;
+
         // Read contrast from the unchanged input; using pixels already whitened
         // earlier in the loop makes the result depend on scan direction.
         var originalGray = GrayImage.FromBgra(bgra, width, height);
