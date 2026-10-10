@@ -1,0 +1,54 @@
+name: Download one NexusPDF installer
+
+on:
+  push:
+    branches: [codex/nexuspdf-single-installer-20261010]
+    paths: [.github/workflows/single-installer.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  installer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download the verified Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: NexusPdf-win-x64
+          run-id: 38089166562
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: verified-build
+
+      - name: Select and verify Setup.exe
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import os
+          candidates = list(Path("verified-build").rglob("NexusPdfSetup.exe"))
+          if len(candidates) != 1:
+              raise SystemExit(f"Expected one installer, found {len(candidates)}")
+          source = candidates[0]
+          with source.open("rb") as stream:
+              digest = hashlib.file_digest(stream, "sha256").hexdigest().upper()
+          expected = "A40B3F5BA823A0B1028709F70CB0AB4A861D0F21CB11FEFD6F93F5E81771EE15"
+          if digest != expected:
+              raise SystemExit("The installer does not match the tested Windows build.")
+          destination = Path("installer/NexusPdfSetup.exe")
+          destination.parent.mkdir(exist_ok=True)
+          os.replace(source, destination)
+          print(f"{destination.name}: {destination.stat().st_size} bytes; SHA-256 verified.")
+          PY
+
+      - name: Upload only the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: NexusPDF-Setup
+          path: installer/NexusPdfSetup.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
