@@ -350,6 +350,34 @@ public sealed class ReportedPdfRegressionTests : IAsyncLifetime
             _output.WriteLine($"Source mask image right centre: {originalImage.Bgra[60 * originalImage.Stride + 90 * 4]}");
             AssertVisible(originalImage);
         }
+        if (transparent)
+        {
+            foreach (var settings in new[] {
+                ("plain", 0, 0, 0, 0, 0), ("garbage", 4, 0, 0, 0, 0),
+                ("clean", 4, 1, 0, 0, 0), ("deflate", 4, 0, 1, 0, 0),
+                ("images", 4, 0, 1, 1, 0), ("objects", 4, 0, 1, 1, 1),
+                ("full", 4, 1, 1, 1, 1) })
+            {
+                var candidate = Path.Combine(dir, "diagnostic-" + settings.Item1 + ".pdf");
+                using (var rewrite = new MuPDF.NET.Document(source))
+                    rewrite.Save(candidate, garbage: settings.Item2, clean: settings.Item3,
+                        deflate: settings.Item4, deflateImages: settings.Item5,
+                        deflateFonts: settings.Item4, useObjstms: settings.Item6, preserveMetadata: 1);
+                await using var probe = await _pdfium.OpenAsync(candidate, null, CancellationToken.None);
+                var rendered = await probe.RenderPageAsync(0, 120, 120, 0, CancellationToken.None);
+                _output.WriteLine($"Save variant {settings.Item1}: right pixel {rendered.Bgra[60 * rendered.Stride + 90 * 4]}, bytes {new FileInfo(candidate).Length}");
+                using var inspect = new MuPDF.NET.Document(candidate);
+                foreach (var entry in inspect.GetPageImages(0, false))
+                {
+                    _output.WriteLine($"Image xref {entry.Xref}, smask {entry.Smask}, filter {entry.Filter}");
+                    if (entry.Smask > 0)
+                    {
+                        var decoded = inspect.XrefStream(entry.Smask);
+                        _output.WriteLine($"Mask: length {decoded.Length}, zero {decoded.Count(value => value == 0)}, white {decoded.Count(value => value == 255)}, colorspace {inspect.XrefGetKey(entry.Smask, "ColorSpace")}");
+                    }
+                }
+            }
+        }
         var result = await _mupdf.CompressAsync(source, target,
             new PdfCompressionRequest(150, 35, false, false), CancellationToken.None);
         Assert.Equal(transparent ? 0 : 1, result.Recompressed);

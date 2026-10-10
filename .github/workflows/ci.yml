@@ -36,11 +36,33 @@ jobs:
         run: dotnet test tests/NexusPdf.PdfEngineTests -c Release --no-build --logger "trx"
 
       - name: Printing tests
+        if: ${{ !cancelled() }}
         run: dotnet test tests/NexusPdf.PrintingTests -c Release --no-build --logger "trx"
 
       - name: Full artifact pipeline (publish + MSI + Setup + ZIP)
         shell: pwsh
         run: ./build.ps1 -All -SkipTests
+
+      - name: Collect generated PDF fixtures on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          $destination = Join-Path $env:RUNNER_TEMP 'pdf-regression-fixtures'
+          New-Item -ItemType Directory -Path $destination -Force | Out-Null
+          Get-ChildItem (Join-Path $env:TEMP 'NexusPdfTests') -Filter legacy-mask.pdf -Recurse | ForEach-Object {
+            $folder = Join-Path $destination $_.Directory.Name
+            New-Item -ItemType Directory -Path $folder -Force | Out-Null
+            Copy-Item (Join-Path $_.Directory.FullName '*.pdf') $folder
+          }
+
+      - name: Upload generated failure fixtures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexuspdf-generated-failure-fixtures
+          path: ${{ runner.temp }}/pdf-regression-fixtures
+          if-no-files-found: ignore
+          retention-days: 7
 
       # Отчёты .trx создавались и раньше, но никуда не выкладывались: разбирать
       # упавший тест приходилось по сырому выводу шага.
