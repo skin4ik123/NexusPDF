@@ -1182,12 +1182,15 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     [ObservableProperty]
     private string _currentPageTextInfo = "";
 
+    private int _pagePropertiesVersion;
+
     /// <summary>
     /// Разбор текущей страницы для панели свойств. Делается по смене страницы,
     /// а не на каждый кадр: один запрос текста страницы дёшев, но не бесплатен.
     /// </summary>
     private async Task RefreshPagePropertiesAsync()
     {
+        var version = ++_pagePropertiesVersion;
         OnPropertyChanged(nameof(CurrentPageSizeWithOrientation));
         OnPropertyChanged(nameof(CurrentPageRotationText));
         try
@@ -1197,8 +1200,13 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             var (handle, pageIndex) = await Document.ResolveTextPageAsync(index, CancellationToken.None);
             var text = await handle.GetPageTextAsync(pageIndex, CancellationToken.None);
             var letters = text.Count(char.IsLetterOrDigit);
+            var fields = letters == 0
+                ? (await handle.GetFormFieldValuesAsync(pageIndex, CancellationToken.None)).Count
+                : 0;
+            if (version != _pagePropertiesVersion) return;
             CurrentPageTextInfo = letters switch
             {
+                0 when fields > 0 => Loc.F("PropFormFields", fields),
                 0 => Loc.Get("PropNoTextLayer"),
                 < 40 => Loc.F("PropLittleText", letters),
                 _ => Loc.F("PropHasText", letters),
@@ -1207,7 +1215,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         catch (Exception)
         {
             // Свойства — справка, а не операция: молчим и не мешаем работать.
-            CurrentPageTextInfo = "";
+            if (version == _pagePropertiesVersion) CurrentPageTextInfo = "";
         }
     }
 
@@ -1362,6 +1370,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasObjectSelection))]
+    [NotifyPropertyChangedFor(nameof(ShowsTextProperties))]
+    [NotifyPropertyChangedFor(nameof(ShowsPageProperties))]
     private ObjectSelection? _selectedObject;
 
     public bool HasObjectSelection => SelectedObject != null;
@@ -1432,6 +1442,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         }
         SelectedObject = null;
         _dragHandle = NexusPdf.Ux.ResizeHandle.None;
+        if (StatusText == Loc.Get("UxObjectSelected")) StatusText = Loc.Get("Ready");
     }
 
     /// <summary>Оверлей в системе координат текущего показа страницы.</summary>
@@ -2951,6 +2962,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     public async ValueTask DisposeAsync()
     {
+        ++_pagePropertiesVersion;
         _rerenderTimer?.Stop();
         _thumbSizeTimer?.Stop();
         _findDebounceCts?.Cancel();

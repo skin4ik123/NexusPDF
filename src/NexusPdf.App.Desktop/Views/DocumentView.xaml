@@ -541,7 +541,7 @@
           <Thumb Panel.ZIndex="10" Style="{StaticResource PanelResizer}"
                  Tag="Properties" HorizontalAlignment="Left"
                  DragStarted="OnPanelResizeStart" DragDelta="OnPanelResize" DragCompleted="OnPanelResizeDone"/>
-        <StackPanel Margin="12,10"
+        <StackPanel x:Name="ObjectProperties" Margin="12,10"
                     Visibility="{Binding HasObjectSelection, Converter={StaticResource BoolToVis}}">
           <Grid>
             <TextBlock Text="{Binding SelectedObjectTitle}" FontWeight="SemiBold" FontSize="13"
@@ -628,7 +628,7 @@
         </StackPanel>
 
         <!-- Что взято мышью: сколько текста и что с ним можно сделать. -->
-        <StackPanel Margin="12,10"
+        <StackPanel x:Name="TextProperties" Margin="12,10"
                     Visibility="{Binding ShowsTextProperties, Converter={StaticResource BoolToVis}}">
           <Grid>
             <TextBlock Text="{l:Loc PropTextTitle}" FontWeight="SemiBold" FontSize="13"
@@ -670,7 +670,7 @@
 
         <!-- Ничего не выбрано — панель рассказывает про текущую страницу,
              вместо того чтобы стоять пустой. -->
-        <StackPanel Margin="12,10"
+        <StackPanel x:Name="PageProperties" Margin="12,10"
                     Visibility="{Binding ShowsPageProperties, Converter={StaticResource BoolToVis}}">
           <Grid>
             <TextBlock Text="{Binding PageOfText}" FontWeight="SemiBold" FontSize="13"

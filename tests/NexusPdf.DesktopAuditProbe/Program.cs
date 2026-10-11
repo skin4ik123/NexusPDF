@@ -413,6 +413,7 @@ internal static class Program
 
         _document.Document.Session.Apply(new AddOverlayOperation(0, new NoteAnnotationDraft(40, 90, "Заметка для проверки", "NexusPDF")));
         await _document.ToggleCommentsCommand.ExecuteAsync(null);
+        await WaitForReaderAsync();
         Capture(_main, "main-comments-panel");
         _document.IsCommentsVisible = false;
         _document.Document.Session.Undo();
@@ -422,8 +423,17 @@ internal static class Program
         var box = OverlayGeometry.BoundsOf(text)!.Value;
         Require(_document.SelectObjectAt(_document.Pages[0], box.XPt + box.WidthPt / 2, box.YPt + box.HeightPt / 2),
             "Added text can be selected and its properties inspected");
+        await CheckPropertiesAsync("ObjectProperties");
+        await WaitForReaderAsync();
         Capture(_main, "main-object-properties");
+        _document.SelectedText = "NexusPDF";
+        await CheckPropertiesAsync("ObjectProperties");
         _document.ClearObjectSelection();
+        Require(_document.StatusText != Loc.Get("UxObjectSelected"), "Clearing an object removes its stale status hint");
+        await CheckPropertiesAsync("TextProperties");
+        Capture(_main, "main-text-properties");
+        _document.ClearTextSelection();
+        await CheckPropertiesAsync("PageProperties");
         _document.Document.Session.Undo();
 
         _main.ViewModel.Panels = _main.ViewModel.Panels with { Tools = true, Properties = false };
@@ -433,6 +443,7 @@ internal static class Program
         DependencyObject parent = items;
         while (parent is not ScrollViewer) parent = VisualTreeHelper.GetParent(parent);
         var scroll = (ScrollViewer)parent;
+        await WaitForReaderAsync();
         var frame = 1;
         for (var offset = 0.0; offset <= scroll.ScrollableHeight + 1; offset += Math.Max(100, scroll.ViewportHeight - 50))
         {
@@ -457,6 +468,9 @@ internal static class Program
         await form.FormClickAsync(form.Pages[0], 200, 72, 1);
         foreach (var character in "FORM VALUE") await form.FormCharAsync(character, 1);
         await form.ReleaseFormFieldAsync(1);
+        await WaitUntilAsync(() => form.CurrentPageTextInfo == Loc.F("PropFormFields", 3),
+            "A form page is described as fields rather than a scan");
+        await WaitForReaderAsync();
         Capture(_main, "main-filled-form");
         Require((await form.Document.PrimaryHandle.GetFormFieldValuesAsync(0, CancellationToken.None))
             .Any(field => field.Name == "text1" && field.Value == "FORM VALUE"), "Typing into a form updates the actual PDF field");
@@ -466,6 +480,27 @@ internal static class Program
         Require((await saved.GetFormFieldValuesAsync(0, CancellationToken.None)).Any(field => field.Value == "FORM VALUE"),
             "The filled form retains its value after reopening the saved file");
         _main.ViewModel.ActiveDocument = _document;
+    }
+
+    private static async Task CheckPropertiesAsync(string expected)
+    {
+        await _main.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.DataBind);
+        _main.UpdateLayout();
+        foreach (var name in new[] { "ObjectProperties", "TextProperties", "PageProperties" })
+        {
+            var panel = Descendants(_main).OfType<FrameworkElement>().Single(e => e.Name == name && ReferenceEquals(e.DataContext, _document));
+            Require(panel.IsVisible == (name == expected), expected + " displays without overlap from " + name);
+        }
+    }
+
+    private static async Task WaitForReaderAsync()
+    {
+        await Task.Delay(250);
+        var document = _main.ViewModel.ActiveDocument!;
+        var page = document.Pages[Math.Clamp(document.CurrentPageNumber - 1, 0, document.Pages.Count - 1)];
+        page.EnsureImage(document.DpiScale);
+        await WaitUntilAsync(() => page.Image != null && !page.IsRendering, "Reader finishes rendering before visual inspection");
+        _main.UpdateLayout();
     }
 
     private static void Require(bool condition, string description)
