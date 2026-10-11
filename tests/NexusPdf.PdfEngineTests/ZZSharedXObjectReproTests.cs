@@ -14,8 +14,8 @@ public sealed class ZZSharedXObjectReproTests : IAsyncLifetime
 {
     private PdfiumRenderEngine _pdfium = null!;
 
-    private const string OutPath =
-        @"C:\Users\yurch\AppData\Local\Temp\claude\E--Cossacks\14459d2b-9cfd-4a4f-bc91-e773fa716755\scratchpad\shared_xobject_repro.txt";
+    private static readonly string OutPath =
+        Path.Combine(Path.GetTempPath(), $"nexuspdf-shared-xobject-{Guid.NewGuid():N}.txt");
 
     public Task InitializeAsync()
     {

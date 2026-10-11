@@ -21,7 +21,8 @@ public static class ThemeManager
         };
         IsDark = dark;
 
-        var uri = new Uri(dark ? "Themes/Dark.xaml" : "Themes/Light.xaml", UriKind.Relative);
+        var uri = new Uri("/" + typeof(ThemeManager).Assembly.GetName().Name + ";component/Themes/" +
+            (dark ? "Dark.xaml" : "Light.xaml"), UriKind.Relative);
         var dict = new ResourceDictionary { Source = uri };
 
         var app = System.Windows.Application.Current;

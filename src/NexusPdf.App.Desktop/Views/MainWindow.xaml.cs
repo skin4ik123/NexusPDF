@@ -1,6 +1,10 @@
 using System.IO;
+using System.Globalization;
+using System.ComponentModel;
+using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using NexusPdf.App.Desktop.ViewModels;
 
 namespace NexusPdf.App.Desktop.Views;
@@ -11,6 +15,16 @@ public partial class MainWindow : Window
     private WindowState _preFullScreenState;
 
     public MainViewModel ViewModel { get; }
+
+    public static readonly DependencyProperty ShowResponsiveQuickPanelLabelsProperty =
+        DependencyProperty.Register(nameof(ShowResponsiveQuickPanelLabels), typeof(bool), typeof(MainWindow),
+            new PropertyMetadata(true));
+
+    public bool ShowResponsiveQuickPanelLabels
+    {
+        get => (bool)GetValue(ShowResponsiveQuickPanelLabelsProperty);
+        private set => SetValue(ShowResponsiveQuickPanelLabelsProperty, value);
+    }
 
     public MainWindow(MainViewModel viewModel)
     {
@@ -23,6 +37,46 @@ public partial class MainWindow : Window
         // Реестр команд проверяет себя в конструкторе: команда без обработчика
         // обязана обнаружиться на запуске, а не пустым пунктом меню у пользователя.
         _ = ViewModel.Ux;
+        ViewModel.QuickPanel.Items.CollectionChanged += OnQuickPanelItemsChanged;
+        ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        Closed += (_, _) =>
+        {
+            ViewModel.QuickPanel.Items.CollectionChanged -= OnQuickPanelItemsChanged;
+            ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        };
+        UpdateQuickPanelLabels();
+    }
+
+    private void OnQuickPanelItemsChanged(object? sender, NotifyCollectionChangedEventArgs e) => UpdateQuickPanelLabels();
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainViewModel.ShowQuickPanelLabels)) UpdateQuickPanelLabels();
+    }
+
+    private void OnQuickPanelSizeChanged(object sender, SizeChangedEventArgs e) => UpdateQuickPanelLabels();
+
+    private void UpdateQuickPanelLabels()
+    {
+        if (QuickPanelScroll == null || QuickPanelScroll.ActualWidth <= 0) return;
+        var padding = (Thickness)FindResource("UxToolPadding");
+        var margin = (Thickness)FindResource("UxToolMargin");
+        var glyphWidth = (double)FindResource("UxGlyphSize");
+        var targetWidth = (double)FindResource("UxTouchTarget");
+        var typeface = new Typeface(FontFamily, FontStyle, FontWeight, FontStretch);
+        var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        var fullWidth = ViewModel.QuickPanel.Items.Sum(item => item.IsSeparator ? 13 :
+            Math.Max(targetWidth, padding.Left + padding.Right + margin.Left + margin.Right + 4 + glyphWidth + 6 +
+                new FormattedText(item.Title, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+                    typeface, FontSize, Brushes.Black, dpi).WidthIncludingTrailingWhitespace));
+        ShowResponsiveQuickPanelLabels = ViewModel.ShowQuickPanelLabels && fullWidth <= QuickPanelScroll.ActualWidth;
+    }
+
+    private void OnQuickPanelMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (QuickPanelScroll.ScrollableWidth <= 0) return;
+        QuickPanelScroll.ScrollToHorizontalOffset(QuickPanelScroll.HorizontalOffset - e.Delta);
+        e.Handled = true;
     }
 
     /// <summary>
@@ -96,6 +150,17 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
+        // Линейка: Esc сначала бросает начатое измерение, потом убирает инструмент —
+        // откуда бы ни пришла клавиша, хоть из поля масштаба на панели.
+        if (ViewModel.ActiveDocument is { IsMeasuring: true } measuring)
+        {
+            if (measuring.HasMeasureInProgress)
+                measuring.CancelMeasurement();
+            else
+                measuring.StopMeasurement();
+            e.Handled = true;
+            return;
+        }
         if (WindowStyle == WindowStyle.None)
         {
             ToggleFullScreen();
@@ -119,9 +184,17 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Свои же страницы, которые тащат из организатора. Они несут и файл для
+    /// Проводника, но внутри программы это не «брошенный файл»: принимать его
+    /// как чужой PDF значило бы открыть копию собственных страниц.
+    /// </summary>
+    private static bool IsOwnPageDrag(IDataObject data) =>
+        data.GetDataPresent(GongSolutions.Wpf.DragDrop.DragDrop.DataFormat.Name);
+
     private void OnFileDragOver(object sender, DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop)
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) && !IsOwnPageDrag(e.Data)
             ? DragDropEffects.Copy
             : DragDropEffects.None;
         e.Handled = true;
@@ -129,11 +202,18 @@ public partial class MainWindow : Window
 
     private async void OnFileDrop(object sender, DragEventArgs e)
     {
-        if (e.Data.GetData(DataFormats.FileDrop) is not string[] files) return;
-        var pdfs = files.Where(f => File.Exists(f) &&
-            string.Equals(Path.GetExtension(f), ".pdf", StringComparison.OrdinalIgnoreCase)).ToList();
-        if (pdfs.Count > 0)
-            await ViewModel.OpenFilesAsync(pdfs);
+        if (IsOwnPageDrag(e.Data)) return;
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] files || files.Length == 0) return;
+        e.Handled = true;
+        await ViewModel.DropFilesOnWindowAsync(files);
+    }
+
+    /// <summary>Enter в поле масштаба применяет его сразу, не дожидаясь ухода фокуса.</summary>
+    private void OnMeasureScaleKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || sender is not System.Windows.Controls.TextBox box) return;
+        box.GetBindingExpression(System.Windows.Controls.TextBox.TextProperty)?.UpdateSource();
+        e.Handled = true;
     }
 
     private void OnPageBoxKeyDown(object sender, KeyEventArgs e)

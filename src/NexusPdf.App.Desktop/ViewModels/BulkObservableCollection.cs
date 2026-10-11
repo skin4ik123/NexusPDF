@@ -17,6 +17,61 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
 {
     private bool _silent;
 
+    /// <summary>Preserve item containers for small edits; batch large rearrangements.</summary>
+    public bool Reconcile(IReadOnlyList<T> items, int maxChanges = 64)
+    {
+        var working = this.ToList();
+        var desired = new HashSet<T>(items);
+        var changes = new List<(NotifyCollectionChangedAction Action, int Index, int OldIndex, T Item)>();
+        var comparer = EqualityComparer<T>.Default;
+        for (var i = 0; i < items.Count; i++)
+        {
+            if (i < working.Count && comparer.Equals(working[i], items[i])) continue;
+            var from = working.IndexOf(items[i], Math.Min(i + 1, working.Count));
+            if (from >= 0)
+            {
+                working.RemoveAt(from);
+                working.Insert(i, items[i]);
+                changes.Add((NotifyCollectionChangedAction.Move, i, from, items[i]));
+            }
+            else if (i < working.Count && !desired.Contains(working[i]))
+            {
+                working[i] = items[i];
+                changes.Add((NotifyCollectionChangedAction.Replace, i, -1, items[i]));
+            }
+            else
+            {
+                working.Insert(i, items[i]);
+                changes.Add((NotifyCollectionChangedAction.Add, i, -1, items[i]));
+            }
+            if (changes.Count > maxChanges)
+            {
+                ReplaceAll(items);
+                return true;
+            }
+        }
+        for (var i = working.Count - 1; i >= items.Count; i--)
+        {
+            changes.Add((NotifyCollectionChangedAction.Remove, i, -1, working[i]));
+            if (changes.Count > maxChanges)
+            {
+                ReplaceAll(items);
+                return true;
+            }
+        }
+        foreach (var change in changes)
+        {
+            switch (change.Action)
+            {
+                case NotifyCollectionChangedAction.Move: Move(change.OldIndex, change.Index); break;
+                case NotifyCollectionChangedAction.Replace: this[change.Index] = change.Item; break;
+                case NotifyCollectionChangedAction.Add: Insert(change.Index, change.Item); break;
+                case NotifyCollectionChangedAction.Remove: RemoveAt(change.Index); break;
+            }
+        }
+        return changes.Count > 0;
+    }
+
     protected override void OnCollectionChanged(NotifyCollectionChangedEventArgs e)
     {
         if (!_silent) base.OnCollectionChanged(e);

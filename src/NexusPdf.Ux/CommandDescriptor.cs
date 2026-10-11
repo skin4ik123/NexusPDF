@@ -35,6 +35,7 @@ public enum CommandCategory
     Pages,
     Content,
     Comments,
+    Measure,
     Forms,
     Security,
     Recognition,

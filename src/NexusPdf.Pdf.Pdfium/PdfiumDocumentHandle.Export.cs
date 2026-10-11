@@ -737,8 +737,10 @@ internal sealed partial class PdfiumDocumentHandle
         {
             var segment = fpdf_edit.FPDFPathGetPathSegment(obj, i);
             if (segment == null || segment.__Instance == IntPtr.Zero) return;
-            // 2 — кривая Безье: у неё узлы стоят где угодно, и рамкой она не бывает.
-            if (fpdf_edit.FPDFPathSegmentGetType(segment) == 2) return;
+            // FPDF_SEGMENT_BEZIERTO = 1 — кривая Безье: у неё узлы стоят где
+            // угодно, и рамкой она не бывает. (MOVETO = 2 — это первый узел
+            // любого прямоугольника, отбрасывать по нему нельзя.)
+            if (fpdf_edit.FPDFPathSegmentGetType(segment) == 1) return;
 
             float x = 0, y = 0;
             if (fpdf_edit.FPDFPathSegmentGetPoint(segment, ref x, ref y) == 0) return;

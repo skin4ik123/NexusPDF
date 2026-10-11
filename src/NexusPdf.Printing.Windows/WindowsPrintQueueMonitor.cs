@@ -15,10 +15,15 @@ public sealed class WindowsPrintQueueMonitor : IDisposable
     private readonly PrintServer _server = new();
     private bool _disposed;
 
-    /// <summary>Задания принтера. Свои узнаются по номерам, выданным при отправке.</summary>
-    public IReadOnlyList<PrintJobSnapshot> Read(string printerName, IReadOnlySet<int> ownJobIds)
+    /// <summary>
+    /// Задания принтера. Свои узнаются по номерам, выданным при отправке.
+    /// null — очередь прочитать не удалось: это НЕ «заданий нет». Раньше
+    /// ошибка чтения возвращала пустой список, и каждое своё задание тут же
+    /// считалось допечатанным.
+    /// </summary>
+    public IReadOnlyList<PrintJobSnapshot>? Read(string printerName, IReadOnlySet<int> ownJobIds)
     {
-        if (_disposed) return Array.Empty<PrintJobSnapshot>();
+        if (_disposed) return null;
         try
         {
             using var queue = new PrintQueue(_server, printerName);
@@ -41,9 +46,9 @@ public sealed class WindowsPrintQueueMonitor : IDisposable
         }
         catch (Exception)
         {
-            // Очередь могла исчезнуть вместе с принтером: пустой список честнее
-            // исключения — окно продолжает работать.
-            return Array.Empty<PrintJobSnapshot>();
+            // Очередь могла исчезнуть вместе с принтером или не ответить по сети:
+            // окно продолжает работать и показывает «нет связи», а не «напечатано».
+            return null;
         }
     }
 

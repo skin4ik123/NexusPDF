@@ -31,6 +31,7 @@ public partial class CompareDialog : Window
     {
         InitializeComponent();
         _engine = engine;
+        UpdateRunAvailability();
     }
 
     public static void Run(Window? owner, IPdfRenderEngine engine, string? initialFirstPath)
@@ -43,6 +44,7 @@ public partial class CompareDialog : Window
             dialog._firstPath = initialFirstPath;
             dialog.FirstButton.Content = Path.GetFileName(initialFirstPath);
         }
+        dialog.UpdateRunAvailability();
         dialog.ShowDialog();
     }
 
@@ -63,7 +65,11 @@ public partial class CompareDialog : Window
             _secondPath = dialog.FileName;
             SecondButton.Content = Path.GetFileName(dialog.FileName);
         }
+        UpdateRunAvailability();
     }
+
+    private void UpdateRunAvailability() =>
+        RunButton.IsEnabled = !_running && _firstPath != null && _secondPath != null;
 
     private async void OnRun(object sender, RoutedEventArgs e)
     {
@@ -132,7 +138,7 @@ public partial class CompareDialog : Window
         finally
         {
             _running = false;
-            RunButton.IsEnabled = true;
+            UpdateRunAvailability();
             FirstButton.IsEnabled = true;
             SecondButton.IsEnabled = true;
             // Окно закрылось, пока шло сравнение: сессию освобождаем здесь —

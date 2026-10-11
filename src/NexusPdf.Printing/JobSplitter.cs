@@ -1,71 +1,110 @@
 namespace NexusPdf.Printing;
 
 /// <summary>Часть задания, отправляемая отдельно.</summary>
-public sealed record JobPart(PrintJobPlan Plan, string Reason);
+public sealed record JobPart(PrintJobPlan Plan, SizePt PhysicalPaper);
 
 /// <summary>
 /// Разбиение задания на части.
 ///
 /// Windows задаёт формат бумаги одним PrintTicket на всё задание, поэтому
-/// документ со смешанными форматами физически нельзя напечатать одним
-/// заданием: принтер возьмёт формат первого листа и напечатает на нём всё.
-/// Молча так и сделать — значит испортить остальные листы, поэтому задание
-/// разбивается, а пользователю показывается список частей.
+/// документ на РАЗНОЙ бумаге физически нельзя напечатать одним заданием:
+/// принтер возьмёт формат первого листа и напечатает на нём всё.
+///
+/// Ориентация причиной разбиения НЕ служит. Раньше альбомный лист A4 считался
+/// «другим форматом», и отчёт с альбомными таблицами выходил так: сначала все
+/// книжные листы, потом все альбомные, а обороты при двусторонней печати
+/// ложились не на свои листы. Листы и так уходят на принтер изображениями,
+/// поэтому альбомный лист просто поворачивается на книжной странице задания.
 /// </summary>
 public static class JobSplitter
 {
-    /// <summary>Нужно ли разбивать: в задании больше одного размера листа.</summary>
-    public static bool NeedsSplit(PrintJobPlan plan) => DistinctSizes(plan).Count > 1;
+    /// <summary>Допуск сравнения форматов: драйверы округляют размеры по-разному.</summary>
+    private const double TolerancePt = 1.5;
 
-    public static IReadOnlyList<SizePt> DistinctSizes(PrintJobPlan plan) =>
-        plan.Sheets
-            .Select(s => s.PaperSizePt)
-            .Distinct()
-            .ToList();
+    /// <summary>Нужно ли разбивать: в задании больше одного физического формата.</summary>
+    public static bool NeedsSplit(PrintJobPlan plan) => DistinctPapers(plan).Count > 1;
+
+    /// <summary>Физические форматы задания: книжная и альбомная A4 — одна бумага.</summary>
+    public static IReadOnlyList<SizePt> DistinctPapers(PrintJobPlan plan)
+    {
+        var result = new List<SizePt>();
+        foreach (var sheet in plan.Sheets)
+        {
+            var paper = Physical(sheet.PaperSizePt);
+            if (!result.Any(p => SamePaper(p, paper)))
+                result.Add(paper);
+        }
+        return result;
+    }
+
+    /// <summary>Формат бумаги без учёта ориентации: короткая сторона — ширина.</summary>
+    public static SizePt Physical(SizePt size) =>
+        size.WidthPt <= size.HeightPt ? size : new SizePt(size.HeightPt, size.WidthPt);
+
+    public static bool SamePaper(SizePt a, SizePt b)
+    {
+        var pa = Physical(a);
+        var pb = Physical(b);
+        return Math.Abs(pa.WidthPt - pb.WidthPt) <= TolerancePt &&
+               Math.Abs(pa.HeightPt - pb.HeightPt) <= TolerancePt;
+    }
 
     /// <summary>
-    /// Части задания по размеру бумаги. Порядок листов внутри части сохраняется,
-    /// а сами части идут в порядке первого появления размера — так итоговая
-    /// стопка ближе всего к исходному порядку документа.
+    /// Части задания: подряд идущие листы на одной бумаге. Порядок документа
+    /// сохраняется полностью — части идут ровно так, как листы стоят в плане,
+    /// и стопка на выходе совпадает с документом.
     /// </summary>
     public static IReadOnlyList<JobPart> SplitByPaperSize(PrintJobPlan plan)
     {
-        if (!NeedsSplit(plan))
-            return new[] { new JobPart(plan, "Одно задание") };
+        if (plan.Sheets.Count == 0 || !NeedsSplit(plan))
+        {
+            var paper = plan.Sheets.Count > 0 ? Physical(plan.Sheets[0].PaperSizePt) : default;
+            return new[] { new JobPart(plan, paper) };
+        }
 
         var parts = new List<JobPart>();
-        var seen = new List<SizePt>();
+        var run = new List<SheetPlan>();
+        SizePt? current = null;
 
-        foreach (var size in plan.Sheets.Select(s => s.PaperSizePt))
+        void Flush()
         {
-            if (seen.Contains(size)) continue;
-            seen.Add(size);
-
-            var sheets = plan.Sheets
-                .Where(s => s.PaperSizePt.Equals(size))
-                .Select((s, index) => s with { SheetIndex = index, PairedSheetIndex = null })
+            if (run.Count == 0 || current == null) return;
+            var sheets = run
+                .Select((s, index) => s with
+                {
+                    SheetIndex = index,
+                    // Ссылка на парный лист другой части указывала бы в никуда.
+                    PairedSheetIndex = null,
+                })
                 .ToList();
-
-            var name = DescribeSize(size);
             parts.Add(new JobPart(
                 plan with
                 {
                     Sheets = sheets,
-                    JobName = $"{plan.JobName} — {name}",
-                    // Дуплекс внутри части остаётся, но пары пересчитаны выше:
-                    // ссылки на листы другой части были бы неверными.
-                    Duplex = plan.Duplex,
+                    JobName = plan.JobName + " — " + DescribeSize(current.Value),
                 },
-                $"Формат {name}: листов {sheets.Count}"));
+                current.Value));
+            run = new List<SheetPlan>();
         }
+
+        foreach (var sheet in plan.Sheets)
+        {
+            var paper = Physical(sheet.PaperSizePt);
+            if (current is { } open && !SamePaper(open, paper))
+                Flush();
+            if (run.Count == 0)
+                current = paper;
+            run.Add(sheet);
+        }
+        Flush();
         return parts;
     }
 
-    private static string DescribeSize(SizePt size)
+    public static string DescribeSize(SizePt size)
     {
         var widthMm = Units.PointsToUnit(size.WidthPt, LengthUnit.Millimeters);
         var heightMm = Units.PointsToUnit(size.HeightPt, LengthUnit.Millimeters);
-        return $"{widthMm:F0}×{heightMm:F0} мм";
+        return PrintText.Get("PrintSizeMm", widthMm.ToString("F0"), heightMm.ToString("F0"));
     }
 
     /// <summary>
@@ -79,13 +118,13 @@ public static class JobSplitter
 
         var parts = SplitByPaperSize(plan);
         var suggestion = plan.Copies > 1 || plan.Capabilities.SupportsStapling
-            ? "Сортировка копий и скрепление будут работать внутри каждой части отдельно."
-            : "Части печатаются одна за другой.";
+            ? PrintText.Get("PfMixedPaperCopies")
+            : PrintText.Get("PfMixedPaperSequential");
 
         return new PreflightIssue(
             PreflightLevel.Warning,
             Preflight.CodeMixedPaper,
-            $"В документе листы разного размера, поэтому задание будет разбито на части: {parts.Count}.",
+            PrintText.Get("PfMixedPaper", parts.Count),
             suggestion);
     }
 }

@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using NexusPdf.Pdf.Abstractions;
 using PDFiumCore;
 
@@ -15,15 +15,13 @@ namespace NexusPdf.Pdf.Pdfium;
 internal static class PdfiumOverlayWriter
 {
     private const int FpdfFontTrueType = 2;
-    private const int FpdfBitmapBgra = 4;
 
     public static void ApplyOverlays(
         FpdfDocumentT document, FpdfPageT page, OverlayFontCache fonts,
         IReadOnlyList<PageOverlay> overlays, int extraQuarterTurns)
     {
-        // Шрифт по умолчанию нужен слоям распознавания: у них своей гарнитуры
-        // нет, они пишут системной. Надписи выбирают шрифт сами, ниже.
-        var font = fonts.Default;
+        // Load fonts only in text branches. Image/annotation-only edits must
+        // not embed an unused full system font into an otherwise small PDF.
 
         var rotation = ((fpdf_edit.FPDFPageGetRotation(page) % 4) + 4) % 4;
 
@@ -120,6 +118,10 @@ internal static class PdfiumOverlayWriter
                     ApplyInk(page, ink,
                         rotation, left, bottom, contentWidth, contentHeight);
                     break;
+                case MeasurementDraft measurement:
+                    ApplyMeasurement(document, page, fonts.Default, measurement,
+                        rotation, left, bottom, contentWidth, contentHeight);
+                    break;
                 case PageRasterReplacement:
                     break; // уже применена выше
                 case RegionEraseDraft erase:
@@ -140,7 +142,7 @@ internal static class PdfiumOverlayWriter
                     contentAdded = true;
                     break;
                 case OcrTextLayerOverlay ocrLayer:
-                    ApplyOcrLayer(document, page, font, ocrLayer, extraAngle,
+                    ApplyOcrLayer(document, page, fonts.Default, ocrLayer, extraAngle,
                         rotation, left, bottom, contentWidth, contentHeight);
                     contentAdded = true;
                     break;
@@ -423,6 +425,372 @@ internal static class PdfiumOverlayWriter
         finally
         {
             fpdf_annot.FPDFPageCloseAnnot(annot);
+        }
+    }
+
+    private const int AnnotStamp = 13;      // FPDF_ANNOT_STAMP
+    private const int AnnotFlagPrint = 4;   // FPDF_ANNOT_FLAG_PRINT
+    private const int AppearanceNormal = 0; // FPDF_ANNOT_APPEARANCEMODE_NORMAL
+    private const int FillModeWinding = 2;  // FPDF_FILLMODE_WINDING
+    private const int LineCapRound = 1;
+    private const int LineJoinRound = 1;
+
+    /// <summary>Засечка на концах размерной линии — по столько пунктов в каждую сторону.</summary>
+    private const double MeasureTickPt = 4;
+    private const double MeasureStrokePt = 1.2;
+    private const double MeasureLabelPadPt = 2;
+
+    /// <summary>
+    /// Измерение сохраняется аннотацией-штампом с собственным внешним видом:
+    /// линия, засечки или контур и подпись с величиной. Штамп, а не Line/Polygon
+    /// из спецификации, потому что для тех PDFium внешний вид не строит — такая
+    /// аннотация оказалась бы невидимой в любой программе. Штамп же собирается
+    /// из обычных объектов (пути и текст), и его видно везде, а удаляется он как
+    /// любая аннотация, не трогая содержимое страницы. Параметры измерения
+    /// лежат в строке NexusMeasure — программа узнаёт свои измерения при
+    /// повторном открытии.
+    /// </summary>
+    private static void ApplyMeasurement(
+        FpdfDocumentT document, FpdfPageT page, FpdfFontT? font, MeasurementDraft measurement,
+        int rotation, double offsetX, double offsetY, double contentWidth, double contentHeight)
+    {
+        var minimum = measurement.Kind == MeasurementKind.Area ? 3 : 2;
+        if (measurement.Points.Count < minimum)
+            return;
+        if (!(measurement.FontSizePt > 0) || !double.IsFinite(measurement.FontSizePt))
+            throw new PdfEngineException("Некорректный кегль подписи измерения.");
+
+        // Точки в координатах содержимого (Y вверх).
+        var points = new (double X, double Y)[measurement.Points.Count];
+        for (var i = 0; i < points.Length; i++)
+        {
+            var p = measurement.Points[i];
+            if (!double.IsFinite(p.XPt) || !double.IsFinite(p.YPt))
+                throw new PdfEngineException("Некорректная точка измерения.");
+            var (cx, cy) = DisplayedToContent(p.XPt, p.YPt, rotation, contentWidth, contentHeight);
+            points[i] = (offsetX + cx, offsetY + cy);
+        }
+
+        var color = measurement.ColorArgb;
+        var alpha = (byte)(color >> 24);
+        if (alpha == 0) alpha = 0xFF;
+        var r = (uint)(byte)(color >> 16);
+        var g = (uint)(byte)(color >> 8);
+        var b = (uint)(byte)color;
+
+        var objects = new List<FpdfPageobjectT>();
+        var extent = new Extent();
+        try
+        {
+            // 1. Геометрия: линия с засечками, ломаная или заливка контура.
+            switch (measurement.Kind)
+            {
+                case MeasurementKind.Distance:
+                {
+                    var (ax, ay) = points[0];
+                    var (bx, by) = points[^1];
+                    objects.Add(StrokedPath(new[] { points[0], points[^1] }, false, r, g, b, alpha, extent));
+                    var length = Math.Sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay));
+                    if (length > 1e-6)
+                    {
+                        var nx = -(by - ay) / length * MeasureTickPt;
+                        var ny = (bx - ax) / length * MeasureTickPt;
+                        objects.Add(StrokedPath(new[] { (ax - nx, ay - ny), (ax + nx, ay + ny) }, false, r, g, b, alpha, extent));
+                        objects.Add(StrokedPath(new[] { (bx - nx, by - ny), (bx + nx, by + ny) }, false, r, g, b, alpha, extent));
+                    }
+                    break;
+                }
+                case MeasurementKind.Perimeter:
+                    objects.Add(StrokedPath(points, false, r, g, b, alpha, extent));
+                    foreach (var point in points)
+                        objects.Add(VertexMark(point, r, g, b, alpha, extent));
+                    break;
+                case MeasurementKind.Area:
+                {
+                    var fill = fpdf_edit.FPDFPageObjCreateNewPath((float)points[0].X, (float)points[0].Y);
+                    if (fill == null || fill.__Instance == IntPtr.Zero)
+                        throw new PdfEngineException("Не удалось создать контур площади.");
+                    objects.Add(fill);
+                    for (var i = 1; i < points.Length; i++)
+                        fpdf_edit.FPDFPathLineTo(fill, (float)points[i].X, (float)points[i].Y);
+                    fpdf_edit.FPDFPathClose(fill);
+                    // Полупрозрачная заливка: площадь видно, а чертёж под ней читается.
+                    fpdf_edit.FPDFPageObjSetFillColor(fill, r, g, b, (uint)Math.Max(24, alpha / 5));
+                    fpdf_edit.FPDFPathSetDrawMode(fill, FillModeWinding, 0);
+                    objects.Add(StrokedPath(points, true, r, g, b, alpha, extent));
+                    foreach (var point in points)
+                        objects.Add(VertexMark(point, r, g, b, alpha, extent));
+                    break;
+                }
+            }
+
+            // 2. Подпись: середина отрезка для расстояния (вдоль него), середина
+            //    самой длинной стороны для периметра, центр тяжести для площади.
+            if (measurement.Label.Length > 0)
+            {
+                if (font == null)
+                    throw new PdfEngineException(
+                        "Для подписи измерения нужен системный шрифт TTF (Segoe UI/Arial), но он не найден.");
+                var (anchorX, anchorY, angle) = LabelAnchor(measurement, points, rotation, contentWidth, contentHeight);
+                AddLabel(document, font, measurement, anchorX, anchorY, angle, r, g, b, alpha, objects, extent);
+            }
+
+            if (extent.IsEmpty)
+                return;
+
+            // 3. Аннотация. Рамка ставится ДО внешнего вида: PDFium берёт её как
+            //    BBox формы, и всё, что выйдет за рамку, будет обрезано.
+            var annot = fpdf_annot.FPDFPageCreateAnnot(page, AnnotStamp);
+            if (annot == null || annot.__Instance == IntPtr.Zero)
+                throw new PdfEngineException("Не удалось создать аннотацию измерения.");
+            try
+            {
+                var pad = MeasureStrokePt + MeasureTickPt;
+                fpdf_annot.FPDFAnnotSetRect(annot, new FS_RECTF_
+                {
+                    Left = (float)(extent.MinX - pad),
+                    Bottom = (float)(extent.MinY - pad),
+                    Right = (float)(extent.MaxX + pad),
+                    Top = (float)(extent.MaxY + pad),
+                });
+                fpdf_annot.FPDFAnnotSetColor(annot, (FPDFANNOT_COLORTYPE)ColorTypeStroke, r, g, b, alpha);
+                fpdf_annot.FPDFAnnotSetFlags(annot, AnnotFlagPrint);
+
+                // Пустой внешний вид создаётся явно: добавлять объекты PDFium
+                // соглашается только в уже существующую форму.
+                var empty = new ushort[1];
+                if (fpdf_annot.FPDFAnnotSetAP(annot, AppearanceNormal, ref empty[0]) == 0)
+                    throw new PdfEngineException("Не удалось подготовить внешний вид измерения.");
+
+                foreach (var obj in objects)
+                {
+                    if (fpdf_annot.FPDFAnnotAppendObject(annot, obj) == 0)
+                        throw new PdfEngineException("Не удалось добавить объект в аннотацию измерения.");
+                }
+                objects.Clear(); // объекты принадлежат аннотации
+
+                SetAnnotString(annot, "Contents", measurement.Label);
+                SetAnnotString(annot, "Subj", "Measurement");
+                if (measurement.Author.Length > 0)
+                    SetAnnotString(annot, "T", measurement.Author);
+                SetAnnotString(annot, "NexusMeasure", string.Join(";",
+                    measurement.Kind.ToString(),
+                    measurement.ScaleRatio.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+                    measurement.Unit.ToString(),
+                    measurement.Decimals.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            }
+            finally
+            {
+                fpdf_annot.FPDFPageCloseAnnot(annot);
+            }
+        }
+        finally
+        {
+            foreach (var obj in objects)
+                fpdf_edit.FPDFPageObjDestroy(obj);
+        }
+    }
+
+    /// <summary>Описывающий прямоугольник всего, что нарисовано, — для /Rect аннотации.</summary>
+    private sealed class Extent
+    {
+        public double MinX = double.MaxValue, MinY = double.MaxValue;
+        public double MaxX = double.MinValue, MaxY = double.MinValue;
+        public bool IsEmpty => MaxX < MinX;
+
+        public void Add(double x, double y)
+        {
+            MinX = Math.Min(MinX, x); MaxX = Math.Max(MaxX, x);
+            MinY = Math.Min(MinY, y); MaxY = Math.Max(MaxY, y);
+        }
+    }
+
+    private static FpdfPageobjectT StrokedPath(
+        IReadOnlyList<(double X, double Y)> points, bool close,
+        uint r, uint g, uint b, uint alpha, Extent extent)
+    {
+        var path = fpdf_edit.FPDFPageObjCreateNewPath((float)points[0].X, (float)points[0].Y);
+        if (path == null || path.__Instance == IntPtr.Zero)
+            throw new PdfEngineException("Не удалось создать линию измерения.");
+        extent.Add(points[0].X, points[0].Y);
+        for (var i = 1; i < points.Count; i++)
+        {
+            fpdf_edit.FPDFPathLineTo(path, (float)points[i].X, (float)points[i].Y);
+            extent.Add(points[i].X, points[i].Y);
+        }
+        if (close)
+            fpdf_edit.FPDFPathClose(path);
+        fpdf_edit.FPDFPageObjSetStrokeColor(path, r, g, b, alpha);
+        fpdf_edit.FPDFPageObjSetStrokeWidth(path, (float)MeasureStrokePt);
+        fpdf_edit.FPDFPageObjSetLineCap(path, LineCapRound);
+        fpdf_edit.FPDFPageObjSetLineJoin(path, LineJoinRound);
+        fpdf_edit.FPDFPathSetDrawMode(path, 0, 1);
+        return path;
+    }
+
+    /// <summary>Маленький квадрат в вершине ломаной: видно, где именно щёлкнули.</summary>
+    private static FpdfPageobjectT VertexMark((double X, double Y) point, uint r, uint g, uint b, uint alpha, Extent extent)
+    {
+        const double half = 1.6;
+        var mark = fpdf_edit.FPDFPageObjCreateNewRect(
+            (float)(point.X - half), (float)(point.Y - half), (float)(half * 2), (float)(half * 2));
+        if (mark == null || mark.__Instance == IntPtr.Zero)
+            throw new PdfEngineException("Не удалось создать отметку вершины.");
+        fpdf_edit.FPDFPageObjSetFillColor(mark, r, g, b, alpha);
+        fpdf_edit.FPDFPathSetDrawMode(mark, FillModeWinding, 0);
+        extent.Add(point.X - half, point.Y - half);
+        extent.Add(point.X + half, point.Y + half);
+        return mark;
+    }
+
+    /// <summary>
+    /// Куда и под каким углом ставить подпись. Угол — в координатах содержимого,
+    /// поэтому направление отрезка переводится через ту же функцию, что и точки:
+    /// на повёрнутой странице иначе подпись легла бы поперёк линии.
+    /// </summary>
+    private static (double X, double Y, double AngleRad) LabelAnchor(
+        MeasurementDraft measurement, (double X, double Y)[] points,
+        int rotation, double contentWidth, double contentHeight)
+    {
+        var displayed = measurement.Points;
+        switch (measurement.Kind)
+        {
+            case MeasurementKind.Distance:
+            {
+                var a = displayed[0];
+                var b = displayed[^1];
+                return AlongSegment(a, b, measurement, rotation, contentWidth, contentHeight, points[0], points[^1]);
+            }
+            case MeasurementKind.Perimeter:
+            {
+                // Самая длинная сторона — на ней подпись заметнее всего.
+                var best = 0;
+                var bestLength = -1.0;
+                for (var i = 1; i < displayed.Count; i++)
+                {
+                    var length = MeasurementMath.Distance(displayed[i - 1], displayed[i]);
+                    if (length > bestLength)
+                    {
+                        bestLength = length;
+                        best = i;
+                    }
+                }
+                return AlongSegment(displayed[best - 1], displayed[best], measurement,
+                    rotation, contentWidth, contentHeight, points[best - 1], points[best]);
+            }
+            default:
+            {
+                var centroid = MeasurementMath.Centroid(displayed);
+                var (cx, cy) = DisplayedToContent(centroid.XPt, centroid.YPt, rotation, contentWidth, contentHeight);
+                // Смещение центроида от первой точки в содержимом: offsetX/Y одинаковы.
+                var (fx, fy) = DisplayedToContent(displayed[0].XPt, displayed[0].YPt, rotation, contentWidth, contentHeight);
+                return (points[0].X + (cx - fx), points[0].Y + (cy - fy), 0);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Подпись вдоль отрезка: над его серединой (со стороны, которая на экране
+    /// «вверх»), текст всегда читается слева направо.
+    /// </summary>
+    private static (double X, double Y, double AngleRad) AlongSegment(
+        InkPoint a, InkPoint b, MeasurementDraft measurement,
+        int rotation, double contentWidth, double contentHeight,
+        (double X, double Y) contentA, (double X, double Y) contentB)
+    {
+        var dx = b.XPt - a.XPt;
+        var dy = b.YPt - a.YPt;
+        var length = Math.Sqrt(dx * dx + dy * dy);
+        if (length < 1e-6)
+            return (contentA.X, contentA.Y, 0);
+
+        // Нормаль к отрезку в отображаемых координатах, направленная вверх по
+        // экрану (Y вниз, поэтому «вверх» — отрицательный Y); у вертикальной
+        // линии — вправо.
+        var nx = -dy / length;
+        var ny = dx / length;
+        if (ny > 1e-9 || (Math.Abs(ny) <= 1e-9 && nx < 0))
+        {
+            nx = -nx;
+            ny = -ny;
+        }
+        var offset = measurement.FontSizePt * 0.75 + MeasureLabelPadPt + MeasureStrokePt;
+        var midX = (a.XPt + b.XPt) / 2 + nx * offset;
+        var midY = (a.YPt + b.YPt) / 2 + ny * offset;
+
+        // Направление текста: вдоль отрезка, но так, чтобы читалось слева направо.
+        var ux = dx / length;
+        var uy = dy / length;
+        if (ux < -1e-9 || (Math.Abs(ux) <= 1e-9 && uy > 0))
+        {
+            ux = -ux;
+            uy = -uy;
+        }
+
+        var (anchorCx, anchorCy) = DisplayedToContent(midX, midY, rotation, contentWidth, contentHeight);
+        var (tipCx, tipCy) = DisplayedToContent(midX + ux, midY + uy, rotation, contentWidth, contentHeight);
+        var (originCx, originCy) = DisplayedToContent(a.XPt, a.YPt, rotation, contentWidth, contentHeight);
+        var angle = Math.Atan2(tipCy - anchorCy, tipCx - anchorCx);
+        return (contentA.X + (anchorCx - originCx), contentA.Y + (anchorCy - originCy), angle);
+    }
+
+    /// <summary>Подпись величины на белой подложке, центрированная в якоре и повёрнутая вдоль линии.</summary>
+    private static void AddLabel(
+        FpdfDocumentT document, FpdfFontT font, MeasurementDraft measurement,
+        double anchorX, double anchorY, double angle,
+        uint r, uint g, uint b, uint alpha, List<FpdfPageobjectT> objects, Extent extent)
+    {
+        var text = fpdf_edit.FPDFPageObjCreateTextObj(document, font, (float)measurement.FontSizePt);
+        if (text == null || text.__Instance == IntPtr.Zero)
+            throw new PdfEngineException("Не удалось создать подпись измерения.");
+        var owned = false;
+        try
+        {
+            var buffer = new ushort[measurement.Label.Length + 1];
+            for (var i = 0; i < measurement.Label.Length; i++)
+                buffer[i] = measurement.Label[i];
+            if (fpdf_edit.FPDFTextSetText(text, ref buffer[0]) == 0)
+                throw new PdfEngineException("Не удалось записать подпись измерения.");
+            fpdf_edit.FPDFPageObjSetFillColor(text, r, g, b, alpha);
+
+            float bl = 0, bb = 0, br = 0, bt = 0;
+            if (fpdf_edit.FPDFPageObjGetBounds(text, ref bl, ref bb, ref br, ref bt) == 0 || br <= bl)
+                return; // пустая подпись (один пробел): рисовать нечего, объект освободит finally
+
+            // Подложка по рамке текста с полями; и текст, и подложка сначала
+            // центрируются в начале координат, потом поворачиваются и переносятся
+            // в якорь одной и той же матрицей.
+            var halfW = (br - bl) / 2 + MeasureLabelPadPt;
+            var halfH = (bt - bb) / 2 + MeasureLabelPadPt;
+            var cos = Math.Cos(angle);
+            var sin = Math.Sin(angle);
+
+            var pad = fpdf_edit.FPDFPageObjCreateNewPath((float)-halfW, (float)-halfH);
+            if (pad == null || pad.__Instance == IntPtr.Zero)
+                throw new PdfEngineException("Не удалось создать подложку подписи.");
+            objects.Add(pad);
+            fpdf_edit.FPDFPathLineTo(pad, (float)halfW, (float)-halfH);
+            fpdf_edit.FPDFPathLineTo(pad, (float)halfW, (float)halfH);
+            fpdf_edit.FPDFPathLineTo(pad, (float)-halfW, (float)halfH);
+            fpdf_edit.FPDFPathClose(pad);
+            fpdf_edit.FPDFPageObjSetFillColor(pad, 0xFF, 0xFF, 0xFF, 0xE6);
+            fpdf_edit.FPDFPageObjSetStrokeColor(pad, r, g, b, alpha);
+            fpdf_edit.FPDFPageObjSetStrokeWidth(pad, 0.6f);
+            fpdf_edit.FPDFPathSetDrawMode(pad, FillModeWinding, 1);
+            fpdf_edit.FPDFPageObjTransform(pad, cos, sin, -sin, cos, anchorX, anchorY);
+
+            fpdf_edit.FPDFPageObjTransform(text, 1, 0, 0, 1, -(bl + br) / 2, -(bb + bt) / 2);
+            fpdf_edit.FPDFPageObjTransform(text, cos, sin, -sin, cos, anchorX, anchorY);
+            objects.Add(text);
+            owned = true;
+
+            foreach (var (lx, ly) in new[] { (-halfW, -halfH), (halfW, -halfH), (halfW, halfH), (-halfW, halfH) })
+                extent.Add(anchorX + lx * cos - ly * sin, anchorY + lx * sin + ly * cos);
+        }
+        finally
+        {
+            if (!owned && !objects.Contains(text))
+                fpdf_edit.FPDFPageObjDestroy(text);
         }
     }
 
@@ -826,7 +1194,7 @@ internal static class PdfiumOverlayWriter
         try
         {
             var bitmap = fpdfview.FPDFBitmapCreateEx(
-                replacement.PixelWidth, replacement.PixelHeight, FpdfBitmapBgra,
+                replacement.PixelWidth, replacement.PixelHeight, PdfiumImageEncoding.BitmapFormat(replacement.Bgra),
                 pin.AddrOfPinnedObject(), stride);
             if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
                 throw new PdfEngineException("Не удалось подготовить растр замены изображения.");
@@ -856,27 +1224,32 @@ internal static class PdfiumOverlayWriter
 
         try
         {
-            var stride = image.PixelWidth * 4;
-            var pin = GCHandle.Alloc(image.Bgra, GCHandleType.Pinned);
-            try
+            if (image.EncodedJpeg is not { Length: > 0 } ||
+                !PdfiumImageEncoding.LoadJpeg(page, obj, image.EncodedJpeg))
             {
-                var bitmap = fpdfview.FPDFBitmapCreateEx(
-                    image.PixelWidth, image.PixelHeight, FpdfBitmapBgra, pin.AddrOfPinnedObject(), stride);
-                if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
-                    throw new PdfEngineException("Не удалось подготовить растр изображения.");
+                var stride = image.PixelWidth * 4;
+                var pin = GCHandle.Alloc(image.Bgra, GCHandleType.Pinned);
                 try
                 {
-                    if (fpdf_edit.FPDFImageObjSetBitmap(null, 0, obj, bitmap) == 0)
-                        throw new PdfEngineException("Не удалось поместить изображение в объект.");
+                    var bitmap = fpdfview.FPDFBitmapCreateEx(
+                        image.PixelWidth, image.PixelHeight, PdfiumImageEncoding.BitmapFormat(image.Bgra),
+                        pin.AddrOfPinnedObject(), stride);
+                    if (bitmap == null || bitmap.__Instance == IntPtr.Zero)
+                        throw new PdfEngineException("Не удалось подготовить растр изображения.");
+                    try
+                    {
+                        if (fpdf_edit.FPDFImageObjSetBitmap(null, 0, obj, bitmap) == 0)
+                            throw new PdfEngineException("Не удалось поместить изображение в объект.");
+                    }
+                    finally
+                    {
+                        fpdfview.FPDFBitmapDestroy(bitmap);
+                    }
                 }
                 finally
                 {
-                    fpdfview.FPDFBitmapDestroy(bitmap);
+                    pin.Free();
                 }
-            }
-            finally
-            {
-                pin.Free();
             }
 
             // Единичный квадрат изображения масштабируется до отображаемого

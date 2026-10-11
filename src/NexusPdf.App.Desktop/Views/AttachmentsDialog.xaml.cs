@@ -3,6 +3,7 @@ using System.Windows;
 using Microsoft.Win32;
 using NexusPdf.App.Desktop.Localization;
 using NexusPdf.Pdf.Abstractions;
+using NexusPdf.Infrastructure;
 
 namespace NexusPdf.App.Desktop.Views;
 
@@ -62,10 +63,12 @@ public partial class AttachmentsDialog : Window
         {
             SaveButton.IsEnabled = false;
             var bytes = await _read(row.Index);
-            await File.WriteAllBytesAsync(dialog.FileName, bytes);
+            await SafeFileReplace.WriteAndReplaceAsync(dialog.FileName,
+                tmp => File.WriteAllBytesAsync(tmp, bytes), _ => Task.CompletedTask,
+                keepBackup: false, CancellationToken.None);
             Serilog.Log.Information("Вложение {Name} сохранено, байт: {Size}", row.Name, bytes.Length);
-            ErrorDialog.Show(this, Loc.Get("AttachmentsTitle"),
-                Loc.F("AttachmentsSaved", Path.GetFileName(dialog.FileName)), "");
+            InfoDialog.Show(this, Loc.Get("AttachmentsTitle"),
+                Loc.F("AttachmentsSaved", Path.GetFileName(dialog.FileName)));
         }
         catch (Exception ex)
         {

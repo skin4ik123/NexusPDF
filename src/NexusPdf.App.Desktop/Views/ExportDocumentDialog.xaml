@@ -13,12 +13,12 @@
 
     <TextBlock Text="{l:Loc ExportPages}" Foreground="{DynamicResource TextSecondary}" FontSize="12"
                Margin="0,14,0,4"/>
-    <RadioButton x:Name="ScopeAll" Content="{l:Loc ExportScopeAll}" IsChecked="True"
+    <RadioButton x:Name="ScopeAll" Content="{l:Loc ExportScopeAll}" IsChecked="True" GroupName="ExportPages" Checked="OnScopeChanged"
                  Foreground="{DynamicResource TextBrush}"/>
-    <RadioButton x:Name="ScopeCurrent" Content="{l:Loc ExportScopeCurrent}" Margin="0,6,0,0"
+    <RadioButton x:Name="ScopeCurrent" Content="{l:Loc ExportScopeCurrent}" Margin="0,6,0,0" GroupName="ExportPages" Checked="OnScopeChanged"
                  Foreground="{DynamicResource TextBrush}"/>
     <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-      <RadioButton x:Name="ScopeRange" Content="{l:Loc ExportScopeRange}" VerticalAlignment="Center"
+      <RadioButton x:Name="ScopeRange" Content="{l:Loc ExportScopeRange}" VerticalAlignment="Center" GroupName="ExportPages" Checked="OnScopeChanged"
                    Foreground="{DynamicResource TextBrush}"/>
       <TextBox x:Name="RangeBox" AutomationProperties.Name="{l:Loc ExportScopeRange}" Width="170" Margin="10,0,0,0" Style="{StaticResource ThemedTextBox}"
                IsEnabled="{Binding IsChecked, ElementName=ScopeRange}"

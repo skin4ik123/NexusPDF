@@ -69,8 +69,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     public bool IsDirty => Document.Session.IsDirty || _formModified;
     public int PageCount => Pages.Count;
-    public bool CanUndo => Document.Session.History.CanUndo;
-    public bool CanRedo => Document.Session.History.CanRedo;
+    public bool CanUndo => !IsBusy && Document.Session.History.CanUndo;
+    public bool CanRedo => !IsBusy && Document.Session.History.CanRedo;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ZoomPercentText))]
@@ -104,6 +104,22 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     public double ViewportWidth { get; set; }
     public double ViewportHeight { get; set; }
 
+    /// <summary>
+    /// Плотность экрана (1,0 = 96 DPI). Сообщает представление при показе и
+    /// при переезде окна на другой монитор: модель экран не знает, а размеры
+    /// карточек и растров должны считаться в его пикселях.
+    /// </summary>
+    public double DpiScale { get; private set; } = 1.0;
+
+    public void SetDpiScale(double scale)
+    {
+        if (!(scale > 0) || !double.IsFinite(scale) || Math.Abs(scale - DpiScale) < 0.0005) return;
+        DpiScale = scale;
+        foreach (var page in Pages)
+            page.NotifyZoomChanged();
+        ScheduleRerender();
+    }
+
     /// <summary>Как выбирается масштаб: сам по ширине, сам по странице или вручную.</summary>
     public enum ZoomFit
     {
@@ -111,6 +127,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         Manual,
         Width,
         Page,
+        /// <summary>
+        /// Пока человек ничего не выбирал: портретный лист — по ширине,
+        /// альбомный — целиком (см. <see cref="NexusPdf.Ux.ZoomFitting.PrefersWholePage"/>).
+        /// </summary>
+        Auto,
     }
 
     /// <summary>
@@ -119,7 +140,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     /// остаток окна сам, а не уехать под панель.
     /// </summary>
     [ObservableProperty]
-    private ZoomFit _fitMode = ZoomFit.Width;
+    private ZoomFit _fitMode = ZoomFit.Auto;
 
     [RelayCommand]
     private void FitWidth()
@@ -169,13 +190,33 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             case ZoomFit.Page:
                 FitPage(ViewportWidth, ViewportHeight > 0 ? ViewportHeight : 700);
                 break;
+            case ZoomFit.Auto:
+                FitAuto();
+                break;
         }
+    }
+
+    private void FitAuto()
+    {
+        if (Pages.Count == 0)
+        {
+            FitWidth(ViewportWidth);
+            return;
+        }
+        var page = Pages[Math.Clamp(CurrentPageNumber - 1, 0, Pages.Count - 1)];
+        if (ViewportHeight > 50 &&
+            NexusPdf.Ux.ZoomFitting.PrefersWholePage(page.SizePt.WidthPoints, page.SizePt.HeightPoints))
+            FitPage(ViewportWidth, ViewportHeight);
+        else
+            FitWidth(ViewportWidth);
     }
 
     [ObservableProperty]
     private string _statusText = Loc.Get("Ready");
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanUndo))]
+    [NotifyPropertyChangedFor(nameof(CanRedo))]
     private bool _isBusy;
 
     /// <summary>
@@ -196,30 +237,32 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     partial void OnFindQueryChanged(string value)
     {
-        Matches = Array.Empty<SearchMatch>();
-        _currentMatch = -1;
-        FindStatus = "";
-        ClearHighlights();
+        ClearSearch();
 
         // Поиск по мере ввода: ждать Enter, как раньше, — лишний шаг, которого
         // нет ни в одном современном просмотрщике. Пауза гасит поиск на каждую
         // букву при наборе.
+        ScheduleSearch();
+    }
+
+    private void ScheduleSearch(bool preservePosition = false)
+    {
         _findDebounceCts?.Cancel();
-        if (string.IsNullOrWhiteSpace(value))
+        if (string.IsNullOrWhiteSpace(FindQuery))
             return;
         var cts = new CancellationTokenSource();
         _findDebounceCts = cts;
-        _ = RunSearchAfterPauseAsync(cts);
+        _ = RunSearchAfterPauseAsync(cts, preservePosition);
     }
 
-    private async Task RunSearchAfterPauseAsync(CancellationTokenSource cts)
+    private async Task RunSearchAfterPauseAsync(CancellationTokenSource cts, bool preservePosition)
     {
         try
         {
             await Task.Delay(350, cts.Token);
             if (!ReferenceEquals(cts, _findDebounceCts))
                 return;
-            await RunSearchAsync();
+            await RunSearchAsync(preservePosition);
         }
         catch (OperationCanceledException)
         {
@@ -241,6 +284,36 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         foreach (var page in Pages)
             page.NotifyZoomChanged();
         ClearHighlights();
+        ScheduleRerender();
+    }
+
+    private System.Windows.Threading.DispatcherTimer? _rerenderTimer;
+
+    /// <summary>
+    /// Перерисовка видимых страниц под новый масштаб — с короткой паузой:
+    /// колесо с Ctrl и щипок меняют масштаб сериями, и рисовать каждый
+    /// промежуточный шаг значит занимать движок работой, которую тут же
+    /// выбросят. Пока пауза идёт, показывается прежний растр, растянутый
+    /// качественным фильтром.
+    /// </summary>
+    private void ScheduleRerender()
+    {
+        if (_rerenderTimer == null)
+        {
+            _rerenderTimer = new System.Windows.Threading.DispatcherTimer(
+                System.Windows.Threading.DispatcherPriority.Background, _dispatcher)
+            {
+                Interval = TimeSpan.FromMilliseconds(90),
+            };
+            _rerenderTimer.Tick += (_, _) =>
+            {
+                _rerenderTimer.Stop();
+                foreach (var page in Pages)
+                    page.RefreshIfShown();
+            };
+        }
+        _rerenderTimer.Stop();
+        _rerenderTimer.Start();
     }
 
     /// <summary>
@@ -266,34 +339,20 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     [RelayCommand]
     private void ZoomActual() => SetZoom(1.0);
 
-    /// <summary>Подгон по ширине: вычисляется по самой широкой странице и ширине видимой области (DIU).</summary>
-    private bool _initialFitDone;
-
-    /// <summary>
-    /// Однократная подгонка по ширине при первом показе документа. Дальше
-    /// масштаб принадлежит пользователю и сам не меняется.
-    /// </summary>
-    public void ApplyInitialFit(double viewportWidthDiu)
-    {
-        if (_initialFitDone || viewportWidthDiu < 50) return;
-        _initialFitDone = true;
-        ViewportWidth = viewportWidthDiu;
-        ApplyFit();
-    }
-
+    /// <summary>Подгон по ширине: по самой широкой странице и ширине видимой области (DIU).</summary>
     public void FitWidth(double viewportWidthDiu)
     {
         var maxPageWidthPt = Pages.Count == 0 ? 612 : Pages.Max(p => p.SizePt.WidthPoints);
-        SetZoomFitted((viewportWidthDiu - PageMarginDiu * 2) / (maxPageWidthPt * PtToDiu));
+        SetZoomFitted(NexusPdf.Ux.ZoomFitting.ByWidth(viewportWidthDiu, maxPageWidthPt, PageMarginDiu));
     }
 
     public void FitPage(double viewportWidthDiu, double viewportHeightDiu)
     {
         if (Pages.Count == 0) return;
         var page = Pages[Math.Clamp(CurrentPageNumber - 1, 0, Pages.Count - 1)];
-        var byWidth = (viewportWidthDiu - PageMarginDiu * 2) / (page.SizePt.WidthPoints * PtToDiu);
-        var byHeight = (viewportHeightDiu - PageMarginDiu * 2) / (page.SizePt.HeightPoints * PtToDiu);
-        SetZoomFitted(Math.Min(byWidth, byHeight));
+        SetZoomFitted(NexusPdf.Ux.ZoomFitting.ByPage(
+            viewportWidthDiu, viewportHeightDiu,
+            page.SizePt.WidthPoints, page.SizePt.HeightPoints, PageMarginDiu));
     }
 
     // ----- Позиция чтения -----
@@ -779,6 +838,10 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         try
         {
             HasAcroForm = await Document.PrimaryHandle.GetFormTypeAsync(CancellationToken.None) == 1;
+            // Поля без подсветки не видны глазом — подсказываем, что они есть
+            // и что включать для них ничего не нужно.
+            if (HasAcroForm && StatusText == Loc.Get("Ready"))
+                StatusText = Loc.Get("FormDetectedHint");
         }
         catch (Exception ex)
         {
@@ -791,28 +854,132 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     [RelayCommand]
     private async Task ToggleFormMode()
     {
-        if (!HasAcroForm || IsBusy) return;
         if (IsFormMode)
-        {
-            // Полное завершение окружения: значения зафиксированы, подсветка
-            // полей уходит из рендеров (в т.ч. из печати).
-            await Document.PrimaryHandle.FormEndAsync(CancellationToken.None);
-            IsFormMode = false;
-            _formActivePage = null;
-            StatusText = Loc.Get("Ready");
-            BumpFormRender();
-            return;
-        }
+            await ExitFormModeAsync();
+        else
+            await EnterFormModeAsync();
+    }
 
+    /// <summary>Включить заполнение формы: подсветка полей и ввод с клавиатуры в поле.</summary>
+    public async Task<bool> EnterFormModeAsync()
+    {
+        if (!HasAcroForm || IsBusy) return false;
+        if (IsFormMode) return true;
         if (!await Document.PrimaryHandle.InitFormsAsync(CancellationToken.None))
         {
             HasAcroForm = false;
-            return;
+            return false;
         }
+        if (IsBusy) return false;
+        // Заполнение несовместимо с остальными инструментами мыши.
         CancelPlacement();
+        StopMeasurement();
+        if (IsDrawing)
+            SelectDrawTool(DrawTool.None);
+        ClearObjectSelection();
+        ClearTextSelection();
         IsFormMode = true;
         StatusText = Loc.Get("FormModeHint");
         BumpFormRender();
+        return true;
+    }
+
+    /// <summary>Выключить заполнение: набранное фиксируется, подсветка полей уходит из рендеров (в т.ч. из печати).</summary>
+    public async Task ExitFormModeAsync()
+    {
+        if (!IsFormMode || IsBusy) return;
+        await Document.PrimaryHandle.FormEndAsync(CancellationToken.None);
+        IsFormMode = false;
+        _formActivePage = null;
+        StatusText = Loc.Get("Ready");
+        BumpFormRender();
+    }
+
+    /// <summary>
+    /// Esc при заполнении: сначала отпускается поле (набранное фиксируется),
+    /// второй Esc выключает заполнение целиком.
+    /// </summary>
+    public async Task EscapeFormAsync(double dpiScale)
+    {
+        if (!IsFormMode) return;
+        if (_formActivePage != null)
+        {
+            await ReleaseFormFieldAsync(dpiScale);
+            return;
+        }
+        await ExitFormModeAsync();
+    }
+
+    /// <summary>Отпустить поле: набранное фиксируется, клавиатура возвращается к документу.</summary>
+    public async Task ReleaseFormFieldAsync(double dpiScale)
+    {
+        if (_formActivePage is not { } page) return;
+        await Document.PrimaryHandle.FormKillFocusAsync(CancellationToken.None);
+        _formActivePage = null;
+        StatusText = Loc.Get("FormModeHint");
+        await RefreshFormPageAsync(page, dpiScale);
+    }
+
+    /// <summary>
+    /// Поле формы под точкой (пункты страницы) — по кэшу, без обращения к
+    /// движку: проверка идёт на каждое движение мыши.
+    /// </summary>
+    public NexusPdf.Pdf.Abstractions.PdfFormFieldArea? FormFieldAt(PageViewModel page, double xPt, double yPt)
+    {
+        if (!HasAcroForm || !page.FormAreasLoaded) return null;
+        foreach (var area in page.FormAreas)
+        {
+            if (!area.IsReadOnly && area.Contains(xPt, yPt))
+                return area;
+        }
+        return null;
+    }
+
+    /// <summary>Поля страницы читаются один раз, лениво — при первом наведении на страницу.</summary>
+    public async Task EnsureFormAreasAsync(PageViewModel page)
+    {
+        if (!HasAcroForm || page.FormAreasLoaded || page.FormAreasLoading) return;
+        // Формы принадлежат первичному источнику; вставленные чужие страницы не интерактивны.
+        if (page.PageRef.SourceId != Document.PrimarySourceId)
+        {
+            page.FormAreasLoaded = true;
+            return;
+        }
+        page.FormAreasLoading = true;
+        try
+        {
+            page.FormAreas = await Document.PrimaryHandle.GetFormFieldAreasAsync(
+                page.PageRef.SourcePageIndex, page.PageRef.RotationOffset, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Не удалось прочитать поля формы страницы {Page}", page.PageNumber);
+            page.FormAreas = Array.Empty<NexusPdf.Pdf.Abstractions.PdfFormFieldArea>();
+        }
+        finally
+        {
+            page.FormAreasLoaded = true;
+            page.FormAreasLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// Щелчок по полю в обычном просмотре: заполнение включается само, и тот
+    /// же щелчок уже ставит курсор в поле — как в Acrobat и браузерах. Раньше
+    /// нужно было сначала найти и включить режим, а потом щёлкать ещё раз.
+    /// </summary>
+    public async Task FillFieldAtAsync(PageViewModel page, double xPt, double yPt, double dpiScale)
+    {
+        if (!HasAcroForm || IsBusy) return;
+        var logicalIndex = page.LogicalIndex;
+        if (!IsFormMode)
+        {
+            if (!await EnterFormModeAsync()) return;
+            // Включение режима пересобрало список страниц: прежняя карточка устарела.
+            if (logicalIndex >= Pages.Count) return;
+            page = Pages[logicalIndex];
+        }
+        await FormClickAsync(page, xPt, yPt, dpiScale);
     }
 
     private void BumpFormRender()
@@ -842,10 +1009,16 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             return;
         }
 
-        await Document.PrimaryHandle.FormClickAsync(
+        var kind = await Document.PrimaryHandle.FormClickAsync(
             page.PageRef.SourcePageIndex, page.PageRef.RotationOffset, xPt, yPt, CancellationToken.None);
-        _formActivePage = page;
-        MarkFormModified();
+        _formActivePage = kind == NexusPdf.Pdf.Abstractions.PdfFormFieldKind.Unknown ? null : page;
+        // Значение меняет только щелчок по флажку, переключателю или кнопке.
+        // Щелчок в текстовое поле ничего не меняет: раньше и он помечал документ
+        // изменённым, и закрытие без единой правки спрашивало «сохранить?».
+        if (kind is NexusPdf.Pdf.Abstractions.PdfFormFieldKind.CheckBox
+            or NexusPdf.Pdf.Abstractions.PdfFormFieldKind.RadioButton
+            or NexusPdf.Pdf.Abstractions.PdfFormFieldKind.PushButton)
+            MarkFormModified();
         await RefreshFormPageAsync(page, dpiScale);
     }
 
@@ -870,11 +1043,13 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         await RefreshFormPageAsync(page, dpiScale);
     }
 
-    public async Task FormKeyAsync(int virtualKey, double dpiScale)
+    public async Task FormKeyAsync(int virtualKey, double dpiScale, bool shift = false)
     {
         if (!IsFormMode || IsBusy || _formActivePage is not { } page) return;
-        await Document.PrimaryHandle.FormKeyDownAsync(virtualKey, CancellationToken.None);
-        MarkFormModified();
+        await Document.PrimaryHandle.FormKeyDownAsync(virtualKey, shift, CancellationToken.None);
+        // Стрелки, Home/End и Tab двигают курсор и фокус, а не текст.
+        if (virtualKey is not (0x09 or 0x23 or 0x24 or 0x25 or 0x26 or 0x27 or 0x28))
+            MarkFormModified();
         await RefreshFormPageAsync(page, dpiScale);
     }
 
@@ -1008,12 +1183,15 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     [ObservableProperty]
     private string _currentPageTextInfo = "";
 
+    private int _pagePropertiesVersion;
+
     /// <summary>
     /// Разбор текущей страницы для панели свойств. Делается по смене страницы,
     /// а не на каждый кадр: один запрос текста страницы дёшев, но не бесплатен.
     /// </summary>
     private async Task RefreshPagePropertiesAsync()
     {
+        var version = ++_pagePropertiesVersion;
         OnPropertyChanged(nameof(CurrentPageSizeWithOrientation));
         OnPropertyChanged(nameof(CurrentPageRotationText));
         try
@@ -1023,8 +1201,13 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             var (handle, pageIndex) = await Document.ResolveTextPageAsync(index, CancellationToken.None);
             var text = await handle.GetPageTextAsync(pageIndex, CancellationToken.None);
             var letters = text.Count(char.IsLetterOrDigit);
+            var fields = letters == 0
+                ? (await handle.GetFormFieldAreasAsync(pageIndex, 0, CancellationToken.None)).Count
+                : 0;
+            if (version != _pagePropertiesVersion) return;
             CurrentPageTextInfo = letters switch
             {
+                0 when fields > 0 => Loc.F("PropFormFields", fields),
                 0 => Loc.Get("PropNoTextLayer"),
                 < 40 => Loc.F("PropLittleText", letters),
                 _ => Loc.F("PropHasText", letters),
@@ -1033,7 +1216,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         catch (Exception)
         {
             // Свойства — справка, а не операция: молчим и не мешаем работать.
-            CurrentPageTextInfo = "";
+            if (version == _pagePropertiesVersion) CurrentPageTextInfo = "";
         }
     }
 
@@ -1188,6 +1371,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasObjectSelection))]
+    [NotifyPropertyChangedFor(nameof(ShowsTextProperties))]
+    [NotifyPropertyChangedFor(nameof(ShowsPageProperties))]
     private ObjectSelection? _selectedObject;
 
     public bool HasObjectSelection => SelectedObject != null;
@@ -1206,6 +1391,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         NexusPdf.Pdf.Abstractions.RedactionDraft => NexusPdf.Ux.SelectionKind.Shape,
         NexusPdf.Pdf.Abstractions.NoteAnnotationDraft => NexusPdf.Ux.SelectionKind.Annotation,
         NexusPdf.Pdf.Abstractions.TextMarkupDraft => NexusPdf.Ux.SelectionKind.Annotation,
+        NexusPdf.Pdf.Abstractions.MeasurementDraft => NexusPdf.Ux.SelectionKind.Annotation,
         _ => NexusPdf.Ux.SelectionKind.Nothing,
     };
 
@@ -1257,6 +1443,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         }
         SelectedObject = null;
         _dragHandle = NexusPdf.Ux.ResizeHandle.None;
+        if (StatusText == Loc.Get("UxObjectSelected")) StatusText = Loc.Get("Ready");
     }
 
     /// <summary>Оверлей в системе координат текущего показа страницы.</summary>
@@ -1538,6 +1725,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         NexusPdf.Pdf.Abstractions.InkAnnotationDraft => Loc.Get("UxObjectInk"),
         NexusPdf.Pdf.Abstractions.RedactionDraft => Loc.Get("UxObjectRedaction"),
         NexusPdf.Pdf.Abstractions.TextMarkupDraft => Loc.Get("UxObjectMarkup"),
+        NexusPdf.Pdf.Abstractions.MeasurementDraft measurement => Loc.Get("UxObjectMeasure") + ": " + measurement.Label,
         _ => Loc.Get("UxObjectOther"),
     };
 
@@ -1960,6 +2148,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
                         s.Author, s.Contents),
                     NexusPdf.Pdf.Abstractions.RedactionDraft =>
                         (Loc.Get("AnnotRedaction"), "", Loc.Get("AnnotRedactionText")),
+                    NexusPdf.Pdf.Abstractions.MeasurementDraft m => (Loc.Get("AnnotMeasure"), m.Author, m.Label),
                     _ => ("", "", ""),
                 };
                 if (label.Length > 0)
@@ -1982,6 +2171,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
                         5 => Loc.Get("AnnotRect"),
                         6 => Loc.Get("AnnotEllipse"),
                         9 => Loc.Get("AnnotHighlight"),
+                        // Свои измерения, сохранённые раньше: штамп с пометкой.
+                        13 when a.Subject == "Measurement" => Loc.Get("AnnotMeasure"),
                         _ => Loc.Get("AnnotOther"),
                     };
                     // Виджеты форм (Subtype 20) — часть AcroForm: их удаление
@@ -2014,49 +2205,82 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         selection?.Cast<PageViewModel>().Select(p => p.LogicalIndex).OrderBy(i => i).ToArray()
         ?? Array.Empty<int>();
 
-    [RelayCommand]
-    private void RotateSelected(IList? selection) => Rotate(ToIndices(selection), 1);
+    /// <summary>
+    /// Страницы, над которыми работает команда организатора: переданные явно
+    /// (контекстное меню, панель инструментов) или выбранные в организаторе.
+    /// </summary>
+    private int[] TargetIndices(IList? selection) =>
+        selection is { Count: > 0 } ? ToIndices(selection) : ToIndices(OrganizeSelectedPages.ToList());
 
-    [RelayCommand]
-    private void RotateSelectedLeft(IList? selection) => Rotate(ToIndices(selection), -1);
+    private bool CanActOnPages(IList? selection) =>
+        !IsBusy && (selection?.Count > 0 || OrganizeSelectionCount > 0);
 
-    [RelayCommand]
-    private void RotateSelected180(IList? selection) => Rotate(ToIndices(selection), 2);
+    private bool CanDeletePages(IList? selection)
+    {
+        if (IsBusy) return false;
+        var count = selection?.Count > 0 ? selection.Count : OrganizeSelectionCount;
+        // Удалить ВСЕ страницы нельзя — кнопка не должна это обещать.
+        return count > 0 && count < Pages.Count;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanActOnPages))]
+    private void RotateSelected(IList? selection) => Rotate(TargetIndices(selection), 1);
+
+    [RelayCommand(CanExecute = nameof(CanActOnPages))]
+    private void RotateSelectedLeft(IList? selection) => Rotate(TargetIndices(selection), -1);
+
+    [RelayCommand(CanExecute = nameof(CanActOnPages))]
+    private void RotateSelected180(IList? selection) => Rotate(TargetIndices(selection), 2);
 
     [RelayCommand]
     private void RotateAll() => Rotate(Enumerable.Range(0, Pages.Count).ToArray(), 1);
 
     private void Rotate(int[] indices, int quarterTurns)
     {
-        if (indices.Length == 0) return;
+        if (indices.Length == 0 || IsBusy) return;
+        // Порядок страниц не меняется, поэтому выбор переживёт пересборку сам:
+        // те же номера останутся выбранными, и поворачивать можно щелчок за
+        // щелчком, не выделяя страницы заново.
+        _organizeSelectionAfterRebuild = indices;
         Document.Session.Apply(new RotatePagesOperation(indices, quarterTurns));
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanDeletePages))]
     private void DeleteSelected(IList? selection)
     {
-        var indices = ToIndices(selection);
-        if (indices.Length == 0 || indices.Length >= Pages.Count) return;
+        var indices = TargetIndices(selection);
+        if (indices.Length == 0 || indices.Length >= Pages.Count || IsBusy) return;
+        _organizeSelectionAfterRebuild = Array.Empty<int>();
         Document.Session.Apply(new DeletePagesOperation(indices));
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanActOnPages))]
     private void DuplicateSelected(IList? selection)
     {
-        var indices = ToIndices(selection);
-        if (indices.Length == 0) return;
+        var indices = TargetIndices(selection);
+        if (indices.Length == 0 || IsBusy) return;
+        // Выбранными становятся копии: с ними обычно и работают дальше —
+        // переносят или поворачивают. Копия k-й страницы встаёт сразу за ней,
+        // а все копии перед ней сдвигают её на k позиций.
+        _organizeSelectionAfterRebuild = indices.Select((index, k) => index + k + 1).ToArray();
         Document.Session.Apply(new DuplicatePagesOperation(indices));
     }
 
     [RelayCommand]
     private void Undo()
     {
+        if (IsBusy) return;
+        // После отмены прежние номера указывают на другие страницы: оставить
+        // их выбранными значит подставить под следующую команду не то.
+        _organizeSelectionAfterRebuild = Array.Empty<int>();
         Document.Session.Undo();
     }
 
     [RelayCommand]
     private void Redo()
     {
+        if (IsBusy) return;
+        _organizeSelectionAfterRebuild = Array.Empty<int>();
         Document.Session.Redo();
     }
 
@@ -2072,6 +2296,16 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     /// </summary>
     public event EventHandler<CrossDocumentDrop>? PagesDroppedFromOtherDocument;
 
+    /// <summary>Файлы из Проводника, брошенные между карточками, и место вставки.</summary>
+    public sealed record FilesDrop(IReadOnlyList<string> Files, int InsertIndex);
+
+    /// <summary>
+    /// Просьба вставить файлы (PDF, картинки, документы Office) на указанное
+    /// место. Вставкой занимается главная модель: ей известны движок,
+    /// преобразователь Office и временная папка.
+    /// </summary>
+    public event EventHandler<FilesDrop>? FilesDropped;
+
     private static IReadOnlyList<PageViewModel> DraggedPages(object? data) => data switch
     {
         PageViewModel single => new[] { single },
@@ -2079,8 +2313,28 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         _ => Array.Empty<PageViewModel>(),
     };
 
+    /// <summary>
+    /// Что принесли из Проводника. Для чужих данных библиотека перетаскивания
+    /// отдаёт сам IDataObject, а не распакованный объект.
+    /// </summary>
+    private static string[] DroppedFiles(object? data) =>
+        data is IDataObject payload && payload.GetDataPresent(DataFormats.FileDrop)
+        && payload.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files
+            ? files
+            : Array.Empty<string>();
+
     void IDropTarget.DragOver(IDropInfo dropInfo)
     {
+        if (DroppedFiles(dropInfo.Data).Length > 0)
+        {
+            // Файлы из Проводника: PDF отдаст страницы, картинка станет
+            // страницей. Раньше обработчик библиотеки объявлял их «не своими»,
+            // и до собственных обработчиков списка они не доходили вовсе.
+            dropInfo.Effects = DragDropEffects.Copy;
+            dropInfo.DropTargetAdorner = DropTargetAdorners.Insert;
+            return;
+        }
+
         var pages = DraggedPages(dropInfo.Data);
         if (pages.Count == 0) return;
 
@@ -2095,6 +2349,13 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     void IDropTarget.Drop(IDropInfo dropInfo)
     {
+        var files = DroppedFiles(dropInfo.Data);
+        if (files.Length > 0)
+        {
+            FilesDropped?.Invoke(this, new FilesDrop(files, Math.Clamp(dropInfo.InsertIndex, 0, Pages.Count)));
+            return;
+        }
+
         var items = DraggedPages(dropInfo.Data);
         if (items.Count == 0) return;
 
@@ -2114,7 +2375,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             return;
         }
 
-        var indices = items.Select(p => p.LogicalIndex).OrderBy(i => i).ToArray();
+        var indices = items.Select(p => p.LogicalIndex).Distinct().OrderBy(i => i).ToArray();
+        // Перенесённые страницы остаются выбранными на новом месте — их видно
+        // и их можно сразу двигать дальше.
+        var landed = insertIndex - indices.Count(i => i < insertIndex);
+        _organizeSelectionAfterRebuild = Enumerable.Range(landed, indices.Length).ToArray();
         Document.Session.Apply(new MovePagesOperation(indices, insertIndex));
     }
 
@@ -2152,8 +2417,9 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         await ShowCurrentMatchAsync();
     }
 
-    public async Task RunSearchAsync()
+    public async Task RunSearchAsync(bool preservePosition = false)
     {
+        _findDebounceCts?.Cancel();
         _searchCts?.Cancel();
         var cts = new CancellationTokenSource();
         _searchCts = cts;
@@ -2180,26 +2446,31 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             }
             else
             {
-                _currentMatch = 0;
-                await ShowCurrentMatchAsync();
+                _currentMatch = preservePosition
+                    ? Math.Max(0, result.ToList().FindIndex(m => m.LogicalPageIndex >= CurrentPageNumber - 1))
+                    : 0;
+                await ShowCurrentMatchAsync(cts.Token, navigate: !preservePosition);
             }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             Serilog.Log.Warning(ex, "Поиск прерван ошибкой");
-            FindStatus = Loc.Get("NoMatches");
+            if (!cts.IsCancellationRequested && ReferenceEquals(cts, _searchCts))
+                FindStatus = Loc.Get("NoMatches");
         }
         finally
         {
-            StatusText = Loc.Get("Ready");
+            if (ReferenceEquals(cts, _searchCts)) StatusText = Loc.Get("Ready");
         }
     }
 
-    private async Task ShowCurrentMatchAsync()
+    private async Task ShowCurrentMatchAsync(CancellationToken ct = default, bool navigate = true)
     {
         if (_currentMatch < 0 || _currentMatch >= Matches.Count) return;
         var match = Matches[_currentMatch];
+        var matches = Matches;
+        var stamp = Document.Session.ChangeStamp;
         if (match.LogicalPageIndex >= Pages.Count) return; // страницы изменились после поиска
         FindStatus = Loc.F("MatchesFound", _currentMatch + 1, Matches.Count);
 
@@ -2212,20 +2483,25 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             // исходный лист не знает этих символов, и подсветка либо
             // пропадала, либо вставала не на то слово.
             var (handle, pageIndex) = await Document.ResolveTextPageAsync(
-                match.LogicalPageIndex, CancellationToken.None);
+                match.LogicalPageIndex, ct);
             var rects = await handle.GetTextRectsAsync(
-                pageIndex, match.CharIndex, match.Length, CancellationToken.None);
+                pageIndex, match.CharIndex, match.Length, ct);
+            if (ct.IsCancellationRequested || !ReferenceEquals(matches, Matches) ||
+                stamp != Document.Session.ChangeStamp) return;
             page.Highlights = rects
                 .Select(r => TransformRectToDiu(r, page))
                 .ToList();
             _highlightedPage = page;
         }
+        catch (OperationCanceledException) { return; }
         catch (Exception ex)
         {
             Serilog.Log.Warning(ex, "Не удалось получить прямоугольники подсветки");
         }
 
-        GoToPage(match.LogicalPageIndex + 1);
+        if (navigate && !ct.IsCancellationRequested && ReferenceEquals(matches, Matches) &&
+            stamp == Document.Session.ChangeStamp)
+            GoToPage(match.LogicalPageIndex + 1);
     }
 
     /// <summary>
@@ -2287,6 +2563,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     private void ClearSearch()
     {
+        _findDebounceCts?.Cancel();
         _searchCts?.Cancel();
         Matches = Array.Empty<SearchMatch>();
         _currentMatch = -1;
@@ -2299,6 +2576,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     private void OnSessionChanged()
     {
         RebuildPages();
+        if (_selectionPage != null && !Pages.Contains(_selectionPage)) ClearTextSelection();
+        if (SelectedObject is { } selected && !Pages.Contains(selected.Page)) ClearObjectSelection();
         // Ссылка на активную страницу формы указывает на пересозданный список.
         if (_formActivePage is { } stale)
         {
@@ -2308,6 +2587,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             if (_formActivePage == null)
                 _ = Document.PrimaryHandle.FormKillFocusAsync(CancellationToken.None);
         }
+        RemapMeasurementAfterRebuild();
         OnPropertyChanged(nameof(IsDirty));
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(AccessibleName));
@@ -2315,6 +2595,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         OnPropertyChanged(nameof(CanUndo));
         OnPropertyChanged(nameof(CanRedo));
         ClearSearch();
+        if (IsFindVisible) ScheduleSearch(preservePosition: true);
         RemapBookmarks(); // страницы могли переставить или удалить
         DropRestoreOffer();
         if (IsCommentsVisible)
@@ -2382,6 +2663,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     {
         CancelPlacement();
         ClearTextSelection();
+        if (tool != DrawTool.None)
+            StopMeasurement();
         ActiveDrawTool = ActiveDrawTool == tool ? DrawTool.None : tool;
         StatusText = ActiveDrawTool switch
         {
@@ -2596,20 +2879,75 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     private void RebuildPages()
     {
-        foreach (var page in Pages)
-            page.CancelAll();
-
         var model = Document.Session.Model;
+        var sizes = Enumerable.Range(0, model.Pages.Count).Select(Document.GetLogicalPageSize).ToArray();
+        var unchanged = new Dictionary<int, PageViewModel>();
+        var reserved = new HashSet<PageViewModel>();
+        // Identical page references are common after duplication. Reserve
+        // unchanged positions first: otherwise replacing one duplicate shifts
+        // the entire reuse queue and invalidates many unrelated thumbnails.
+        for (var i = 0; i < Math.Min(Pages.Count, model.Pages.Count); i++)
+        {
+            if (Pages[i].PageRef != model.Pages[i] || Pages[i].SizePt != sizes[i]) continue;
+            unchanged[i] = Pages[i];
+            reserved.Add(Pages[i]);
+        }
+        var previous = Pages.Where(p => !reserved.Contains(p)).GroupBy(p => p.PageRef)
+            .ToDictionary(g => g.Key, g => new Queue<PageViewModel>(g));
+
+        // Выбор в организаторе переживает пересборку. Команда, знающая, куда
+        // уехали страницы, называет новый выбор сама; иначе он переносится по
+        // номерам, но только если число страниц не изменилось — иначе номера
+        // указывали бы на чужие страницы.
+        var selected = _organizeSelectionAfterRebuild is { } explicitSelection
+            ? new HashSet<int>(explicitSelection)
+            : Pages.Count == model.Pages.Count
+                ? Pages.Where(p => p.IsOrganizeSelected).Select(p => p.LogicalIndex).ToHashSet()
+                : new HashSet<int>();
+        _organizeSelectionAfterRebuild = null;
+
+        _rebuildingPages = true;
         var rebuilt = new List<PageViewModel>(model.Pages.Count);
-        for (var i = 0; i < model.Pages.Count; i++)
-            rebuilt.Add(new PageViewModel(this, i, model.Pages[i], Document.GetLogicalPageSize(i)));
-        // Одно уведомление на весь список: триста отдельных добавлений держали
-        // поток интерфейса секунду, и всё это время документ не показывался.
-        var started = System.Diagnostics.Stopwatch.StartNew();
-        Pages.ReplaceAll(rebuilt);
-        if (rebuilt.Count > 50)
-            Serilog.Log.Debug("Список из {Count} страниц собран за {Ms:N0} мс",
-                rebuilt.Count, started.Elapsed.TotalMilliseconds);
+        try
+        {
+            for (var i = 0; i < model.Pages.Count; i++)
+            {
+                var reference = model.Pages[i];
+                var size = sizes[i];
+                var page = unchanged.TryGetValue(i, out var stationary) ? stationary
+                    : previous.TryGetValue(reference, out var candidates) && candidates.Count > 0
+                    ? candidates.Dequeue()
+                    : new PageViewModel(this, i, reference, size);
+                if (page.SizePt != size)
+                {
+                    page.CancelAll();
+                    page = new PageViewModel(this, i, reference, size);
+                }
+                page.SetLogicalIndex(i);
+                page.IsOrganizeSelected = selected.Contains(i);
+                rebuilt.Add(page);
+            }
+            foreach (var removed in previous.Values.SelectMany(q => q)) removed.CancelAll();
+            PagesRebuilding?.Invoke(this, EventArgs.Empty);
+            // Малые правки дают точечные события; массовая перестановка —
+            // один Reset вместо сотен отдельных уведомлений.
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            Pages.Reconcile(rebuilt);
+            if (rebuilt.Count > 50)
+                Serilog.Log.Debug("Список из {Count} страниц собран за {Ms:N0} мс",
+                    rebuilt.Count, started.Elapsed.TotalMilliseconds);
+        }
+        finally
+        {
+            _rebuildingPages = false;
+        }
+        RecountOrganizeSelection();
+        foreach (var page in Pages)
+        {
+            page.RefreshIfShown();
+            page.RefreshThumbnailIfStale();
+        }
+        PagesRebuilt?.Invoke(this, EventArgs.Empty);
 
         OnPropertyChanged(nameof(PageCount));
         OnPropertyChanged(nameof(AccessibleName));
@@ -2625,6 +2963,10 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     public async ValueTask DisposeAsync()
     {
+        ++_pagePropertiesVersion;
+        _rerenderTimer?.Stop();
+        _thumbSizeTimer?.Stop();
+        _findDebounceCts?.Cancel();
         _searchCts?.Cancel();
         foreach (var page in Pages)
             page.CancelAll();

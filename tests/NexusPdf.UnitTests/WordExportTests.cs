@@ -117,6 +117,51 @@ public sealed class WordExportTests
         return PageAnalyzer.Analyze(0, 595, 842, words, rulings, Array.Empty<PdfFormFieldValue>());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Comments_On_Margins_And_Without_A_Rect_Are_Kept_Once_On_Every_Page(bool blankPage)
+    {
+        var path = TempFile("заметки.docx");
+        var layout = blankPage
+            ? PageAnalyzer.Analyze(0, 595, 842, Array.Empty<PdfTextWord>(), Array.Empty<PdfRulingLine>(), Array.Empty<PdfFormFieldValue>())
+            : SampleLayout();
+        var margin = new PdfAnnotationInfo(0, 1, "Заметка на полях", "Артур", "", new PdfTextRect(540, 820, 580, 800));
+        var unplaced = new PdfAnnotationInfo(1, 1, "Заметка без координат", "PDF");
+        using (var writer = new DocxExporter(path))
+        {
+            // Duplicate enumeration must not create duplicate Word comments;
+            // annotation indices restart on each source page.
+            for (var page = 0; page < 2; page++)
+                writer.AddPage(layout, Array.Empty<PdfPageLink>(), new[] { margin, unplaced, margin }, Array.Empty<PdfPageImage>(), 2);
+            writer.Finish();
+            Assert.Equal(4, writer.CommentCount);
+        }
+        using var document = WordprocessingDocument.Open(path, false);
+        var main = document.MainDocumentPart!;
+        var comments = main.WordprocessingCommentsPart!.Comments!.Elements<Comment>().ToArray();
+        Assert.Equal(2, comments.Count(c => c.InnerText == margin.Contents));
+        Assert.Equal(2, comments.Count(c => c.InnerText == unplaced.Contents));
+        Assert.Equal(4, main.Document!.Descendants<CommentReference>().Count());
+        var errors = new DocumentFormat.OpenXml.Validation.OpenXmlValidator().Validate(document).ToArray();
+        Assert.True(errors.Length == 0, string.Join("\n", errors.Take(12).Select(e => e.Description + " " + e.Path?.XPath)));
+    }
+
+    [Fact]
+    public void Disabling_Word_Comments_Omits_Loose_Notes()
+    {
+        var path = TempFile("без-заметок.docx");
+        using (var writer = new DocxExporter(path, new WordExportOptions(KeepComments: false)))
+        {
+            writer.AddPage(SampleLayout(), Array.Empty<PdfPageLink>(),
+                new[] { new PdfAnnotationInfo(0, 1, "Не переносить", "PDF") }, Array.Empty<PdfPageImage>(), 1);
+            writer.Finish();
+            Assert.Equal(0, writer.CommentCount);
+        }
+        using var document = WordprocessingDocument.Open(path, false);
+        Assert.Null(document.MainDocumentPart!.WordprocessingCommentsPart);
+    }
+
     [Fact]
     public void The_Document_Opens_With_Paragraphs_Tables_Links_And_Comments()
     {

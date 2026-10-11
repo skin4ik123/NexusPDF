@@ -47,6 +47,8 @@ public sealed class OcrService
 
     public OcrService(ITextRecognizer ocr) => _ocr = ocr;
 
+    internal IDisposable? BeginOperation() => (_ocr as RetainedTextRecognizer)?.Acquire();
+
     /// <summary>Название работающего движка — для журнала и интерфейса.</summary>
     public string EngineName => _ocr.DisplayName;
 
@@ -78,6 +80,7 @@ public sealed class OcrService
     public async Task<IReadOnlyList<OcrWordBox>> RecognizePageWordsAsync(
         OpenedDocument document, int logicalIndex, CancellationToken ct)
     {
+        using var recognition = BeginOperation();
         var size = document.GetLogicalPageSize(logicalIndex);
         var scale = Math.Min(TargetDpi / 72.0,
             MaxRenderSide / Math.Max(size.WidthPoints, size.HeightPoints));
@@ -105,6 +108,7 @@ public sealed class OcrService
         CancellationToken ct,
         bool editableText = false)
     {
+        using var recognition = BeginOperation();
         var targets = logicalIndices ?? Enumerable.Range(0, document.Session.Model.Pages.Count).ToList();
         var recognized = 0;
         var skipped = 0;

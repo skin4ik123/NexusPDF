@@ -82,6 +82,27 @@ public sealed class AppSettings
     public bool KeepBackupOnSave { get; set; }
     public double LastZoom { get; set; } = 1.0;
 
+    /// <summary>
+    /// Измерение: во сколько раз натура больше листа (200 для чертежа 1:200),
+    /// единица результата, число знаков и привязка к линиям. Запоминаются
+    /// между запусками: серия чертежей обычно в одном масштабе.
+    /// </summary>
+    public double MeasureScaleRatio { get; set; } = 100;
+    public string MeasureUnit { get; set; } = "Meter";
+    public int MeasureDecimals { get; set; } = 2;
+    public bool MeasureSnap { get; set; } = true;
+
+    /// <summary>
+    /// Принтер, на котором печатали в последний раз. Окно печати открывается
+    /// на нём, а не на принтере Windows по умолчанию: у многих по умолчанию
+    /// стоит «Факс» или виртуальный принтер, и выбирать настоящий приходилось
+    /// при каждой печати.
+    /// </summary>
+    public string LastPrinterName { get; set; } = "";
+
+    /// <summary>Ширина карточки страницы в организаторе (90–420).</summary>
+    public double OrganizeThumbWidth { get; set; } = 150;
+
     public const int MaxRecentFiles = 15;
 
     public void TouchRecent(string path)
@@ -125,7 +146,11 @@ public sealed class JsonSettingsStore
         var dir = Path.GetDirectoryName(_path)!;
         Directory.CreateDirectory(dir);
         var tmp = Path.Combine(dir, Path.GetFileName(_path) + ".nexustmp-" + Guid.NewGuid().ToString("N"));
-        File.WriteAllText(tmp, JsonSerializer.Serialize(settings, Options));
-        File.Move(tmp, _path, overwrite: true);
+        try
+        {
+            File.WriteAllText(tmp, JsonSerializer.Serialize(settings, Options));
+            File.Move(tmp, _path, overwrite: true);
+        }
+        finally { SafeFileReplace.TryDelete(tmp); }
     }
 }

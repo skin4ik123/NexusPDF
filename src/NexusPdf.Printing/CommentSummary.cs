@@ -77,13 +77,13 @@ public static class CommentSummaryLayout
 
         // Заголовок только на первой странице: повторять его на каждой —
         // тратить место, которого в сводке и так мало.
-        lines.Add(new SummaryLine($"Комментарии: {documentTitle}",
+        lines.Add(new SummaryLine(PrintText.Get("CsTitle", documentTitle),
             area.XPt, y, settings.TitleSizePt, true));
         y += settings.TitleSizePt * 1.8;
 
         if (comments.Count == 0)
         {
-            lines.Add(new SummaryLine("В документе нет комментариев.",
+            lines.Add(new SummaryLine(PrintText.Get("CsNoComments"),
                 area.XPt, y, settings.FontSizePt, false));
             pages.Add(new SummaryPage(lines));
             return pages;
@@ -91,7 +91,7 @@ public static class CommentSummaryLayout
 
         foreach (var comment in comments)
         {
-            var header = $"{comment.Number}. Стр. {comment.PageNumber} · {comment.TypeName}";
+            var header = PrintText.Get("CsHeader", comment.Number, comment.PageNumber, comment.TypeName);
             var meta = string.Join(" · ", new[] { comment.Author, comment.Date }
                 .Where(s => !string.IsNullOrWhiteSpace(s)));
 
@@ -128,7 +128,7 @@ public static class CommentSummaryLayout
     /// <summary>Перенос по словам; слишком длинное слово рвётся, а не уезжает за поле.</summary>
     public static IReadOnlyList<string> Wrap(string text, double widthPt, double fontSizePt)
     {
-        if (string.IsNullOrWhiteSpace(text)) return new[] { "(без текста)" };
+        if (string.IsNullOrWhiteSpace(text)) return new[] { PrintText.Get("CsNoText") };
 
         var maxChars = Math.Max(8, (int)(widthPt / (fontSizePt * AverageCharWidthRatio)));
         var result = new List<string>();
@@ -154,30 +154,13 @@ public static class CommentSummaryLayout
             result.Add(current);
         }
 
-        return result.Count == 0 ? new[] { "(без текста)" } : result;
+        return result.Count == 0 ? new[] { PrintText.Get("CsNoText") } : result;
     }
 
     /// <summary>Человеческое имя типа аннотации по подтипу PDF.</summary>
     public static string DescribeSubtype(int subtype) => subtype switch
     {
-        1 => "Заметка",
-        2 => "Ссылка",
-        3 => "Текст",
-        4 => "Линия",
-        5 => "Прямоугольник",
-        6 => "Овал",
-        7 => "Многоугольник",
-        8 => "Ломаная",
-        9 => "Выделение",
-        10 => "Подчёркивание",
-        11 => "Волнистое подчёркивание",
-        12 => "Зачёркивание",
-        13 => "Штамп",
-        14 => "Знак вставки",
-        15 => "Рисунок",
-        16 => "Всплывающее окно",
-        17 => "Вложение",
-        20 => "Виджет формы",
-        _ => "Аннотация",
+        >= 1 and <= 17 or 20 => PrintText.Get("AnnotSubtype" + subtype),
+        _ => PrintText.Get("AnnotSubtypeOther"),
     };
 }

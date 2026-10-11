@@ -13,6 +13,7 @@
     <app:InverseBoolConverter x:Key="InvBool"/>
     <app:NonZeroToVisibilityConverter x:Key="RotBadgeVis"/>
     <app:AllTrueToVisibilityConverter x:Key="AllTrue"/>
+    <app:StringToVisibilityConverter x:Key="TextToVis"/>
   </UserControl.Resources>
 
   <Grid>
@@ -144,8 +145,10 @@
           <ListBox.ItemTemplate>
             <DataTemplate>
               <StackPanel views:ViewBehaviors.RenderThumbnail="True" Width="140">
+                <!-- Высота задана заранее по пропорциям страницы: пока миниатюра
+                     рисуется, место под неё уже занято, и список не прыгает. -->
                 <Border Background="{DynamicResource PageBg}" BorderBrush="{DynamicResource PanelBorder}"
-                        BorderThickness="1">
+                        BorderThickness="1" Height="{Binding SideThumbHeight}">
                   <Image Source="{Binding ThumbImage}" Stretch="Uniform"/>
                 </Border>
                 <TextBlock Text="{Binding PageNumber}" HorizontalAlignment="Center"
@@ -164,6 +167,7 @@
                ItemContainerStyle="{StaticResource ReadingPageItem}"
                ScrollViewer.CanContentScroll="True"
                ScrollViewer.HorizontalScrollBarVisibility="Auto"
+               ScrollViewer.VerticalScrollBarVisibility="Visible"
                VirtualizingPanel.IsVirtualizing="True"
                VirtualizingPanel.VirtualizationMode="Standard"
                VirtualizingPanel.ScrollUnit="Pixel"
@@ -187,14 +191,23 @@
                PreviewKeyDown="OnPagesKeyDown">
         <ListBox.ItemTemplate>
           <DataTemplate>
-            <Border Margin="0,12" Background="{DynamicResource PageBg}"
-                    BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1"
-                    Width="{Binding WidthDiu}" Height="{Binding HeightDiu}"
-                    views:ViewBehaviors.RenderFullPage="True">
-              <Border.Effect>
-                <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.22"
-                                  Color="{DynamicResource ShadowColor}"/>
-              </Border.Effect>
+            <!-- Размер карточке задаёт сетка БЕЗ рамки. Прежний Border с рамкой
+                 в 1 px отнимал у растра по пикселю с каждой стороны: лист в
+                 1049 px рисовался в 1047 и пересчитывался фильтром — вся
+                 страница мылилась. Теперь тень и рамка — отдельные фигуры под
+                 растром и вокруг него, а он встаёт пиксель в пиксель. Тень
+                 нарисована двумя прямоугольниками вместо DropShadowEffect:
+                 эффект гнал весь лист через промежуточную текстуру и размытие
+                 на каждый кадр прокрутки — дорого на слабых машинах и само по
+                 себе источник нерезкости. Код ищет карточку как Border с
+                 DataContext страницы — поэтому слои вокруг растра не Border. -->
+            <Grid Margin="0,12" Width="{Binding WidthDiu}" Height="{Binding HeightDiu}"
+                  views:ViewBehaviors.RenderFullPage="True">
+              <Rectangle Margin="3,4,-3,-4" Fill="{DynamicResource ShadowBrush}" Opacity="0.35"
+                         RadiusX="1.5" RadiusY="1.5" IsHitTestVisible="False"/>
+              <Rectangle Margin="1,1,-1,-1" Fill="{DynamicResource ShadowBrush}" Opacity="0.5"
+                         IsHitTestVisible="False"/>
+              <Border Background="{DynamicResource PageBg}">
               <Grid>
                 <TextBlock Text="{l:Loc Rendering}" HorizontalAlignment="Center" VerticalAlignment="Center"
                            Foreground="{DynamicResource TextSecondary}"/>
@@ -204,7 +217,12 @@
                      «программа висит». Полный растр появляется поверх. -->
                 <Image Source="{Binding ThumbImage}" Stretch="Fill"
                        RenderOptions.BitmapScalingMode="LowQuality"/>
-                <Image Source="{Binding Image}" Stretch="Fill"/>
+                <!-- Фильтр выбирает модель: растр, совпавший с карточкой пиксель
+                     в пиксель, копируется без фильтра (NearestNeighbor), а
+                     устаревший после смены масштаба — растягивается Fant'ом,
+                     пока не придёт новый. -->
+                <Image Source="{Binding Image}" Stretch="Fill"
+                       RenderOptions.BitmapScalingMode="{Binding ScalingMode}"/>
                 <!-- Выделенный мышью текст -->
                 <ItemsControl ItemsSource="{Binding SelectionRects}" IsHitTestVisible="False">
                   <ItemsControl.ItemsPanel>
@@ -362,8 +380,76 @@
                             StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                             StrokeLineJoin="Round"/>
                 </Canvas>
+
+                <!-- Измерение: ведущаяся ломаная, вершины и маркер привязки.
+                     Толщина и размеры заданы в пунктах через HairlinePt/MarkerPt,
+                     поэтому на экране они постоянны при любом масштабе. -->
+                <Canvas IsHitTestVisible="False"
+                        Visibility="{Binding HasMeasurePreview, Converter={StaticResource BoolToVis}}">
+                  <Canvas.LayoutTransform>
+                    <ScaleTransform ScaleX="{Binding DisplayScale}" ScaleY="{Binding DisplayScale}"/>
+                  </Canvas.LayoutTransform>
+                  <Polyline Points="{Binding MeasureGuide}" Stroke="{Binding MeasureBrush}"
+                            StrokeThickness="{Binding HairlinePt}" StrokeLineJoin="Round"/>
+                  <Polyline Points="{Binding MeasureClosing}" Stroke="{Binding MeasureBrush}"
+                            StrokeThickness="{Binding HairlinePt}" StrokeDashArray="4 3"/>
+                  <ItemsControl ItemsSource="{Binding MeasureVertices}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemContainerStyle>
+                      <Style TargetType="ContentPresenter">
+                        <Setter Property="Canvas.Left" Value="{Binding X}"/>
+                        <Setter Property="Canvas.Top" Value="{Binding Y}"/>
+                      </Style>
+                    </ItemsControl.ItemContainerStyle>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Rectangle Width="{Binding Width}" Height="{Binding Height}"
+                                   Fill="{Binding DataContext.MeasureBrush,
+                                          RelativeSource={RelativeSource AncestorType=ItemsControl}}"/>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <!-- Маркер привязки: квадрат — конец линии, ромб — пересечение,
+                       круг — середина или точка на линии. -->
+                  <Rectangle Canvas.Left="{Binding MeasureSnapRect.X}" Canvas.Top="{Binding MeasureSnapRect.Y}"
+                             Width="{Binding MeasureSnapRect.Width}" Height="{Binding MeasureSnapRect.Height}"
+                             Stroke="{Binding MeasureBrush}" StrokeThickness="{Binding HairlinePt}"
+                             Visibility="{Binding SnapIsBox, Converter={StaticResource BoolToVis}}"/>
+                  <Rectangle Canvas.Left="{Binding MeasureSnapRect.X}" Canvas.Top="{Binding MeasureSnapRect.Y}"
+                             Width="{Binding MeasureSnapRect.Width}" Height="{Binding MeasureSnapRect.Height}"
+                             Stroke="{Binding MeasureBrush}" StrokeThickness="{Binding HairlinePt}"
+                             RenderTransformOrigin="0.5,0.5"
+                             Visibility="{Binding SnapIsDiamond, Converter={StaticResource BoolToVis}}">
+                    <Rectangle.RenderTransform>
+                      <RotateTransform Angle="45"/>
+                    </Rectangle.RenderTransform>
+                  </Rectangle>
+                  <Ellipse Canvas.Left="{Binding MeasureSnapRect.X}" Canvas.Top="{Binding MeasureSnapRect.Y}"
+                           Width="{Binding MeasureSnapRect.Width}" Height="{Binding MeasureSnapRect.Height}"
+                           Stroke="{Binding MeasureBrush}" StrokeThickness="{Binding HairlinePt}"
+                           Visibility="{Binding SnapIsRound, Converter={StaticResource BoolToVis}}"/>
+                </Canvas>
+
+                <!-- Живая величина у курсора — в экранных единицах, чтобы текст
+                     не рос вместе с масштабом страницы. -->
+                <Canvas IsHitTestVisible="False"
+                        Visibility="{Binding HasMeasurePreview, Converter={StaticResource BoolToVis}}">
+                  <Border Canvas.Left="{Binding MeasureReadoutX}" Canvas.Top="{Binding MeasureReadoutY}"
+                          Background="#F2FFFFFF" BorderBrush="{Binding MeasureBrush}" BorderThickness="1"
+                          CornerRadius="3" Padding="6,2"
+                          Visibility="{Binding MeasureReadoutText, Converter={StaticResource TextToVis}}">
+                    <TextBlock Text="{Binding MeasureReadoutText}" FontSize="12" Foreground="#111827"/>
+                  </Border>
+                </Canvas>
               </Grid>
-            </Border>
+              </Border>
+              <!-- Рамка листа — снаружи растра, чтобы не закрывать его крайний
+                   ряд пикселей и не входить в размер карточки. -->
+              <Rectangle Margin="-1" Stroke="{DynamicResource PanelBorder}" StrokeThickness="1"
+                         IsHitTestVisible="False"/>
+            </Grid>
           </DataTemplate>
         </ListBox.ItemTemplate>
       </ListBox>
@@ -455,7 +541,7 @@
           <Thumb Panel.ZIndex="10" Style="{StaticResource PanelResizer}"
                  Tag="Properties" HorizontalAlignment="Left"
                  DragStarted="OnPanelResizeStart" DragDelta="OnPanelResize" DragCompleted="OnPanelResizeDone"/>
-        <StackPanel Margin="12,10"
+        <StackPanel x:Name="ObjectProperties" Margin="12,10"
                     Visibility="{Binding HasObjectSelection, Converter={StaticResource BoolToVis}}">
           <Grid>
             <TextBlock Text="{Binding SelectedObjectTitle}" FontWeight="SemiBold" FontSize="13"
@@ -542,7 +628,7 @@
         </StackPanel>
 
         <!-- Что взято мышью: сколько текста и что с ним можно сделать. -->
-        <StackPanel Margin="12,10"
+        <StackPanel x:Name="TextProperties" Margin="12,10"
                     Visibility="{Binding ShowsTextProperties, Converter={StaticResource BoolToVis}}">
           <Grid>
             <TextBlock Text="{l:Loc PropTextTitle}" FontWeight="SemiBold" FontSize="13"
@@ -584,7 +670,7 @@
 
         <!-- Ничего не выбрано — панель рассказывает про текущую страницу,
              вместо того чтобы стоять пустой. -->
-        <StackPanel Margin="12,10"
+        <StackPanel x:Name="PageProperties" Margin="12,10"
                     Visibility="{Binding ShowsPageProperties, Converter={StaticResource BoolToVis}}">
           <Grid>
             <TextBlock Text="{Binding PageOfText}" FontWeight="SemiBold" FontSize="13"
@@ -829,35 +915,38 @@
 
       <Border Grid.Row="0" Background="{DynamicResource PanelBg}"
               BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,0,1">
+        <!-- Кнопки не забирают фокус клавиатуры: после поворота Delete,
+             стрелки и Ctrl+A должны продолжать работать в списке страниц. -->
         <StackPanel Orientation="Horizontal" Margin="8,4">
-          <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc RotateLeft}"
-                  Command="{Binding RotateSelectedLeftCommand}"
-                  CommandParameter="{Binding SelectedItems, ElementName=OrganizeList}">
+          <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc OrganizeRotateLeftTip}" Focusable="False"
+                  AutomationProperties.Name="{l:Loc RotateLeft}"
+                  Command="{Binding RotateSelectedLeftCommand}">
             <TextBlock Text="⟲" FontSize="16"/>
           </Button>
-          <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc RotateRight}"
-                  Command="{Binding RotateSelectedCommand}"
-                  CommandParameter="{Binding SelectedItems, ElementName=OrganizeList}">
+          <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc OrganizeRotateRightTip}" Focusable="False"
+                  AutomationProperties.Name="{l:Loc RotateRight}"
+                  Command="{Binding RotateSelectedCommand}">
             <TextBlock Text="⟳" FontSize="16"/>
           </Button>
-          <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc Rotate180}"
-                  Command="{Binding RotateSelected180Command}"
-                  CommandParameter="{Binding SelectedItems, ElementName=OrganizeList}">
+          <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc Rotate180}" Focusable="False"
+                  AutomationProperties.Name="{l:Loc Rotate180}"
+                  Command="{Binding RotateSelected180Command}">
             <TextBlock Text="180°" FontSize="12"/>
           </Button>
           <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
-          <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc DuplicatePages}"
-                  Command="{Binding DuplicateSelectedCommand}"
-                  CommandParameter="{Binding SelectedItems, ElementName=OrganizeList}">
+          <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc OrganizeDuplicateTip}" Focusable="False"
+                  AutomationProperties.Name="{l:Loc DuplicatePages}"
+                  Command="{Binding DuplicateSelectedCommand}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8C8;"/>
           </Button>
-          <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc DeletePages}"
-                  Command="{Binding DeleteSelectedCommand}"
-                  CommandParameter="{Binding SelectedItems, ElementName=OrganizeList}">
+          <Button Style="{StaticResource ToolButton}" ToolTip="{l:Loc OrganizeDeleteTip}" Focusable="False"
+                  AutomationProperties.Name="{l:Loc DeletePages}"
+                  Command="{Binding DeleteSelectedCommand}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE74D;"/>
           </Button>
           <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="6,4"/>
-          <Button Style="{StaticResource ToolButton}"
+          <Button Style="{StaticResource ToolButton}" Focusable="False"
+                  IsEnabled="{Binding HasOrganizeSelection}"
                   Command="{Binding DataContext.ExtractSelectedCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                   CommandParameter="{Binding SelectedItems, ElementName=OrganizeList}">
             <StackPanel Orientation="Horizontal">
@@ -865,8 +954,9 @@
               <TextBlock Text="{l:Loc ExtractPages}" Margin="6,0,0,0"/>
             </StackPanel>
           </Button>
-          <!-- Подсказка живёт в контекстной полосе группы «Страницы»;
-               здесь она была вторым экземпляром той же фразы на экране. -->
+          <!-- Сколько выбрано: команды выше применяются именно к этим страницам. -->
+          <TextBlock Text="{Binding OrganizeSelectionText}" VerticalAlignment="Center" Margin="14,0,0,0"
+                     FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
         </StackPanel>
       </Border>
 
@@ -878,10 +968,8 @@
                dd:DragDrop.IsDragSource="True"
                dd:DragDrop.IsDropTarget="True"
                dd:DragDrop.DropHandler="{Binding}"
-               AllowDrop="True"
-               DragOver="OnOrganizeFileDragOver"
-               DragLeave="OnOrganizeFileDragLeave"
-               Drop="OnOrganizeFileDrop"
+               dd:DragDrop.DragHandler="{Binding DragHandler}"
+               PreviewMouseWheel="OnOrganizeMouseWheel"
                PreviewMouseRightButtonDown="OnOrganizeRightClick"
                PreviewMouseLeftButtonDown="OnOrganizeMouseDown"
                MouseMove="OnOrganizeMouseMove"
@@ -894,19 +982,25 @@
         </ListBox.ItemsPanel>
         <ListBox.ItemTemplate>
           <DataTemplate>
-            <StackPanel views:ViewBehaviors.RenderThumbnail="True" Width="150">
-              <Border Background="{DynamicResource PageBg}" BorderBrush="{DynamicResource PanelBorder}"
-                      BorderThickness="1" Height="190">
-                <Grid>
-                  <Image Source="{Binding ThumbImage}" Stretch="Uniform"/>
-                  <Border Background="{DynamicResource Accent}" CornerRadius="3" Padding="4,1"
-                          HorizontalAlignment="Right" VerticalAlignment="Top" Margin="4"
-                          Visibility="{Binding PageRef.RotationOffset, Converter={StaticResource RotBadgeVis}}">
-                    <TextBlock Text="{Binding RotationDegrees, StringFormat={}{0}°}"
-                               Foreground="{DynamicResource AccentText}" FontSize="10"/>
-                  </Border>
-                </Grid>
-              </Border>
+            <!-- Размер карточки задаёт документ (ползунок на панели, Ctrl+колесо). -->
+            <StackPanel views:ViewBehaviors.RenderThumbnail="True" Width="{Binding Owner.OrganizeThumbWidth}">
+              <!-- Лист той же формы, что страница (альбомный — альбомный),
+                   по центру ячейки постоянной высоты: ряды не скачут. -->
+              <Grid Height="{Binding Owner.OrganizeThumbHeight}">
+                <Border Background="{DynamicResource PageBg}" BorderBrush="{DynamicResource PanelBorder}"
+                        BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Width="{Binding OrganizeCardWidth}" Height="{Binding OrganizeCardHeight}">
+                  <Grid>
+                    <Image Source="{Binding ThumbImage}" Stretch="Uniform"/>
+                    <Border Background="{DynamicResource Accent}" CornerRadius="3" Padding="4,1"
+                            HorizontalAlignment="Right" VerticalAlignment="Top" Margin="4"
+                            Visibility="{Binding PageRef.RotationOffset, Converter={StaticResource RotBadgeVis}}">
+                      <TextBlock Text="{Binding RotationDegrees, StringFormat={}{0}°}"
+                                 Foreground="{DynamicResource AccentText}" FontSize="10"/>
+                    </Border>
+                  </Grid>
+                </Border>
+              </Grid>
               <TextBlock Text="{Binding PageNumber}" HorizontalAlignment="Center"
                          Foreground="{DynamicResource TextBrush}" FontSize="12" Margin="0,4,0,0"/>
             </StackPanel>

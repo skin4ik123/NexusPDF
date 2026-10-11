@@ -1,4 +1,4 @@
-﻿using NexusPdf.Application;
+using NexusPdf.Application;
 using NexusPdf.Pdf.Pdfium;
 using NexusPdf.Pdf.Qpdf;
 using NexusPdf.Printing;
@@ -108,10 +108,11 @@ public sealed class PrintPermissionTests : IAsyncLifetime
 
         // И экспорт раскладки в файл тоже: это тот же вывод содержимого.
         var target = Path.Combine(_dir, "layout.pdf");
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var error = await Assert.ThrowsAsync<PrintToFileException>(() =>
             new PrintToFileService(_pdfium).SaveAsync(
                 document, plan with { Issues = issues }, target, 300, null, CancellationToken.None));
-        _output.WriteLine("экспорт отклонён: " + error.Message);
+        Assert.Equal("PrintToFileForbidden", error.Code);
+        _output.WriteLine("экспорт отклонён: " + error.Code);
         Assert.False(File.Exists(target), "файл раскладки не должен создаваться");
     }
 

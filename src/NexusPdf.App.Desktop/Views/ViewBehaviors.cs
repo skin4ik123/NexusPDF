@@ -21,19 +21,55 @@ public static class ViewBehaviors
     public static bool GetRenderFullPage(DependencyObject element) =>
         (bool)element.GetValue(RenderFullPageProperty);
 
+    private static readonly DependencyProperty AttachedPageProperty =
+        DependencyProperty.RegisterAttached("AttachedPage", typeof(PageViewModel), typeof(ViewBehaviors));
+
     private static void OnRenderFullPageChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        if (d is not FrameworkElement element || e.NewValue is not true) return;
-        element.Loaded += (_, _) =>
+        if (d is not FrameworkElement element) return;
+        if (e.NewValue is true)
         {
-            if (element.DataContext is PageViewModel page)
-                page.EnsureImage(VisualTreeHelper.GetDpi(element).DpiScaleX);
-        };
-        element.Unloaded += (_, _) =>
+            element.Loaded += OnPageLoaded;
+            element.Unloaded += OnPageUnloaded;
+            element.DataContextChanged += OnPageContextChanged;
+            UpdateAttachedPage(element);
+        }
+        else
         {
-            if (element.DataContext is PageViewModel page)
-                page.ReleaseImage();
-        };
+            element.Loaded -= OnPageLoaded;
+            element.Unloaded -= OnPageUnloaded;
+            element.DataContextChanged -= OnPageContextChanged;
+            DetachPage(element);
+        }
+    }
+
+    private static void OnPageLoaded(object sender, RoutedEventArgs e) => UpdateAttachedPage((FrameworkElement)sender);
+
+    private static void OnPageUnloaded(object sender, RoutedEventArgs e) => DetachPage((FrameworkElement)sender);
+
+    private static void OnPageContextChanged(object sender, DependencyPropertyChangedEventArgs e) =>
+        UpdateAttachedPage((FrameworkElement)sender);
+
+    private static void UpdateAttachedPage(FrameworkElement element)
+    {
+        // Replace/Move and virtualized scrolling can recycle a loaded template
+        // without another Loaded event. Attach the new model immediately and
+        // detach the model we actually attached, rather than the new context.
+        var page = element.IsLoaded ? element.DataContext as PageViewModel : null;
+        if (ReferenceEquals(element.GetValue(AttachedPageProperty), page)) return;
+        DetachPage(element);
+        if (page == null) return;
+        element.SetValue(AttachedPageProperty, page);
+        var dpi = VisualTreeHelper.GetDpi(element).DpiScaleX;
+        page.Owner.SetDpiScale(dpi);
+        page.Attach(dpi);
+    }
+
+    private static void DetachPage(FrameworkElement element)
+    {
+        var page = element.GetValue(AttachedPageProperty) as PageViewModel;
+        element.ClearValue(AttachedPageProperty);
+        page?.Detach();
     }
 
     public static readonly DependencyProperty RenderThumbnailProperty =
@@ -61,10 +97,32 @@ public static class ViewBehaviors
     /// </summary>
     private static void OnRenderThumbnailChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        if (d is not FrameworkElement element || e.NewValue is not true) return;
+        if (d is not FrameworkElement element) return;
+        if (e.NewValue is true)
+        {
+            element.Loaded += OnThumbnailLoaded;
+            element.Unloaded += OnThumbnailUnloaded;
+            element.DataContextChanged += OnThumbnailContextChanged;
+            if (element.IsLoaded) Watch(element);
+        }
+        else
+        {
+            element.Loaded -= OnThumbnailLoaded;
+            element.Unloaded -= OnThumbnailUnloaded;
+            element.DataContextChanged -= OnThumbnailContextChanged;
+            Forget(element);
+        }
+    }
 
-        element.Loaded += (_, _) => Watch(element);
-        element.Unloaded += (_, _) => Forget(element);
+    private static void OnThumbnailLoaded(object sender, RoutedEventArgs e) => Watch((FrameworkElement)sender);
+
+    private static void OnThumbnailUnloaded(object sender, RoutedEventArgs e) => Forget((FrameworkElement)sender);
+
+    private static void OnThumbnailContextChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        var element = (FrameworkElement)sender;
+        Forget(element);
+        if (element.IsLoaded) Watch(element);
     }
 
     /// <summary>Карточки, ждущие показа, по своему прокручиваемому списку.</summary>
@@ -72,6 +130,7 @@ public static class ViewBehaviors
 
     private static void Watch(FrameworkElement element)
     {
+        Forget(element);
         var scroller = FindScroller(element);
         if (scroller == null)
         {
@@ -83,7 +142,7 @@ public static class ViewBehaviors
         if (!Pending.TryGetValue(scroller, out var set))
         {
             Pending[scroller] = set = new HashSet<FrameworkElement>();
-            scroller.ScrollChanged += (_, _) => RequestVisible(scroller);
+            scroller.ScrollChanged += OnThumbnailScrollChanged;
         }
         set.Add(element);
         // Первый показ: список уже прокручен туда, где стоял.
@@ -94,7 +153,21 @@ public static class ViewBehaviors
 
     private static void Forget(FrameworkElement element)
     {
-        foreach (var set in Pending.Values) set.Remove(element);
+        foreach (var (scroller, set) in Pending.ToArray())
+        {
+            set.Remove(element);
+            StopWatchingIfEmpty(scroller, set);
+        }
+    }
+
+    private static void OnThumbnailScrollChanged(object sender, ScrollChangedEventArgs e) =>
+        RequestVisible((ScrollViewer)sender);
+
+    private static void StopWatchingIfEmpty(ScrollViewer scroller, HashSet<FrameworkElement> set)
+    {
+        if (set.Count != 0) return;
+        scroller.ScrollChanged -= OnThumbnailScrollChanged;
+        Pending.Remove(scroller);
     }
 
     private static void RequestVisible(ScrollViewer scroller)
@@ -123,6 +196,7 @@ public static class ViewBehaviors
             Request(element);
             set.Remove(element);
         }
+        StopWatchingIfEmpty(scroller, set);
     }
 
     private static void Request(FrameworkElement element)

@@ -80,8 +80,8 @@ public partial class ExportDocumentDialog : Window
         if (string.IsNullOrWhiteSpace(RangeBox.Text))
         {
             _range = null;
-            RangeHint.Text = Loc.F("ExportRangeHint", _pageCount);
-            ExportButton.IsEnabled = true;
+            RangeHint.Text = ScopeRange.IsChecked == true ? Loc.Get("ExportRangeEmpty") : Loc.F("ExportRangeHint", _pageCount);
+            ExportButton.IsEnabled = ScopeRange.IsChecked != true;
             return;
         }
 
@@ -97,6 +97,17 @@ public partial class ExportDocumentDialog : Window
         _range = parsed.Indices;
         RangeHint.Text = Loc.F("ExportRangeChosen", parsed.Indices.Count, parsed.Normalized);
         ExportButton.IsEnabled = true;
+    }
+
+    private void OnScopeChanged(object sender, RoutedEventArgs e)
+    {
+        if (RangeBox == null || RangeHint == null || ExportButton == null) return;
+        OnRangeChanged(sender, null!);
+        if (ScopeRange.IsChecked == true && string.IsNullOrWhiteSpace(RangeBox.Text))
+        {
+            ExportButton.IsEnabled = false;
+            RangeHint.Text = Loc.Get("ExportRangeEmpty");
+        }
     }
 
     private void OnExport(object sender, RoutedEventArgs e)

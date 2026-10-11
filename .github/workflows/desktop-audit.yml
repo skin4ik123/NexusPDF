@@ -1,0 +1,58 @@
+name: NexusPDF functional and visual audit
+on:
+  push:
+    branches: [codex/nexuspdf-full-audit]
+    paths-ignore: [docs/**, README.md, CHANGELOG.md]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: nexuspdf-audit-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Fetch pinned native tools and Cyrillic OCR
+        shell: pwsh
+        run: |
+          $lock = Get-Content tools/qpdf.lock.json | ConvertFrom-Json
+          ./tools/fetch-qpdf.ps1 -Version $lock.version -ExpectedSha256 $lock.sha256
+          ./tools/fetch-tessdata.ps1
+          ./tools/fetch-ocrmodels.ps1
+      - name: Build desktop audit probe
+        run: dotnet build tests/NexusPdf.DesktopAuditProbe -c Release
+      - name: Inspect actual WPF windows and bindings
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts/ui-audit | Out-Null
+          $probe = Start-Process tests/NexusPdf.DesktopAuditProbe/bin/Release/net10.0-windows/win-x64/NexusPdf.DesktopAuditProbe.exe -ArgumentList 'artifacts/ui-audit --verify' -PassThru -RedirectStandardOutput artifacts/ui-audit/console.log -RedirectStandardError artifacts/ui-audit/errors.log
+          if (-not $probe.WaitForExit(180000)) {
+            Stop-Process -Id $probe.Id -Force
+            throw 'Desktop audit timed out; partial screenshots and logs are retained.'
+          }
+          Get-Content artifacts/ui-audit/console.log
+          if ($probe.ExitCode -ne 0) { throw "Desktop audit failed: $($probe.ExitCode)" }
+      - name: Verify page changes in the ordinary production application
+        shell: pwsh
+        run: |
+          $profileRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'NexusPDF'
+          New-Item -ItemType Directory -Force $profileRoot | Out-Null
+          @{ Language = 'ru'; Theme = 'light'; SingleInstance = $true; UiDensity = 'compact' } | ConvertTo-Json | Set-Content (Join-Path $profileRoot 'settings.json')
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/verify-installed-ui.ps1 -Exe src/NexusPdf.App.Desktop/bin/Release/net10.0-windows/win-x64/NexusPdf.exe -Output artifacts/ui-audit/production-ui -Document artifacts/ui-audit/fixture.pdf
+          if ($LASTEXITCODE -ne 0) { throw 'The production application failed its actual screen/render checks.' }
+      - name: Upload visual audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexuspdf-desktop-audit
+          path: artifacts/ui-audit
+          if-no-files-found: warn
+          retention-days: 14

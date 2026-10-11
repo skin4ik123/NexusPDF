@@ -45,7 +45,15 @@ public sealed class RenderCache
         if (available <= 0) return LegacyDefaultMegabytes;
 
         var eighth = available / 8 / (1024 * 1024);
-        return (int)Math.Clamp(eighth, 384, 1536);
+
+        // На машине с 2–4 ГБ памяти прежний минимум в 384 МБ сам становился
+        // причиной подкачки: кэш ради скорости выталкивал в своп всё
+        // остальное. Там восьмая часть берётся как есть, лишь бы не меньше
+        // пары полноэкранных страниц.
+        if (eighth < 384)
+            return (int)Math.Max(160, eighth);
+
+        return (int)Math.Min(eighth, 1536);
     }
 
     public void SetBudget(int megabytes)

@@ -167,7 +167,7 @@ internal static class PdfiumImageRecompressor
 
         if (HasUnsupportedFilter(obj))
             return null;
-        if (HasTransparency(doc, page, obj))
+        if (PdfiumImageEncoding.HasTransparency(doc, page, obj))
             return null; // JPEG не несёт альфы, /SMask при замене теряется
 
         // Масштаб по осям раздельный, без апскейла: анизотропное размещение
@@ -193,44 +193,6 @@ internal static class PdfiumImageRecompressor
             return null;
         return new Placement(
             pageIndex, objectIndex, width, height, targetWidth, targetHeight, dataKey, originalBytes);
-    }
-
-    /// <summary>Прозрачность по альфе ОТРЕНДЕРЕННОГО битмапа: /SMask вкомпонована именно в него.</summary>
-    private static bool HasTransparency(FpdfDocumentT doc, FpdfPageT page, FpdfPageobjectT obj)
-    {
-        var rendered = fpdf_edit.FPDFImageObjGetRenderedBitmap(doc, page, obj);
-        if (rendered == null || rendered.__Instance == IntPtr.Zero)
-            return true; // не смогли проверить — не рискуем
-        try
-        {
-            var format = fpdfview.FPDFBitmapGetFormat(rendered);
-            if (format != 4)
-                return false; // без альфа-канала прозрачности нет
-            var width = fpdfview.FPDFBitmapGetWidth(rendered);
-            var height = fpdfview.FPDFBitmapGetHeight(rendered);
-            var stride = fpdfview.FPDFBitmapGetStride(rendered);
-            var buffer = fpdfview.FPDFBitmapGetBuffer(rendered);
-            if (buffer == IntPtr.Zero)
-                return true;
-            unsafe
-            {
-                var src = (byte*)buffer;
-                for (var y = 0; y < height; y++)
-                {
-                    var row = src + (long)y * stride;
-                    for (var x = 0; x < width; x++)
-                    {
-                        if (row[x * 4 + 3] != 0xFF)
-                            return true;
-                    }
-                }
-            }
-            return false;
-        }
-        finally
-        {
-            fpdfview.FPDFBitmapDestroy(rendered);
-        }
     }
 
     /// <summary>
@@ -555,25 +517,6 @@ internal static class PdfiumImageRecompressor
         }
     }
 
-    private static unsafe bool ReplaceWithJpeg(FpdfPageT page, FpdfPageobjectT obj, byte[] jpeg)
-    {
-        int GetBlock(IntPtr _, ulong position, byte* pBuf, ulong size)
-        {
-            if (position + size > (ulong)jpeg.Length || size > int.MaxValue)
-                return 0;
-            Marshal.Copy(jpeg, (int)position, (IntPtr)pBuf, (int)size);
-            return 1;
-        }
-
-        var getBlock = new PDFiumCore.Delegates.Func_int___IntPtr_ulong_bytePtr_ulong(GetBlock);
-        var access = new FPDF_FILEACCESS
-        {
-            MFileLen = (uint)jpeg.Length,
-            MGetBlock = getBlock,
-            MParam = IntPtr.Zero,
-        };
-        var ok = fpdf_edit.FPDFImageObjLoadJpegFileInline(page, 1, obj, access) != 0;
-        GC.KeepAlive(getBlock);
-        return ok;
-    }
+    private static bool ReplaceWithJpeg(FpdfPageT page, FpdfPageobjectT obj, byte[] jpeg) =>
+        PdfiumImageEncoding.LoadJpeg(page, obj, jpeg);
 }

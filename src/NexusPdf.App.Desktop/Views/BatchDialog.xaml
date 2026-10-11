@@ -76,13 +76,13 @@
                  VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}" FontSize="12"
                  Margin="0,0,10,6" Visibility="Collapsed"/>
       <PasswordBox Grid.Row="1" Grid.Column="1" x:Name="PasswordBox" AutomationProperties.Name="{l:Loc BatchPassword}" Margin="0,0,0,6"
-                   Visibility="Collapsed"/>
+                   Visibility="Collapsed" PasswordChanged="OnInputsChanged"/>
 
       <TextBlock Grid.Row="2" Grid.Column="0" Text="{l:Loc BatchOutput}" VerticalAlignment="Center"
                  Foreground="{DynamicResource TextSecondary}" FontSize="12" Margin="0,0,10,0"/>
       <TextBox Grid.Row="2" Grid.Column="1" x:Name="OutputBox" AutomationProperties.Name="{l:Loc BatchOutput}" Style="{StaticResource ThemedTextBox}"
-               IsReadOnly="True"/>
-      <Button Grid.Row="2" Grid.Column="2" Content="{l:Loc BatchBrowse}" Style="{StaticResource LinkButton}"
+               IsReadOnly="True" TextChanged="OnInputsChanged"/>
+      <Button Grid.Row="2" Grid.Column="2" x:Name="BrowseButton" Content="{l:Loc BatchBrowse}" Style="{StaticResource LinkButton}"
               Margin="8,0,0,0" Click="OnBrowse"/>
     </Grid>
 

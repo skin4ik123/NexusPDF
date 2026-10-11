@@ -24,12 +24,21 @@ public sealed class DocumentSession
 
     public bool IsDirty => _version != _savedVersion;
 
+    /// <summary>
+    /// Растёт при КАЖДОЙ правке, отмене и повторе (в отличие от версии,
+    /// которую «Отменить» уменьшает). По нему сохранение узнаёт, менялся ли
+    /// документ, пока файл записывался: тогда документ не переоткрывается из
+    /// записанного файла, и поздние правки не пропадают.
+    /// </summary>
+    public long ChangeStamp { get; private set; }
+
     public event EventHandler? Changed;
 
     public void Apply(IDocumentOperation operation)
     {
         History.Do(operation, Model);
         _version++;
+        ChangeStamp++;
         // После расхождения ветки Redo вернуться в сохранённое состояние по счётчику нельзя.
         if (_savedVersion > _version - 1)
             _savedVersion = -1;
@@ -41,6 +50,7 @@ public sealed class DocumentSession
         if (!History.CanUndo) return;
         History.Undo(Model);
         _version--;
+        ChangeStamp++;
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -49,6 +59,7 @@ public sealed class DocumentSession
         if (!History.CanRedo) return;
         History.Redo(Model);
         _version++;
+        ChangeStamp++;
         Changed?.Invoke(this, EventArgs.Empty);
     }
 

@@ -49,14 +49,14 @@ public static class PageRangeParser
     public static PageRangeResult Parse(string? text, int pageCount, IReadOnlyList<string>? labels = null)
     {
         if (pageCount <= 0)
-            return PageRangeResult.Failure("В документе нет страниц.");
+            return PageRangeResult.Failure(PrintText.Get("PrRangeNoPages"));
         if (string.IsNullOrWhiteSpace(text))
-            return PageRangeResult.Failure("Укажите диапазон, например 1-5 или 1,3,7.");
+            return PageRangeResult.Failure(PrintText.Get("PrRangeHint"));
 
         var result = new List<int>();
         var parts = text.Split(',', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 0)
-            return PageRangeResult.Failure("Укажите диапазон, например 1-5 или 1,3,7.");
+            return PageRangeResult.Failure(PrintText.Get("PrRangeHint"));
 
         foreach (var rawPart in parts)
         {
@@ -69,7 +69,7 @@ public static class PageRangeParser
             {
                 var single = ResolveOne(part, pageCount, labels);
                 if (single == null)
-                    return PageRangeResult.Failure($"Не удалось понять «{part}».");
+                    return PageRangeResult.Failure(PrintText.Get("PrRangeBadPart", part));
                 result.Add(single.Value);
                 continue;
             }
@@ -79,13 +79,13 @@ public static class PageRangeParser
 
             int from, to;
             if (leftText.Length == 0 && rightText.Length == 0)
-                return PageRangeResult.Failure($"Не удалось понять «{part}».");
+                return PageRangeResult.Failure(PrintText.Get("PrRangeBadPart", part));
 
             if (leftText.Length == 0)
             {
                 // «-10»: с первой страницы по десятую.
                 var right = ResolveOne(rightText, pageCount, labels);
-                if (right == null) return PageRangeResult.Failure($"Не удалось понять «{part}».");
+                if (right == null) return PageRangeResult.Failure(PrintText.Get("PrRangeBadPart", part));
                 from = 0;
                 to = right.Value;
             }
@@ -93,7 +93,7 @@ public static class PageRangeParser
             {
                 // «10-»: с десятой до конца.
                 var left = ResolveOne(leftText, pageCount, labels);
-                if (left == null) return PageRangeResult.Failure($"Не удалось понять «{part}».");
+                if (left == null) return PageRangeResult.Failure(PrintText.Get("PrRangeBadPart", part));
                 from = left.Value;
                 to = pageCount - 1;
             }
@@ -102,7 +102,7 @@ public static class PageRangeParser
                 var left = ResolveOne(leftText, pageCount, labels);
                 var right = ResolveOne(rightText, pageCount, labels);
                 if (left == null || right == null)
-                    return PageRangeResult.Failure($"Не удалось понять «{part}».");
+                    return PageRangeResult.Failure(PrintText.Get("PrRangeBadPart", part));
                 from = left.Value;
                 to = right.Value;
             }
@@ -116,7 +116,7 @@ public static class PageRangeParser
         }
 
         if (result.Count == 0)
-            return PageRangeResult.Failure("Под указанный диапазон не попала ни одна страница.");
+            return PageRangeResult.Failure(PrintText.Get("PrRangeEmpty"));
 
         return new PageRangeResult(result, null, Normalize(result));
     }
@@ -230,14 +230,14 @@ public sealed record PageSelection
 
             case PageScope.CurrentPage:
                 if (CurrentPageIndex < 0 || CurrentPageIndex >= pageCount)
-                    return PageRangeResult.Failure("Текущая страница вне документа.");
+                    return PageRangeResult.Failure(PrintText.Get("PrRangeCurrentOutside"));
                 indices = new[] { CurrentPageIndex };
                 break;
 
             case PageScope.Selected:
                 indices = ExplicitIndices.Where(i => i >= 0 && i < pageCount).ToList();
                 if (indices.Count == 0)
-                    return PageRangeResult.Failure("Не выбрано ни одной страницы.");
+                    return PageRangeResult.Failure(PrintText.Get("PrRangeNoneSelected"));
                 break;
 
             default:
@@ -256,7 +256,7 @@ public sealed record PageSelection
         };
 
         if (filtered.Count == 0)
-            return PageRangeResult.Failure("Под выбранный фильтр не попала ни одна страница.");
+            return PageRangeResult.Failure(PrintText.Get("PrRangeFilterEmpty"));
 
         var repeat = Math.Max(1, RepeatEachPage);
         if (repeat > 1)

@@ -45,10 +45,20 @@ public partial class BatchPrintDialog : Window
         ProfileBox.ItemsSource = new PrintProfileStore().LoadAll();
         ProfileBox.SelectedIndex = 0;
 
-        var printers = _printers.Discover();
+        // Только имена, мгновенно: возможности выбранного принтера дочитываются
+        // при старте печати. Полный опрос в конструкторе держал окно закрытым.
+        var printers = _printers.DiscoverNames()
+            .Select(WindowsPrinterService.Skeleton)
+            .ToList();
         PrinterBox.ItemsSource = printers;
-        PrinterBox.SelectedItem = printers.FirstOrDefault(p => p.IsDefault) ?? printers.FirstOrDefault();
+        // Как в центре печати: тот принтер, на котором печатали в прошлый раз.
+        PrinterBox.SelectedItem =
+            printers.FirstOrDefault(p => string.Equals(p.PrinterName, services.Settings.LastPrinterName,
+                StringComparison.OrdinalIgnoreCase))
+            ?? printers.FirstOrDefault(p => p.IsDefault) ?? printers.FirstOrDefault();
 
+        ProfileBox.SelectionChanged += (_, _) => UpdateRunAvailability();
+        PrinterBox.SelectionChanged += (_, _) => UpdateRunAvailability();
         UpdateStatus();
     }
 
@@ -94,26 +104,65 @@ public partial class BatchPrintDialog : Window
         if (ProfileBox.SelectedItem is not PrintProfile profile) return;
         if (PrinterBox.SelectedItem is not PrinterCapabilities printer) return;
 
-        var paper = printer.PaperSizes.FirstOrDefault(p => p.Name == "A4")
-                    ?? printer.PaperSizes.FirstOrDefault();
-        if (paper == null)
-        {
-            ErrorDialog.Show(this, Loc.Get("BpTitle"), Loc.Get("BpNoPaper"), "");
-            return;
-        }
-
+        // Lock the entire operation before probing a driver. A second click
+        // during that await used to submit the same batch twice.
         _running = true;
         _cts = new CancellationTokenSource();
         StartButton.IsEnabled = false;
+        AddButton.IsEnabled = RemoveButton.IsEnabled = false;
+        ProfileBox.IsEnabled = PrinterBox.IsEnabled = false;
         StopButton.Visibility = Visibility.Visible;
         Bar.Visibility = Visibility.Visible;
         Bar.Maximum = _files.Count;
         Bar.Value = 0;
 
-        foreach (var row in _files) row.Status = Loc.Get("BpWaiting");
-
         try
         {
+            if (printer.PaperSizes.Count == 0)
+            {
+                // Возможности ещё не читались: дочитать перед стартом, не блокируя окно.
+                StatusText.Text = Loc.Get("PrinterProbing");
+                var fresh = await _printers.ReadAsync(
+                    printer.PrinterName, WindowsPrinterService.DefaultTimeout, _cts.Token);
+                _cts.Token.ThrowIfCancellationRequested();
+                StatusText.Text = "";
+                if (fresh == null)
+                {
+                    ErrorDialog.Show(this, Loc.Get("BpTitle"), Loc.Get("PrinterNotResponding"), "");
+                    return;
+                }
+                printer = fresh;
+            }
+
+            var paper = ChoosePaper(profile, printer);
+            if (paper == null)
+            {
+                ErrorDialog.Show(this, Loc.Get("BpTitle"), Loc.Get("BpNoPaper"), "");
+                return;
+            }
+
+            // Непечатаемые поля выбранной бумаги. Без них «уменьшать крупные»
+            // считал печатаемым весь лист, и пакет обрезал края страниц, хотя
+            // тот же профиль из центра печати печатал их целиком.
+            if (!printer.HardMarginsByPaper.ContainsKey(paper.Name))
+            {
+                var margins = await _printers.ReadHardMarginsAsync(
+                    printer.PrinterName, paper, WindowsPrinterService.DefaultTimeout, _cts.Token);
+                _cts.Token.ThrowIfCancellationRequested();
+                if (margins != null)
+                {
+                    printer = printer with
+                    {
+                        HardMarginsByPaper = new Dictionary<string, MarginsPt>(printer.HardMarginsByPaper)
+                        {
+                            [paper.Name] = margins.Value,
+                        },
+                    };
+                }
+            }
+
+            foreach (var row in _files) row.Status = Loc.Get("BpWaiting");
+
             var items = _files.Select(f => new BatchPrintItem(f.Path)).ToList();
             var progress = new Progress<BatchPrintProgress>(p =>
             {
@@ -149,15 +198,39 @@ public partial class BatchPrintDialog : Window
         catch (Exception ex)
         {
             Serilog.Log.Error(ex, "Ошибка пакетной печати");
-            ErrorDialog.Show(this, Loc.Get("ErrorTitle"), Loc.Get("PrintFailed"), ex.ToString());
+            ErrorDialog.Show(this, Loc.Get("ErrorTitle"),
+                Loc.F("PrintFailedReason", ViewModels.PrintCenterViewModel.DescribeSubmitFailure(ex)), ex.ToString());
         }
         finally
         {
             _running = false;
-            StartButton.IsEnabled = true;
+            _cts.Dispose();
+            _cts = null;
+            AddButton.IsEnabled = RemoveButton.IsEnabled = true;
+            ProfileBox.IsEnabled = PrinterBox.IsEnabled = true;
+            UpdateRunAvailability();
             StopButton.Visibility = Visibility.Collapsed;
             Bar.Visibility = Visibility.Collapsed;
         }
+    }
+
+    /// <summary>
+    /// Бумага пакета: та, что указана в профиле; иначе — бумага принтера по
+    /// умолчанию; иначе A4 или Letter по размеру (имена у драйверов разные).
+    /// </summary>
+    private static PaperSizeOption? ChoosePaper(PrintProfile profile, PrinterCapabilities printer)
+    {
+        var papers = printer.PaperSizes;
+        if (profile.PaperName.Length > 0 &&
+            papers.FirstOrDefault(p => string.Equals(p.Name, profile.PaperName, StringComparison.OrdinalIgnoreCase))
+                is { } named)
+            return named;
+        if (printer.DefaultPaperDriverValue is { } code &&
+            papers.FirstOrDefault(p => p.DriverValue == code) is { } preferred)
+            return preferred;
+        return papers.FirstOrDefault(p => JobSplitter.SamePaper(p.SizePt, new SizePt(595.28, 841.89)))
+               ?? papers.FirstOrDefault(p => JobSplitter.SamePaper(p.SizePt, new SizePt(612, 792)))
+               ?? papers.FirstOrDefault();
     }
 
     private void OnStop(object sender, RoutedEventArgs e)
@@ -166,15 +239,21 @@ public partial class BatchPrintDialog : Window
         StatusText.Text = Loc.Get("PrintCancelling");
     }
 
-    private void UpdateStatus() =>
+    private void UpdateRunAvailability() =>
+        StartButton.IsEnabled = !_running && _files.Count > 0
+            && ProfileBox.SelectedItem is PrintProfile && PrinterBox.SelectedItem is PrinterCapabilities;
+
+    private void UpdateStatus()
+    {
         StatusText.Text = _files.Count == 0
             ? Loc.Get("BpEmpty")
             : Loc.F("BpCount", _files.Count);
+        UpdateRunAvailability();
+    }
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         // Пакет в работе — окно не бросаем: половина файлов уже могла уйти.
         if (_running) { e.Cancel = true; return; }
-        _printers.Dispose();
     }
 }

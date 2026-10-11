@@ -255,6 +255,12 @@ public sealed record PrintJobPlan
     public DuplexMode Duplex { get; init; } = DuplexMode.Simplex;
     public bool ReverseOrder { get; init; }
 
+    /// <summary>
+    /// Разрешение растра листов на бумаге и в файле: 300 — обычная печать,
+    /// 600 — высокое качество. Предпросмотр рисуется со своим, меньшим.
+    /// </summary>
+    public double OutputDpi { get; init; } = 300;
+
     /// <summary>Предупреждения и ошибки предварительной проверки.</summary>
     public IReadOnlyList<PreflightIssue> Issues { get; init; } = Array.Empty<PreflightIssue>();
 

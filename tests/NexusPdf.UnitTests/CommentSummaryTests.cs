@@ -20,7 +20,7 @@ public sealed class CommentSummaryTests
             Array.Empty<SummaryComment>(), A4, new CommentSummarySettings(), "документ.pdf");
 
         var page = Assert.Single(pages);
-        Assert.Contains(page.Lines, l => l.Text.Contains("нет комментариев"));
+        Assert.Contains(page.Lines, l => l.Text == PrintText.Get("CsNoComments"));
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public sealed class CommentSummaryTests
         var all = string.Join("\n", pages.SelectMany(p => p.Lines).Select(l => l.Text));
 
         foreach (var comment in comments)
-            Assert.Contains($"{comment.Number}. Стр. {comment.PageNumber}", all);
+            Assert.Contains(PrintText.Get("CsHeader", comment.Number, comment.PageNumber, comment.TypeName), all);
     }
 
     [Fact]
@@ -97,17 +97,19 @@ public sealed class CommentSummaryTests
     public void Empty_Comment_Text_Is_Marked_Explicitly()
     {
         var lines = CommentSummaryLayout.Wrap("   ", 400, 10);
-        Assert.Equal("(без текста)", Assert.Single(lines));
+        Assert.Equal(PrintText.Get("CsNoText"), Assert.Single(lines));
     }
 
     [Theory]
-    [InlineData(1, "Заметка")]
-    [InlineData(9, "Выделение")]
-    [InlineData(15, "Рисунок")]
-    [InlineData(20, "Виджет формы")]
-    [InlineData(999, "Аннотация")]
-    public void Subtypes_Get_Human_Names(int subtype, string expected)
+    [InlineData(1, "AnnotSubtype1")]
+    [InlineData(9, "AnnotSubtype9")]
+    [InlineData(15, "AnnotSubtype15")]
+    [InlineData(20, "AnnotSubtype20")]
+    [InlineData(999, "AnnotSubtypeOther")]
+    public void Subtypes_Get_Human_Names(int subtype, string expectedKey)
     {
-        Assert.Equal(expected, CommentSummaryLayout.DescribeSubtype(subtype));
+        // Имена типов идут из словаря интерфейса: в английском окне сводка
+        // больше не пишет «Заметка».
+        Assert.Equal(PrintText.Get(expectedKey), CommentSummaryLayout.DescribeSubtype(subtype));
     }
 }

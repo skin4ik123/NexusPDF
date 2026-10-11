@@ -1,7 +1,17 @@
 using NexusPdf.Infrastructure;
 using NexusPdf.Pdf.Abstractions;
+using NexusPdf.Signing;
 
 namespace NexusPdf.Application;
+
+/// <summary>Чем закончилось сохранение.</summary>
+/// <param name="Reopened">
+/// Документ переоткрыт из записанного файла и помечен сохранённым. false —
+/// пока шла запись, человек продолжил правку: файл записан, а документ
+/// остаётся с его новыми правками и признаком несохранённости.
+/// </param>
+/// <param name="SignaturesPreserved">Документ подписан, и изменения дописаны так, что подписи целы.</param>
+public sealed record SaveResult(bool Reopened, bool SignaturesPreserved);
 
 public sealed class SaveService
 {
@@ -10,32 +20,14 @@ public sealed class SaveService
     public SaveService(IPdfRenderEngine engine) => _engine = engine;
 
     /// <summary>
-    /// Сохранение по алгоритму «записать во временный файл → проверить → атомарно
-    /// подменить цель». Оригинал не изменяется до успешной проверки. После записи
-    /// документ переоткрывается из сохранённого файла.
-    /// При сохранении «в себя» дескрипторы, удерживающие целевой файл (memory-mapped),
-    /// освобождаются после проверки и перед подменой: Windows не позволяет заменить
-    /// файл с активным отображением в память.
-    /// </summary>
-    /// <summary>
     /// Документ без структурных правок (один источник, исходный порядок, без
-    /// поворотов и нового контента) сохраняется НАПРЯМУЮ из открытого документа:
-    /// это сохраняет закладки, формы (включая заполненные значения), вложения и
-    /// всю прочую структуру, которую перекомпоновка через ImportPages не переносит.
+    /// поворотов, удалений аннотаций и нового контента).
     /// </summary>
     public static bool CanSaveDirect(OpenedDocument document) =>
         KeepsPageStructure(document) &&
         document.Session.Model.Pages.All(p => p.OverlayList.Count == 0);
 
-    /// <summary>
-    /// Страницы стоят на своих местах: один источник, исходный порядок, без
-    /// доворотов и без удалённых аннотаций. Добавленные правки при этом
-    /// допускаются — их можно наложить прямо на страницы открытого документа.
-    ///
-    /// Это и есть условие, при котором перекомпоновка не нужна: она собирает
-    /// новый файл из импортов страниц и теряет форму AcroForm, оглавление и
-    /// вложения. Ради одной надписи на бланке платить формой не за что.
-    /// </summary>
+    /// <summary>Страницы на своих местах, но есть добавленные правки.</summary>
     public static bool CanSaveDirectWithOverlays(OpenedDocument document) =>
         KeepsPageStructure(document) &&
         document.Session.Model.Pages.Any(p => p.OverlayList.Count > 0);
@@ -60,86 +52,184 @@ public sealed class SaveService
         return true;
     }
 
-    public async Task SaveAsAsync(OpenedDocument document, string targetPath, bool keepBackup, CancellationToken ct)
+    /// <summary>
+    /// Состав страниц тот же, что у файла-основы: каждая страница на своём
+    /// месте, без поворотов и удалений аннотаций. Тогда изменения — только
+    /// новые правки и значения полей, и их можно ДОПИСАТЬ к файлу.
+    /// </summary>
+    private static bool KeepsStructureOf(IReadOnlyList<ComposedPage> composition, IPdfDocumentHandle baseHandle)
     {
-        await using var baked = await document.BuildCompositionBakedAsync(_engine, ct).ConfigureAwait(false);
-        var composition = baked.Composition;
-        var expectedCount = composition.Count;
-        if (expectedCount == 0)
-            throw new InvalidOperationException("Документ не содержит страниц.");
-
-        var saveDirect = CanSaveDirect(document);
-        // Правки можно наложить прямо на страницы открытого документа — тогда
-        // форма, оглавление и вложения остаются целыми. Растеризованные
-        // вымарывания к этому моменту уже превращены в правки композиции,
-        // поэтому берём именно её списки, а не сырые из сессии.
-        Dictionary<int, IReadOnlyList<PageOverlay>>? overlaysDirect = null;
-        if (!saveDirect && CanSaveDirectWithOverlays(document))
+        if (composition.Count != baseHandle.Info.PageCount)
+            return false;
+        for (var i = 0; i < composition.Count; i++)
         {
-            overlaysDirect = new Dictionary<int, IReadOnlyList<PageOverlay>>();
-            for (var i = 0; i < composition.Count; i++)
-            {
-                if (composition[i].Overlays is { Count: > 0 } overlays)
-                    overlaysDirect[i] = overlays;
-            }
+            var page = composition[i];
+            if (!ReferenceEquals(page.Source, baseHandle) || page.SourcePageIndex != i ||
+                page.ExtraQuarterTurns % 4 != 0 || page.RemovedAnnotations is { Count: > 0 })
+                return false;
         }
-        // Значение редактируемого поля формы фиксируется только при потере
-        // фокуса — иначе компоновка сохранит пустое поле (прямые пути делают
-        // это сами внутри сохранения).
-        if (!saveDirect && overlaysDirect == null)
-            await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
-        // Прямые пути сохраняют и шифрование исходника.
-        var resultPassword = saveDirect || overlaysDirect != null ? document.Password : null;
-        var fullTarget = Path.GetFullPath(targetPath);
-        var blockingSources = document.Handles
-            .Where(kv => string.Equals(Path.GetFullPath(kv.Value.FilePath), fullTarget, StringComparison.OrdinalIgnoreCase))
-            .Select(kv => kv.Key)
-            .ToList();
+        return true;
+    }
 
-        // Наложение правок на месте МЕНЯЕТ документ в памяти. Если запись не
-        // дойдёт до конца, его нужно вернуть к тому, что лежит в файле, иначе
-        // повторное сохранение наложит те же правки второй раз.
-        var sourcePath = document.PrimaryHandle.FilePath;
-        var overlaysApplied = false;
+    /// <summary>
+    /// Файл-основа: тот, чьих страниц в документе больше всего (при равенстве —
+    /// основной). Именно его структура — закладки, форма, вложения, пароль —
+    /// переносится в результат; после оптимизации это обработанный файл.
+    /// </summary>
+    private static IPdfDocumentHandle ChooseBase(OpenedDocument document, IReadOnlyList<ComposedPage> composition)
+    {
+        var primary = document.PrimaryHandle;
+        var counts = composition
+            .GroupBy(p => p.Source, ReferenceEqualityComparer.Instance)
+            .Select(g => (Handle: (IPdfDocumentHandle)g.Key!, Count: g.Count()))
+            .ToList();
+        var best = counts.OrderByDescending(c => c.Count)
+            .ThenByDescending(c => ReferenceEquals(c.Handle, primary))
+            .FirstOrDefault();
+        return best.Handle ?? primary;
+    }
+
+    /// <summary>
+    /// Текущее состояние документа — в файл <paramref name="targetPath"/>
+    /// (временный: подмену делает вызывающий). Правки ложатся на КОПИЮ
+    /// файла-основы, поэтому сохраняется всё, что живёт вне страниц: пароль,
+    /// закладки, форма, вложения, свойства документа. Открытый документ при
+    /// этом только читается.
+    /// </summary>
+    /// <param name="composition">Готовый состав страниц (с уже применёнными вымарками).</param>
+    public async Task WriteCurrentStateAsync(
+        OpenedDocument document, IReadOnlyList<ComposedPage> composition, string targetPath,
+        InPlaceSaveOptions options, CancellationToken ct)
+    {
+        if (composition.Count == 0)
+            throw new InvalidOperationException("The document has no pages.");
+
+        var baseHandle = ChooseBase(document, composition);
+        var password = ReferenceEquals(baseHandle, document.PrimaryHandle) ? document.Password : null;
+
+        // Значение поля, которое сейчас редактируется, фиксируется до копии.
+        await baseHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
+
+        // Копия-основа берётся с диска, если файл документа совпадает с тем,
+        // что в памяти; иначе — из памяти (там значения полей, введённые в
+        // этой сессии, или файл уже заменён прошлым сохранением).
+        string? snapshot = null;
         try
         {
-            await SafeFileReplace.WriteAndReplaceAsync(
-                targetPath,
-                tempPath =>
-                {
-                    if (saveDirect)
-                        return document.PrimaryHandle.SaveCurrentAsync(tempPath, ct);
-                    if (overlaysDirect != null)
-                    {
-                        overlaysApplied = true;
-                        return document.PrimaryHandle.SaveWithOverlaysAsync(overlaysDirect, tempPath, ct);
-                    }
-                    return _engine.ComposeAsync(composition, tempPath, ct);
-                },
-                tempPath => ValidateAsync(tempPath, expectedCount, resultPassword, ct),
-                beforeReplace: async () =>
-                {
-                    // Компоновка и проверка завершены — эти источники больше не нужны;
-                    // RebaseToSavedFileAsync ниже переоткроет документ заново.
-                    foreach (var sourceId in blockingSources)
-                    {
-                        if (document.Handles.Remove(sourceId, out var handle))
-                            await handle.DisposeAsync().ConfigureAwait(false);
-                    }
-                },
-                keepBackup,
-                ct).ConfigureAwait(false);
+            var workingSource = baseHandle.FilePath;
+            if (baseHandle.HasUnsavedFormChanges || !document.IsHandleCurrent(baseHandle) ||
+                !File.Exists(workingSource))
+            {
+                snapshot = Path.Combine(Path.GetTempPath(), "NexusPDF-save-" + Guid.NewGuid().ToString("N") + ".pdf");
+                await baseHandle.SaveCurrentAsync(snapshot, options.Incremental, ct).ConfigureAwait(false);
+                workingSource = snapshot;
+            }
+
+            var working = await _engine.OpenAsync(workingSource, password, ct).ConfigureAwait(false);
+            await using (working.ConfigureAwait(false))
+            {
+                await _engine.SaveCompositionInPlaceAsync(
+                    working, baseHandle, composition, targetPath, options, ct).ConfigureAwait(false);
+            }
         }
-        catch when (overlaysApplied)
+        finally
         {
-            // Документ в памяти уже с правками — переоткрываем исходный файл,
-            // чтобы состояние в программе снова совпадало с диском.
-            await document.RebaseToSavedFileAsync(_engine, sourcePath, document.Password, CancellationToken.None)
-                .ConfigureAwait(false);
-            throw;
+            if (snapshot != null)
+                SafeFileReplace.TryDelete(snapshot);
+        }
+    }
+
+    /// <summary>
+    /// Сохранение документа в файл (в свой или новый).
+    ///
+    /// Порядок: правки пишутся в копию файла-основы → результат проверяется
+    /// повторным открытием → подменяет цель двумя переименованиями (с откатом).
+    /// Открытый документ до самого конца не меняется и свой файл не
+    /// отпускает: неудача на любом шаге оставляет вкладку рабочей, все правки,
+    /// историю и признак несохранённости — на месте, а файл на диске — целым.
+    /// </summary>
+    public async Task<SaveResult> SaveAsAsync(
+        OpenedDocument document, string targetPath, bool keepBackup, CancellationToken ct)
+    {
+        var fullTarget = Path.GetFullPath(targetPath);
+        SafeFileReplace.ThrowIfReadOnly(fullTarget);
+
+        var stamp = document.Session.ChangeStamp;
+        var formStamps = new Dictionary<IPdfDocumentHandle, long>(ReferenceEqualityComparer.Instance);
+        foreach (var handle in document.Handles.Values)
+            formStamps[handle] = handle.FormChangeStamp;
+
+        await using var baked = await document.BuildCompositionBakedAsync(_engine, ct);
+        var composition = baked.Composition;
+        if (composition.Count == 0)
+            throw new InvalidOperationException("The document has no pages.");
+
+        var baseHandle = ChooseBase(document, composition);
+        var password = ReferenceEquals(baseHandle, document.PrimaryHandle) ? document.Password : null;
+
+        // Подписанный документ без изменения состава страниц сохраняется
+        // ДОПИСЫВАНИЕМ: подписанные байты остаются как были, и подписи целы.
+        // Полная перезапись сделала бы их недействительными без единого слова.
+        var incremental = KeepsStructureOf(composition, baseHandle) &&
+                          await IsSignedAsync(baseHandle, ct);
+
+        var backupPath = keepBackup && !document.BackupTaken && File.Exists(fullTarget)
+            ? fullTarget + ".bak"
+            : null;
+
+        var outcome = await SafeFileReplace.WriteAndReplaceRetainingAsync(
+            fullTarget,
+            tempPath => WriteCurrentStateAsync(document, composition, tempPath,
+                new InPlaceSaveOptions(Incremental: incremental), ct),
+            tempPath => ValidateAsync(tempPath, composition.Count, password, ct),
+            backupPath,
+            beforeReplace: null,
+            ct);
+        if (backupPath != null)
+            document.BackupTaken = true;
+        document.PreserveTemporaryFile(fullTarget);
+
+        // Пока файл записывался, человек мог продолжить работу. Тогда документ
+        // НЕ переоткрывается из записанного файла (это стёрло бы новые правки):
+        // он остаётся как есть и несохранённым, а дескрипторы, чей файл заменён,
+        // помечаются — их содержимое теперь старше файла на диске.
+        var editedDuringSave = document.Session.ChangeStamp != stamp ||
+                               document.Handles.Values.Any(h =>
+                                   !formStamps.TryGetValue(h, out var before) || before != h.FormChangeStamp);
+        if (editedDuringSave)
+        {
+            // Файл записан под новым именем — дальше вкладка сохраняется туда же.
+            document.Session.FilePath = fullTarget;
+            document.MarkHandlesStale(document.Handles.Values.Where(h =>
+                string.Equals(Path.GetFullPath(h.FilePath), fullTarget, StringComparison.OrdinalIgnoreCase)));
+            if (outcome.RetiredPath != null)
+                document.AddRetiredFile(outcome.RetiredPath);
+            return new SaveResult(Reopened: false, SignaturesPreserved: incremental);
         }
 
-        await document.RebaseToSavedFileAsync(_engine, targetPath, resultPassword, ct).ConfigureAwait(false);
+        if (outcome.RetiredPath != null)
+            document.AddRetiredFile(outcome.RetiredPath);
+        await document.RebaseToSavedFileAsync(_engine, fullTarget, password, ct);
+        return new SaveResult(Reopened: true, SignaturesPreserved: incremental);
+    }
+
+    /// <summary>
+    /// Есть ли в файле цифровые подписи. Ошибка чтения — «нет»: она не должна
+    /// мешать сохранению, а полная перезапись — прежнее поведение.
+    /// </summary>
+    private static async Task<bool> IsSignedAsync(IPdfDocumentHandle handle, CancellationToken ct)
+    {
+        try
+        {
+            if (!File.Exists(handle.FilePath)) return false;
+            var signatures = await PdfSignatureInspector.InspectAsync(handle.FilePath, ct).ConfigureAwait(false);
+            return signatures.Count > 0;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Serilog.Log.Debug(ex, "Подписи документа не прочитались");
+            return false;
+        }
     }
 
     /// <summary>
@@ -158,20 +248,25 @@ public sealed class SaveService
         }
     }
 
-    /// <summary>Сохранение копии текущего состояния в файл без переключения документа на него.</summary>
+    /// <summary>
+    /// Сохранение копии текущего состояния в файл без переключения документа
+    /// на него. Структура документа — пароль, закладки, форма — сохраняется
+    /// так же, как при обычном сохранении.
+    /// </summary>
     public async Task SaveCopyAsync(OpenedDocument document, string targetPath, CancellationToken ct)
     {
         ThrowIfTargetIsOpenSource(document, targetPath);
-        await document.PrimaryHandle.FormKillFocusAsync(ct).ConfigureAwait(false);
         await using var baked = await document.BuildCompositionBakedAsync(_engine, ct).ConfigureAwait(false);
         var composition = baked.Composition;
         if (composition.Count == 0)
             throw new InvalidOperationException("Документ не содержит страниц.");
 
+        var baseHandle = ChooseBase(document, composition);
+        var password = ReferenceEquals(baseHandle, document.PrimaryHandle) ? document.Password : null;
         await SafeFileReplace.WriteAndReplaceAsync(
             targetPath,
-            tempPath => _engine.ComposeAsync(composition, tempPath, ct),
-            tempPath => ValidateAsync(tempPath, composition.Count, ct),
+            tempPath => WriteCurrentStateAsync(document, composition, tempPath, default, ct),
+            tempPath => ValidateAsync(tempPath, composition.Count, password, ct),
             keepBackup: false,
             ct).ConfigureAwait(false);
     }

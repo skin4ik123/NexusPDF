@@ -53,6 +53,11 @@ public static class AppMenuTree
             CommandIds.DrawPencil, CommandIds.DrawLine, CommandIds.DrawArrow,
             CommandIds.ToggleCommentsPanel,
         }),
+        new MenuSection("MenuMeasure", new[]
+        {
+            CommandIds.MeasureDistance, CommandIds.MeasurePerimeter, CommandIds.MeasureArea,
+            CommandIds.MeasureCalibrate,
+        }),
         new MenuSection("MenuSecurity", new[]
         {
             CommandIds.Redact, CommandIds.ProtectWithPassword,

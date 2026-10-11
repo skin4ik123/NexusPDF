@@ -4,7 +4,7 @@ using System.Windows.Media.Imaging;
 
 namespace NexusPdf.App.Desktop.Services;
 
-public sealed record LoadedImage(byte[] Bgra, int PixelWidth, int PixelHeight)
+public sealed record LoadedImage(byte[] Bgra, int PixelWidth, int PixelHeight, byte[]? EncodedJpeg = null)
 {
     public double Aspect => PixelHeight / (double)Math.Max(1, PixelWidth);
 }
@@ -28,6 +28,8 @@ public static class ImageLoader
         BitmapSource decoded = BitmapFrame.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
 
         var totalPixels = (double)decoded.PixelWidth * decoded.PixelHeight;
+        var keepJpeg = totalPixels <= MaxPixels && imageBytes.Length >= 3 &&
+                       imageBytes[0] == 0xFF && imageBytes[1] == 0xD8 && imageBytes[2] == 0xFF;
         if (totalPixels > MaxPixels)
         {
             var k = Math.Sqrt(MaxPixels / totalPixels);
@@ -40,7 +42,8 @@ public static class ImageLoader
         var stride = converted.PixelWidth * 4;
         var pixels = new byte[stride * (long)converted.PixelHeight];
         converted.CopyPixels(pixels, stride, 0);
-        return new LoadedImage(pixels, converted.PixelWidth, converted.PixelHeight);
+        return new LoadedImage(pixels, converted.PixelWidth, converted.PixelHeight,
+            keepJpeg ? imageBytes : null);
     }
 
     public static BitmapSource Preview(LoadedImage image)

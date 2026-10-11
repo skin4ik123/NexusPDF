@@ -104,13 +104,13 @@ public static class ImageEncoder
         return stream.ToArray();
     }
 
-    public static byte[] Encode(RenderedPageImage image, bool jpeg, double dpi)
+    public static byte[] Encode(RenderedPageImage image, bool jpeg, double dpi, int jpegQuality = 90)
     {
         var source = BitmapSource.Create(
             image.PixelWidth, image.PixelHeight, dpi, dpi,
             PixelFormats.Bgra32, null, image.Bgra, image.Stride);
         BitmapEncoder encoder = jpeg
-            ? new JpegBitmapEncoder { QualityLevel = 90 }
+            ? new JpegBitmapEncoder { QualityLevel = Math.Clamp(jpegQuality, 1, 100) }
             : new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(source));
         using var stream = new MemoryStream();
@@ -148,6 +148,11 @@ public static class ImageEncoder
         var stride = converted.PixelWidth * 4;
         var pixels = new byte[stride * (long)converted.PixelHeight];
         converted.CopyPixels(pixels, stride, 0);
-        return new ImagePageSpec(pixels, converted.PixelWidth, converted.PixelHeight, widthPoints, heightPoints);
+        // Keep the original compressed stream only when the pixels were not resized.
+        // A 70 KB JPEG must not become a multi-megabyte bitmap inside the PDF.
+        byte[]? jpeg = totalPixels <= maxPixels && frame.Decoder is JpegBitmapDecoder
+            ? File.ReadAllBytes(path) : null;
+        return new ImagePageSpec(pixels, converted.PixelWidth, converted.PixelHeight,
+            widthPoints, heightPoints, jpeg);
     }
 }

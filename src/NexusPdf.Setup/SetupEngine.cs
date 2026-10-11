@@ -122,9 +122,17 @@ public static class SetupEngine
         var dir = Path.Combine(Path.GetTempPath(), "NexusPdfSetup-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         var msiPath = Path.Combine(dir, "NexusPdf.msi");
-        using var file = File.Create(msiPath);
-        stream.CopyTo(file);
-        return msiPath;
+        try
+        {
+            using var file = File.Create(msiPath);
+            stream.CopyTo(file);
+            return msiPath;
+        }
+        catch
+        {
+            TryDeleteExtractedPackage(msiPath);
+            throw;
+        }
     }
 
     public static string LoadLicenseText()
@@ -140,6 +148,27 @@ public static class SetupEngine
         new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
 
     public static async Task<InstallResult> InstallAsync(SetupOptions options, string msiPath)
+    {
+        try { return await InstallCoreAsync(options, msiPath); }
+        finally { TryDeleteExtractedPackage(msiPath); }
+    }
+
+    private static void TryDeleteExtractedPackage(string msiPath)
+    {
+        // Only a directory created by ExtractMsi belongs to this installer.
+        // Keep the installation log for diagnostics, but not the large payload.
+        var directory = Path.GetDirectoryName(Path.GetFullPath(msiPath));
+        if (directory == null || !string.Equals(Path.GetFileName(msiPath), "NexusPdf.msi", StringComparison.OrdinalIgnoreCase)) return;
+        var name = Path.GetFileName(directory);
+        const string prefix = "NexusPdfSetup-";
+        if (!name.StartsWith(prefix, StringComparison.Ordinal) || !Guid.TryParseExact(name[prefix.Length..], "N", out _)) return;
+        if (!string.Equals(Path.GetDirectoryName(directory), Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath())), StringComparison.OrdinalIgnoreCase)) return;
+        try { Directory.Delete(directory, recursive: true); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private static async Task<InstallResult> InstallCoreAsync(SetupOptions options, string msiPath)
     {
         var logPath = Path.Combine(Path.GetTempPath(),
             $"NexusPdf-install-{DateTime.Now:yyyyMMdd-HHmmss}.log");

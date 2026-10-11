@@ -13,7 +13,11 @@ public partial class TextEditDialog : Window
     private Func<string, Task<bool>>? _canRender;
     private CancellationTokenSource? _checkCts;
 
-    private TextEditDialog() => InitializeComponent();
+    private TextEditDialog()
+    {
+        InitializeComponent();
+        Closed += (_, _) => _checkCts?.Cancel();
+    }
 
     /// <summary>Возвращает новый текст или null, если пользователь отказался.</summary>
     public static string? Edit(
@@ -53,6 +57,18 @@ public partial class TextEditDialog : Window
         catch (OperationCanceledException)
         {
             // Пользователь продолжил печатать — эта проверка больше не нужна.
+        }
+        catch (Exception ex)
+        {
+            if (cts.IsCancellationRequested) return;
+            Serilog.Log.Warning(ex, "Не удалось проверить символы выбранного шрифта");
+            WarningBox.Visibility = Visibility.Visible;
+            WarningText.Text = Loc.Get("TextEditFontCheckFailed");
+        }
+        finally
+        {
+            if (ReferenceEquals(_checkCts, cts)) _checkCts = null;
+            cts.Dispose();
         }
     }
 

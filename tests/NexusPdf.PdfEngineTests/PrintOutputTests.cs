@@ -103,6 +103,38 @@ public sealed class PrintOutputTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Long_Layout_Is_Written_In_Parts_Without_Losing_Sheets()
+    {
+        // Сырые растры листов больше не копятся в памяти до конца: при малом
+        // бюджете каждый лист уходит во временную часть, а итоговый файл
+        // собирается из частей — с тем же числом листов в том же размере.
+        var document = await OpenedDocument.OpenAsync(_pdfium, MakeDocument(5), null, CancellationToken.None);
+        await using (document)
+        {
+            var pages = Enumerable.Range(0, 5)
+                .Select(i => new SourcePage("doc", i, A4))
+                .ToList();
+            var plan = new PrintJobPlan
+            {
+                JobName = "parts",
+                PrinterName = "Вывод в файл",
+                Capabilities = Caps(),
+                Sheets = new PrintLayoutEngine().BuildSheets(pages, new LayoutSettings(), A4Paper, Caps()),
+            };
+            var target = Path.Combine(_dir, "parts.pdf");
+            var result = await new PrintToFileService(_pdfium, batchBudgetBytes: 1)
+                .SaveAsync(document, plan, target, 72, null, CancellationToken.None);
+
+            Assert.Equal(5, result.SheetsWritten);
+            await using var check = await _pdfium.OpenAsync(target, null, CancellationToken.None);
+            Assert.Equal(5, check.Info.PageCount);
+            Assert.All(check.Info.Pages, p => Assert.Equal(A4.HeightPt, p.HeightPoints, 0));
+            Assert.Empty(Directory.GetDirectories(Path.GetTempPath(), "NexusPDF-layout-*")
+                .Where(d => Directory.GetLastWriteTimeUtc(d) > DateTime.UtcNow.AddMinutes(-1)));
+        }
+    }
+
+    [Fact]
     public async Task Four_Up_Puts_Four_Pages_On_One_Sheet()
     {
         var document = await OpenedDocument.OpenAsync(_pdfium, MakeDocument(8), null, CancellationToken.None);

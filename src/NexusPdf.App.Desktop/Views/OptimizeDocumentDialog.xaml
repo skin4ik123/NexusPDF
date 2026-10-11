@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:l="clr-namespace:NexusPdf.App.Desktop.Localization"
         Title="{l:Loc OptimizeDocTitle}"
-        Width="1120" Height="800" MinWidth="940" MinHeight="660"
+        Width="1040" Height="700" MinWidth="880" MinHeight="520"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{DynamicResource PanelBg}">
   <Grid Margin="20">

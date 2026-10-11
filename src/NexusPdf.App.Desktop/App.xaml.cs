@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using NexusPdf.App.Desktop.Localization;
 using NexusPdf.App.Desktop.Services;
@@ -45,6 +45,17 @@ public partial class App : System.Windows.Application
             typeof(App).Assembly.GetName().Version?.ToString(3) ?? "?");
         Log.Debug("Запуск: среда и настройки готовы за {Elapsed:N0} мс", Elapsed());
 
+        // Файлы прошлых переносов страниц в Проводник больше никому не нужны.
+        try
+        {
+            if (_singleInstance.IsPrimary && Directory.Exists(AppPaths.DragOutFolder))
+                Directory.Delete(AppPaths.DragOutFolder, recursive: true);
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "Папка переносов не очистилась — не страшно");
+        }
+
         Loc.Load(settings.Language);
         // Каждое окно красит свой системный заголовок под тему сразу, как
         // только появится: один обработчик на класс дешевле, чем помнить про
@@ -52,6 +63,13 @@ public partial class App : System.Windows.Application
         EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
             new RoutedEventHandler((sender, _) => ThemeManager.ApplyTitleBar((Window)sender)));
         ThemeManager.Apply(settings.Theme);
+
+        // Резкий текст на экранах 100–125 % (1366×768 и подобные): без этого
+        // весь интерфейс там выглядел размытым.
+        Services.Ux.CrispRendering.HookAllWindows();
+        // Окна не больше экрана: на 1366×768 диалоги печати и оптимизации
+        // уходили кнопками под панель задач.
+        Services.Ux.WindowScreenFit.HookAllWindows();
 
         // Плотность интерфейса. В режиме «авто» она следует за тем, чем
         // работают сейчас: до первого касания — мышиная, после — пальцевая.

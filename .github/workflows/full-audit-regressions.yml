@@ -1,0 +1,47 @@
+name: NexusPDF full functional regressions
+on:
+  push:
+    branches: [codex/nexuspdf-full-audit]
+    paths-ignore: [docs/**, README.md, CHANGELOG.md]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: nexuspdf-regressions-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Fetch all pinned PDF tools and OCR packs
+        shell: pwsh
+        run: |
+          $lock = Get-Content tools/qpdf.lock.json | ConvertFrom-Json
+          ./tools/fetch-qpdf.ps1 -Version $lock.version -ExpectedSha256 $lock.sha256
+          ./tools/fetch-tessdata.ps1
+          ./tools/fetch-ocrmodels.ps1 -All
+      - name: Compile all application and test projects
+        run: dotnet build NexusPdf.slnx -c Release
+      - name: Unit regressions
+        run: dotnet test tests/NexusPdf.UnitTests -c Release --no-build --logger trx
+      - name: Native PDF and OCR regressions
+        run: dotnet test tests/NexusPdf.PdfEngineTests -c Release --no-build --logger trx
+      - name: Printing regressions
+        if: ${{ !cancelled() }}
+        run: dotnet test tests/NexusPdf.PrintingTests -c Release --no-build --logger trx
+      - name: Real WPF JPEG import
+        run: dotnet run --project tests/NexusPdf.DesktopImportProbe -c Release
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nexuspdf-full-regression-results
+          path: '**/TestResults/*.trx'
+          if-no-files-found: warn
+          retention-days: 14

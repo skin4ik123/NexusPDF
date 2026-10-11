@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <SelfContained Condition="'$(Configuration)' == 'Release'">true</SelfContained>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/NexusPdf.App.Desktop/NexusPdf.App.Desktop.csproj" />
+    <Compile Include="../NexusPdf.PdfEngineTests/PdfFixture.cs" Link="PdfFixture.cs" />
+    <Using Include="System.IO" />
+  </ItemGroup>
+</Project>

@@ -23,6 +23,13 @@ public static class AppPaths
     /// </summary>
     public static string ProcessedFolder => Path.Combine(Root, "Processed");
 
+    /// <summary>
+    /// PDF из страниц, которые тащат в Проводник. Нужны только на время
+    /// переноса, но удалять их в момент броска нельзя — Проводник копирует
+    /// файл после того, как перетаскивание уже завершилось. Чистится на старте.
+    /// </summary>
+    public static string DragOutFolder => Path.Combine(Root, "DragOut");
+
     public static string CrashSentinelFile => Path.Combine(Root, "session.lock");
 
     public static void EnsureCreated()
