@@ -41,15 +41,15 @@
       <TextBlock x:Name="LicenseText" TextWrapping="Wrap" Margin="0,10,0,0" FontSize="12"
                  Foreground="{DynamicResource TextSecondary}"/>
 
-      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+      <WrapPanel Margin="0,18,0,0">
         <Button Content="{l:Loc SupportProject}" Style="{StaticResource LinkButton}" Click="OnSupport"/>
         <Button Content="{l:Loc AboutSource}" Style="{StaticResource LinkButton}" Click="OnSource"
-                Margin="14,0,0,0"/>
+                Margin="12,0,0,0"/>
         <Button Content="{l:Loc AboutNotices}" Style="{StaticResource LinkButton}" Click="OnNotices"
-                Margin="14,0,0,0"/>
-        <Button Content="{l:Loc OK}" Style="{StaticResource PrimaryButton}" MinWidth="100"
-                Margin="8,0,0,0" IsDefault="True" IsCancel="True"/>
-      </StackPanel>
+                Margin="12,0,0,0"/>
+      </WrapPanel>
+      <Button Content="{l:Loc OK}" Style="{StaticResource PrimaryButton}" MinWidth="100"
+              HorizontalAlignment="Right" Margin="0,12,0,0" IsDefault="True" IsCancel="True"/>
     </StackPanel>
   </StackPanel>
 </Window>

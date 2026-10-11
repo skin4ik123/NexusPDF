@@ -43,6 +43,8 @@ public partial class BatchDialog : Window
         InitializeComponent();
         _services = services;
         FileList.ItemsSource = _rows;
+        _rows.CollectionChanged += (_, _) => UpdateRunAvailability();
+        UpdateRunAvailability();
     }
 
     public static void Run(Window? owner, AppServices services)
@@ -83,10 +85,21 @@ public partial class BatchDialog : Window
         var protect = OperationCombo.SelectedIndex == 1;
         PasswordLabel.Visibility = protect ? Visibility.Visible : Visibility.Collapsed;
         PasswordBox.Visibility = protect ? Visibility.Visible : Visibility.Collapsed;
+        UpdateRunAvailability();
+    }
+
+    private void OnInputsChanged(object sender, RoutedEventArgs e) => UpdateRunAvailability();
+
+    private void UpdateRunAvailability()
+    {
+        if (RunButton == null || OutputBox == null || PasswordBox == null) return;
+        RunButton.IsEnabled = _cts == null && _rows.Count > 0 && !string.IsNullOrWhiteSpace(OutputBox.Text)
+            && (OperationCombo.SelectedIndex != 1 || PasswordBox.Password.Length > 0);
     }
 
     private async void OnRun(object sender, RoutedEventArgs e)
     {
+        if (_cts != null) return;
         var outputDir = OutputBox.Text;
         if (_rows.Count == 0 || string.IsNullOrWhiteSpace(outputDir))
         {
@@ -166,6 +179,15 @@ public partial class BatchDialog : Window
                 });
 
             SummaryLabel.Text = Loc.F("BatchSummary", ok, failed);
+        }
+        catch (OperationCanceledException)
+        {
+            SummaryLabel.Text = Loc.F("BatchSummary", ok, failed);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Не удалось запустить пакетную обработку");
+            SummaryLabel.Text = Loc.F("BatchStatusError", Shorten(ex.Message));
         }
         finally
         {
@@ -353,12 +375,16 @@ public partial class BatchDialog : Window
 
     private void SetRunning(bool running)
     {
-        RunButton.IsEnabled = !running;
+        RunButton.IsEnabled = false;
         AddButton.IsEnabled = !running;
         RemoveButton.IsEnabled = !running;
         OperationCombo.IsEnabled = !running;
+        BrowseButton.IsEnabled = !running;
+        PasswordBox.IsEnabled = !running;
         if (running)
             SummaryLabel.Text = "";
+        else
+            UpdateRunAvailability();
     }
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)

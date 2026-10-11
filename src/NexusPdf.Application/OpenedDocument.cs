@@ -214,55 +214,55 @@ public sealed class OpenedDocument : IAsyncDisposable
         await _bakeGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-        var page = Session.Model.Pages[logicalIndex];
-        // Испечённая копия нужна только правкам, которые меняют ТЕКСТ страницы.
-        // Заметка, фигура или измерение текста не добавляют — и раньше ради них
-        // каждый раз копировалась вся страница, на чертеже это секунды.
-        var changed = forExport
-            ? page.OverlayList.Count > 0 || page.RemovedAnnotationList.Count > 0
-            : page.OverlayList.Any(OverlayLayers.ChangesText);
-        if (!changed)
-            return (Handles[page.SourceId], page.SourcePageIndex, page.RotationOffset);
+            var page = Session.Model.Pages[logicalIndex];
+            // Испечённая копия нужна только правкам, которые меняют ТЕКСТ страницы.
+            // Заметка, фигура или измерение текста не добавляют — и раньше ради них
+            // каждый раз копировалась вся страница, на чертеже это секунды.
+            var changed = forExport
+                ? page.OverlayList.Count > 0 || page.RemovedAnnotationList.Count > 0
+                : page.OverlayList.Any(OverlayLayers.ChangesText);
+            if (!changed)
+                return (Handles[page.SourceId], page.SourcePageIndex, page.RotationOffset);
 
-        var key = (logicalIndex, forExport);
-        var source = Handles[page.SourceId];
-        var stamp = source.FormChangeStamp;
-        if (_baked.TryGetValue(key, out var cached))
-        {
-            if (cached.Reference == page && cached.FormStamp == stamp)
-                return (cached.Handle, 0, cached.ExtraRotation);
-            _baked.Remove(key);
-            await cached.Handle.DisposeAsync().ConfigureAwait(false);
-            if (cached.TemporaryPath != null) Infrastructure.SafeFileReplace.TryDelete(cached.TemporaryPath);
-        }
+            var key = (logicalIndex, forExport);
+            var source = Handles[page.SourceId];
+            var stamp = source.FormChangeStamp;
+            if (_baked.TryGetValue(key, out var cached))
+            {
+                if (cached.Reference == page && cached.FormStamp == stamp)
+                    return (cached.Handle, 0, cached.ExtraRotation);
+                _baked.Remove(key);
+                await cached.Handle.DisposeAsync().ConfigureAwait(false);
+                if (cached.TemporaryPath != null) Infrastructure.SafeFileReplace.TryDelete(cached.TemporaryPath);
+            }
 
-        IPdfDocumentHandle handle;
-        string? temporary = null;
-        var remainingRotation = page.RotationOffset;
-        var composed = new ComposedPage(source, page.SourcePageIndex, page.RotationOffset,
-            page.OverlayList, page.RemovedAnnotationList);
-        if (forExport && (page.RemovedAnnotationList.Count > 0 || RedactionBaker.HasRedactions(new[] { composed })))
-        {
-            temporary = Path.Combine(Path.GetTempPath(), "nexus-export-" + Guid.NewGuid().ToString("N") + ".pdf");
-            remainingRotation = 0; // Compose writes the extra rotation into the page.
-            try
+            IPdfDocumentHandle handle;
+            string? temporary = null;
+            var remainingRotation = page.RotationOffset;
+            var composed = new ComposedPage(source, page.SourcePageIndex, page.RotationOffset,
+                page.OverlayList, page.RemovedAnnotationList);
+            if (forExport && (page.RemovedAnnotationList.Count > 0 || RedactionBaker.HasRedactions(new[] { composed })))
             {
-                await using var baked = await RedactionBaker.BakeAsync(_engine, this, new[] { composed }, ct)
-                    .ConfigureAwait(false);
-                await _engine.ComposeAsync(baked.Composition, temporary, ct).ConfigureAwait(false);
-                handle = await _engine.OpenAsync(temporary, null, ct).ConfigureAwait(false);
+                temporary = Path.Combine(Path.GetTempPath(), "nexus-export-" + Guid.NewGuid().ToString("N") + ".pdf");
+                remainingRotation = 0; // Compose writes the extra rotation into the page.
+                try
+                {
+                    await using var baked = await RedactionBaker.BakeAsync(_engine, this, new[] { composed }, ct)
+                        .ConfigureAwait(false);
+                    await _engine.ComposeAsync(baked.Composition, temporary, ct).ConfigureAwait(false);
+                    handle = await _engine.OpenAsync(temporary, null, ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                    Infrastructure.SafeFileReplace.TryDelete(temporary);
+                    throw;
+                }
             }
-            catch
-            {
-                Infrastructure.SafeFileReplace.TryDelete(temporary);
-                throw;
-            }
-        }
-        else
-            handle = await _engine.CreateBakedPageAsync(
-                source, page.SourcePageIndex, page.RotationOffset, page.OverlayList, ct).ConfigureAwait(false);
-        _baked[key] = new BakedPage(page, stamp, handle, temporary, remainingRotation);
-        return (handle, 0, remainingRotation);
+            else
+                handle = await _engine.CreateBakedPageAsync(
+                    source, page.SourcePageIndex, page.RotationOffset, page.OverlayList, ct).ConfigureAwait(false);
+            _baked[key] = new BakedPage(page, stamp, handle, temporary, remainingRotation);
+            return (handle, 0, remainingRotation);
         }
         finally { _bakeGate.Release(); }
     }
@@ -648,6 +648,7 @@ public sealed class OpenedDocument : IAsyncDisposable
         // это надо в потоке вызывающего (интерфейса), а не в фоновом — иначе
         // перестройка списка страниц шла бы параллельно с его чтением.
         var newHandle = await engine.OpenAsync(savedPath, password, ct);
+        await DropBakedPagesAsync();
         Password = password;
         var oldHandles = Handles.Values.ToList();
 

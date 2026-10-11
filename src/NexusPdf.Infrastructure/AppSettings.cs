@@ -146,7 +146,11 @@ public sealed class JsonSettingsStore
         var dir = Path.GetDirectoryName(_path)!;
         Directory.CreateDirectory(dir);
         var tmp = Path.Combine(dir, Path.GetFileName(_path) + ".nexustmp-" + Guid.NewGuid().ToString("N"));
-        File.WriteAllText(tmp, JsonSerializer.Serialize(settings, Options));
-        File.Move(tmp, _path, overwrite: true);
+        try
+        {
+            File.WriteAllText(tmp, JsonSerializer.Serialize(settings, Options));
+            File.Move(tmp, _path, overwrite: true);
+        }
+        finally { SafeFileReplace.TryDelete(tmp); }
     }
 }

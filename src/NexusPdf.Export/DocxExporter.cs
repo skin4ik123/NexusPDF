@@ -1,4 +1,4 @@
-﻿using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using NexusPdf.Pdf.Abstractions;
@@ -62,6 +62,7 @@ public sealed class DocxExporter : IDisposable
     private readonly EncodeImage _encode;
 
     private Comments? _comments;
+    private readonly HashSet<int> _attachedPageNotes = new();
     private int _commentId;
     private int _bookmarkId;
     private uint _drawingId = 1;
@@ -93,7 +94,7 @@ public sealed class DocxExporter : IDisposable
         new(Pages, Paragraphs, Tables, Images, Links, CommentCount);
 
     /// <param name="pageLinks">Ссылки страницы (в координатах PDF).</param>
-    /// <param name="notes">Аннотации страницы; без рамки примечание привязать не к чему.</param>
+    /// <param name="notes">Аннотации страницы; примечания вне текста привязываются к якорю страницы.</param>
     /// <param name="images">Картинки страницы.</param>
     /// <param name="pageCount">Сколько страниц всего — для якорей внутренних ссылок.</param>
     public void AddPage(
@@ -103,6 +104,7 @@ public sealed class DocxExporter : IDisposable
         IReadOnlyList<PdfPageImage> images,
         int pageCount)
     {
+        _attachedPageNotes.Clear();
         var size = new PdfPageDescriptor(layout.WidthPt, layout.HeightPt);
         var margins = MarginsOf(layout);
         var breakBefore = false;
@@ -150,6 +152,12 @@ public sealed class DocxExporter : IDisposable
             else if (block.Paragraph is { } paragraph)
                 WriteParagraph(paragraph, layout, pageLinks, notes, pageCount);
         }
+
+        // Заметки на полях, на изображениях и на пустых страницах тоже
+        // принадлежат документу. Якорь уже существует и не добавляет разрыв.
+        if (_options.KeepComments)
+            foreach (var note in notes)
+                AttachComment(anchor, note);
 
         Pages++;
         _anyContent = true;
@@ -219,17 +227,17 @@ public sealed class DocxExporter : IDisposable
 
         if (paragraph.Alignment != ParagraphAlignment.Left)
         {
-            properties.AppendChild(new Justification
+            properties.Justification = new Justification
             {
                 Val = paragraph.Alignment == ParagraphAlignment.Center
                     ? JustificationValues.Center
                     : JustificationValues.Right,
-            });
+            };
         }
         if (paragraph.IndentPt > 0)
-            properties.AppendChild(new Indentation { Left = Twips(paragraph.IndentPt) });
+            properties.Indentation = new Indentation { Left = Twips(paragraph.IndentPt) };
         if (paragraph.IsHeading)
-            properties.AppendChild(new ParagraphStyleId { Val = "Heading2" });
+            properties.ParagraphStyleId = new ParagraphStyleId { Val = "Heading2" };
 
         element.AppendChild(properties);
         ApplyMeasuredLeading(element, paragraph.Lines);
@@ -317,18 +325,18 @@ public sealed class DocxExporter : IDisposable
     {
         var properties = new RunProperties();
         if (IsUsableFontName(style.FontName))
-            properties.AppendChild(new RunFonts { Ascii = style.FontName, HighAnsi = style.FontName, ComplexScript = style.FontName });
+            properties.RunFonts = new RunFonts { Ascii = style.FontName, HighAnsi = style.FontName, ComplexScript = style.FontName };
         if (style.FontSizePt > 0)
         {
             // Word хранит кегль в ПОЛУпунктах.
             var half = Math.Clamp((int)Math.Round(style.FontSizePt * 2), 2, 3276).ToString();
-            properties.AppendChild(new FontSize { Val = half });
-            properties.AppendChild(new FontSizeComplexScript { Val = half });
+            properties.FontSize = new FontSize { Val = half };
+            properties.FontSizeComplexScript = new FontSizeComplexScript { Val = half };
         }
-        if (style.IsBold) properties.AppendChild(new Bold());
+        if (style.IsBold) properties.Bold = new Bold();
 
         var rgb = style.ColorArgb & 0x00FFFFFF;
-        if (rgb != 0) properties.AppendChild(new Color { Val = rgb.ToString("X6") });
+        if (rgb != 0) properties.Color = new Color { Val = rgb.ToString("X6") };
 
         return new Run(properties, new Text(XmlText.Safe(text)) { Space = SpaceProcessingModeValues.Preserve });
     }
@@ -354,9 +362,8 @@ public sealed class DocxExporter : IDisposable
     private static Run Underlined(Run run)
     {
         var properties = run.GetFirstChild<RunProperties>() ?? run.PrependChild(new RunProperties());
-        properties.RemoveAllChildren<Color>();
-        properties.AppendChild(new Color { Val = "0563C1" });
-        properties.AppendChild(new Underline { Val = UnderlineValues.Single });
+        properties.Color = new Color { Val = "0563C1" };
+        properties.Underline = new Underline { Val = UnderlineValues.Single };
         return run;
     }
 
@@ -426,7 +433,7 @@ public sealed class DocxExporter : IDisposable
                         Width = Twips(SpanWidth(table, c, cell?.ColumnSpan ?? 1)),
                     });
                 if (cell is { ColumnSpan: > 1 })
-                    cellProperties.AppendChild(new GridSpan { Val = cell.ColumnSpan });
+                    cellProperties.GridSpan = new GridSpan { Val = cell.ColumnSpan };
 
                 // Повёрнутая подпись остаётся повёрнутой: Word умеет писать в
                 // ячейке снизу вверх, и в узкой колонке это единственный способ
@@ -434,17 +441,17 @@ public sealed class DocxExporter : IDisposable
                 var rotation = RotationOf(layout, cell);
                 if (rotation != 0)
                 {
-                    cellProperties.AppendChild(new TextDirection
+                    cellProperties.TextDirection = new TextDirection
                     {
                         Val = rotation == 1
                             ? TextDirectionValues.BottomToTopLeftToRight
                             : TextDirectionValues.TopToBottomRightToLeft,
-                    });
+                    };
                 }
                 if (cell is { RowSpan: > 1 })
-                    cellProperties.AppendChild(new VerticalMerge { Val = MergedCellValues.Restart });
+                    cellProperties.VerticalMerge = new VerticalMerge { Val = MergedCellValues.Restart };
                 else if (cell == null)
-                    cellProperties.AppendChild(new VerticalMerge { Val = MergedCellValues.Continue });
+                    cellProperties.VerticalMerge = new VerticalMerge { Val = MergedCellValues.Continue };
 
                 var content = new WordTableCell(cellProperties);
                 content.AppendChild(CellParagraph(cell, table, layout, links, notes, pageCount));
@@ -539,14 +546,13 @@ public sealed class DocxExporter : IDisposable
 
         var properties = paragraph.GetFirstChild<ParagraphProperties>();
         if (properties == null) return;
-        properties.RemoveAllChildren<SpacingBetweenLines>();
-        properties.AppendChild(new SpacingBetweenLines
+        properties.SpacingBetweenLines = new SpacingBetweenLines
         {
             After = "0",
             Before = "0",
             Line = Twips(pitch),
             LineRule = LineSpacingRuleValues.Exact,
-        });
+        };
     }
 
     /// <summary>Поворот текста ячейки, если повёрнуто большинство её слов.</summary>
@@ -588,8 +594,8 @@ public sealed class DocxExporter : IDisposable
         static EnumValue<BorderValues> Single() => new(BorderValues.Single);
         return new TableBorders(
             new TopBorder { Val = Single(), Size = 4 },
-            new BottomBorder { Val = Single(), Size = 4 },
             new LeftBorder { Val = Single(), Size = 4 },
+            new BottomBorder { Val = Single(), Size = 4 },
             new RightBorder { Val = Single(), Size = 4 },
             new InsideHorizontalBorder { Val = Single(), Size = 4 },
             new InsideVerticalBorder { Val = Single(), Size = 4 });
@@ -690,25 +696,31 @@ public sealed class DocxExporter : IDisposable
         foreach (var note in notes)
         {
             if (note.RectPt is not { } rect) continue;
-            if (note.Contents.Length == 0) continue;
+            if (note.Contents.Length == 0 || _attachedPageNotes.Contains(note.AnnotIndex)) continue;
             var x = (rect.Left + rect.Right) / 2.0;
             var y = (rect.Top + rect.Bottom) / 2.0;
             if (x < left - 4 || x > right + 4 || y > top + 4 || y < bottom - 4) continue;
 
-            var id = (++_commentId).ToString();
-            EnsureComments().AppendChild(new Comment(
-                new Paragraph(new Run(new Text(XmlText.Safe(note.Contents)) { Space = SpaceProcessingModeValues.Preserve })))
-            {
-                Id = id,
-                Author = note.Author.Length > 0 ? note.Author : "PDF",
-                Initials = note.Author.Length > 0 ? note.Author[..1] : "P",
-            });
-
-            paragraph.InsertAt(new CommentRangeStart { Id = id }, 1);
-            paragraph.AppendChild(new CommentRangeEnd { Id = id });
-            paragraph.AppendChild(new Run(new CommentReference { Id = id }));
-            CommentCount++;
+            AttachComment(paragraph, note);
         }
+    }
+
+    private void AttachComment(OpenXmlElement paragraph, PdfAnnotationInfo note)
+    {
+        if (note.Contents.Length == 0 || !_attachedPageNotes.Add(note.AnnotIndex)) return;
+        var id = (++_commentId).ToString();
+        EnsureComments().AppendChild(new Comment(
+                new Paragraph(new Run(new Text(XmlText.Safe(note.Contents)) { Space = SpaceProcessingModeValues.Preserve })))
+        {
+            Id = id,
+            Author = note.Author.Length > 0 ? note.Author : "PDF",
+            Initials = note.Author.Length > 0 ? note.Author[..1] : "P",
+        });
+
+        paragraph.InsertAt(new CommentRangeStart { Id = id }, paragraph.FirstChild is ParagraphProperties ? 1 : 0);
+        paragraph.AppendChild(new CommentRangeEnd { Id = id });
+        paragraph.AppendChild(new Run(new CommentReference { Id = id }));
+        CommentCount++;
     }
 
     private Comments EnsureComments()

@@ -53,6 +53,7 @@ public partial class SignaturesDialog : Window
     {
         InitializeComponent();
         SigList.ItemsSource = signatures.Select(s => new Row { Info = s }).ToList();
+        EmptyLabel.Visibility = signatures.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     public static void Show(Window? owner, IReadOnlyList<PdfSignatureInfo> signatures)

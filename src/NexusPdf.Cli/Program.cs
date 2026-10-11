@@ -94,7 +94,7 @@ public static class Program
     /// </summary>
     private static readonly Dictionary<string, string[]> KnownOptions = new(StringComparer.Ordinal)
     {
-        ["export-images"] = ["dpi", "format", "password", "force"],
+        ["export-images"] = ["pages", "dpi", "format", "quality", "password", "force"],
         ["extract-text"] = ["password", "force"],
         ["word"] = ["pages", "ocr", "no-guess-tables", "engine", "lang", "password", "force"],
         ["excel"] = ["pages", "ocr", "no-guess-tables", "dot-decimal", "engine", "lang", "password", "force"],
@@ -173,21 +173,29 @@ public static class Program
                 var format = Get(options, "format", "png").ToLowerInvariant();
                 if (format is not ("png" or "jpeg" or "jpg"))
                     throw new UsageException("--format: поддерживаются png и jpeg.");
+                var qualityNumber = ParseDouble(options, "quality", 90);
+                if (qualityNumber is < 1 or > 100 || qualityNumber != Math.Truncate(qualityNumber))
+                    throw new UsageException("--quality: укажите целое число 1–100.");
+                if (format == "png" && options.ContainsKey("quality"))
+                    throw new UsageException("--quality применяется к JPEG. Укажите --format jpeg.");
+                var quality = (int)qualityNumber;
                 var document = await OpenAsync(engine, positional[0], options, ct);
                 await using (document)
                 {
+                    var pages = ParsePages(NullIfEmpty(Get(options, "pages", "")), document.Session.Model.Pages.Count)?.Distinct().ToArray();
                     Directory.CreateDirectory(positional[1]);
                     var baseName = Path.GetFileNameWithoutExtension(positional[0]);
                     var extension = format == "png" ? "png" : "jpg";
                     // Контракт --force распространяется и на файлы страниц.
                     var mask = $"{baseName}-*.{extension}";
                     if (!options.ContainsKey("force") &&
-                        Directory.EnumerateFiles(positional[1], mask).Any())
+                        (pages ?? Enumerable.Range(0, document.Session.Model.Pages.Count).ToArray()).Any(i =>
+                            File.Exists(Path.Combine(positional[1], $"{baseName}-{i + 1:000}.{extension}"))))
                         throw new UsageException(
                             $"В «{positional[1]}» уже есть файлы {mask}. Добавьте --force для перезаписи.");
                     var dpiWarned = false;
                     var count = await new ConvertService(engine).ExportImagesAsync(
-                        document, null, dpi,
+                        document, pages, dpi,
                         async (image, pageIndex, effectiveDpi, token) =>
                         {
                             if (!dpiWarned && effectiveDpi < dpi - 0.5)
@@ -197,14 +205,16 @@ public static class Program
                                     $"Предупреждение: гигантские страницы урезаны до {Math.Round(effectiveDpi)} DPI (предел стороны растра).");
                             }
                             var path = Path.Combine(positional[1], $"{baseName}-{pageIndex + 1:000}.{extension}");
-                            await File.WriteAllBytesAsync(path, Encode(image, format, effectiveDpi), token);
+                            await NexusPdf.Infrastructure.SafeFileReplace.WriteAndReplaceAsync(path,
+                                temporary => File.WriteAllBytesAsync(temporary, Encode(image, format, effectiveDpi, quality), token),
+                                _ => Task.CompletedTask, keepBackup: false, token);
                             Console.WriteLine(path);
                         },
                         null, ct);
                     // Устаревшие остатки прошлого прогона (страниц стало меньше)
                     // убираются только при --force: без него мы сюда не попадаем
                     // при существующих файлах.
-                    foreach (var stale in Directory.EnumerateFiles(positional[1], mask))
+                    foreach (var stale in pages == null ? Directory.EnumerateFiles(positional[1], mask) : Enumerable.Empty<string>())
                     {
                         var name = Path.GetFileNameWithoutExtension(stale);
                         var suffix = name[(baseName.Length + 1)..];
@@ -635,7 +645,7 @@ public static class Program
         if (!options.TryGetValue(name, out var raw))
             return fallback;
         if (!double.TryParse(raw, System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var value))
+                System.Globalization.CultureInfo.InvariantCulture, out var value) || !double.IsFinite(value))
             throw new UsageException($"--{name}: «{raw}» не число.");
         return value;
     }
@@ -660,14 +670,14 @@ public static class Program
     }
 
     /// <summary>BGRA-растр страницы → PNG/JPEG через WPF-кодеки.</summary>
-    private static byte[] Encode(RenderedPageImage image, string format, double dpi)
+    private static byte[] Encode(RenderedPageImage image, string format, double dpi, int jpegQuality = 90)
     {
         var source = BitmapSource.Create(
             image.PixelWidth, image.PixelHeight, dpi, dpi,
             PixelFormats.Bgra32, null, image.Bgra, image.Stride);
         BitmapEncoder encoder = format == "png"
             ? new PngBitmapEncoder()
-            : new JpegBitmapEncoder { QualityLevel = 90 };
+            : new JpegBitmapEncoder { QualityLevel = jpegQuality };
         encoder.Frames.Add(BitmapFrame.Create(source));
         using var stream = new MemoryStream();
         encoder.Save(stream);
@@ -691,6 +701,15 @@ public static class Program
         BitmapSource decoded = frame;
         var totalPixels = (double)frame.PixelWidth * frame.PixelHeight;
         const double maxPixels = 24_000_000;
+        byte[]? encodedJpeg = null;
+        if (totalPixels <= maxPixels && stream.Length >= 3)
+        {
+            stream.Position = 0;
+            Span<byte> signature = stackalloc byte[3];
+            stream.ReadExactly(signature);
+            if (signature[0] == 0xFF && signature[1] == 0xD8 && signature[2] == 0xFF)
+                encodedJpeg = File.ReadAllBytes(path);
+        }
         if (totalPixels > maxPixels)
         {
             var k = Math.Sqrt(maxPixels / totalPixels);
@@ -704,7 +723,7 @@ public static class Program
         var pixels = new byte[stride * (long)converted.PixelHeight];
         converted.CopyPixels(pixels, stride, 0);
         return new ImagePageSpec(
-            pixels, converted.PixelWidth, converted.PixelHeight, widthPoints, heightPoints);
+            pixels, converted.PixelWidth, converted.PixelHeight, widthPoints, heightPoints, EncodedJpeg: encodedJpeg);
     }
 
     /// <summary>Диапазон страниц из --pages или null (весь документ).</summary>
@@ -738,8 +757,8 @@ public static class Program
 NexusPdfCli — консольные операции NexusPDF (локально, без интернета).
 
 Команды:
-  export-images <вход.pdf> <папка>   [--dpi 150] [--format png|jpeg] [--password X]
-      Экспорт каждой страницы в изображение.
+  export-images <вход.pdf> <папка>   [--pages 1-5] [--dpi 150] [--format png|jpeg] [--quality 90] [--password X]
+      Экспорт выбранных страниц в изображения; --quality задаёт качество JPEG (1–100).
   extract-text  <вход.pdf> <выход.txt> [--password X]
       Извлечение всего текста документа.
   word          <вход.pdf> <выход.docx> [--pages 1-5] [--ocr] [--no-guess-tables]

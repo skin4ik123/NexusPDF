@@ -1,0 +1,93 @@
+name: NexusPDF validated installer
+on:
+  push:
+    branches: [codex/nexuspdf-full-audit]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: nexuspdf-release-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    if: contains(github.event.head_commit.message, '[release]') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 55
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Test the complete product and build the single EXE
+        shell: pwsh
+        run: |
+          ./build.ps1 -All
+          if ($LASTEXITCODE -ne 0) { throw 'Release build or regression tests failed.' }
+      - name: Build the real WPF audit probe
+        run: dotnet build tests/NexusPdf.DesktopAuditProbe -c Release
+      - name: Verify every window, bindings and document workflows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts/ui-audit | Out-Null
+          $probe = Start-Process tests/NexusPdf.DesktopAuditProbe/bin/Release/net10.0-windows/win-x64/NexusPdf.DesktopAuditProbe.exe -ArgumentList 'artifacts/ui-audit --verify' -PassThru -RedirectStandardOutput artifacts/ui-audit/console.log -RedirectStandardError artifacts/ui-audit/errors.log
+          if (-not $probe.WaitForExit(180000)) { Stop-Process $probe.Id -Force; throw 'Desktop audit timed out.' }
+          Get-Content artifacts/ui-audit/console.log
+          if ($probe.ExitCode -ne 0) { Get-Content artifacts/ui-audit/errors.log; throw "Desktop audit failed: $($probe.ExitCode)" }
+      - name: Verify the delivered installer and installed application
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          ./tools/verify-release.ps1 -Version $version
+          Copy-Item artifacts/NexusPdfSetup.exe "artifacts/NexusPDF-Setup-$version.exe"
+          (Get-FileHash "artifacts/NexusPDF-Setup-$version.exe" -Algorithm SHA256).Hash.ToLower() + "  NexusPDF-Setup-$version.exe" | Set-Content artifacts/release-sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NexusPDF-single-installer
+          path: artifacts/NexusPDF-Setup-*.exe
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nexuspdf-release-evidence
+          path: |
+            artifacts/ui-audit
+            artifacts/release-verification
+            artifacts/release-sha256.txt
+            **/TestResults/*.trx
+          if-no-files-found: warn
+          retention-days: 30
+  publish:
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: NexusPDF-single-installer
+          path: delivered
+      - uses: actions/download-artifact@v4
+        with:
+          name: nexuspdf-release-evidence
+          path: evidence
+      - name: Publish exactly the verified EXE
+        shell: bash
+        run: |
+          set -euo pipefail
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/codex/nexuspdf-full-audit" --jq '.object.sha')
+          if [[ "$current" != "$GITHUB_SHA" ]]; then exit 0; fi
+          version=$(python -c 'import xml.etree.ElementTree as e; print(e.parse("Directory.Build.props").findtext("PropertyGroup/Version"))')
+          cd delivered
+          sha256sum --check ../evidence/artifacts/release-sha256.txt
+          cd ..
+          cp docs/RELEASE-0.27.0.md release-notes.md
+          printf '\nSHA-256: `%s`\n' "$(cut -d ' ' -f 1 evidence/artifacts/release-sha256.txt)" >> release-notes.md
+          gh release create "v$version" "delivered/NexusPDF-Setup-$version.exe" --target "$GITHUB_SHA" --title "NexusPDF $version" --notes-file release-notes.md --draft
+          gh release edit "v$version" --draft=false --latest

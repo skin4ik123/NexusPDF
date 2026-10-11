@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -57,6 +57,8 @@ public partial class BatchPrintDialog : Window
                 StringComparison.OrdinalIgnoreCase))
             ?? printers.FirstOrDefault(p => p.IsDefault) ?? printers.FirstOrDefault();
 
+        ProfileBox.SelectionChanged += (_, _) => UpdateRunAvailability();
+        PrinterBox.SelectionChanged += (_, _) => UpdateRunAvailability();
         UpdateStatus();
     }
 
@@ -102,59 +104,65 @@ public partial class BatchPrintDialog : Window
         if (ProfileBox.SelectedItem is not PrintProfile profile) return;
         if (PrinterBox.SelectedItem is not PrinterCapabilities printer) return;
 
-        if (printer.PaperSizes.Count == 0)
-        {
-            // Возможности ещё не читались: дочитать перед стартом, не блокируя окно.
-            StatusText.Text = Loc.Get("PrinterProbing");
-            var fresh = await _printers.ReadAsync(
-                printer.PrinterName, WindowsPrinterService.DefaultTimeout, CancellationToken.None);
-            StatusText.Text = "";
-            if (fresh == null)
-            {
-                ErrorDialog.Show(this, Loc.Get("BpTitle"), Loc.Get("PrinterNotResponding"), "");
-                return;
-            }
-            printer = fresh;
-        }
-
-        var paper = ChoosePaper(profile, printer);
-        if (paper == null)
-        {
-            ErrorDialog.Show(this, Loc.Get("BpTitle"), Loc.Get("BpNoPaper"), "");
-            return;
-        }
-
-        // Непечатаемые поля выбранной бумаги. Без них «уменьшать крупные»
-        // считал печатаемым весь лист, и пакет обрезал края страниц, хотя
-        // тот же профиль из центра печати печатал их целиком.
-        if (!printer.HardMarginsByPaper.ContainsKey(paper.Name))
-        {
-            var margins = await _printers.ReadHardMarginsAsync(
-                printer.PrinterName, paper, WindowsPrinterService.DefaultTimeout, CancellationToken.None);
-            if (margins != null)
-            {
-                printer = printer with
-                {
-                    HardMarginsByPaper = new Dictionary<string, MarginsPt>(printer.HardMarginsByPaper)
-                    {
-                        [paper.Name] = margins.Value,
-                    },
-                };
-            }
-        }
-
+        // Lock the entire operation before probing a driver. A second click
+        // during that await used to submit the same batch twice.
         _running = true;
         _cts = new CancellationTokenSource();
         StartButton.IsEnabled = false;
+        AddButton.IsEnabled = RemoveButton.IsEnabled = false;
+        ProfileBox.IsEnabled = PrinterBox.IsEnabled = false;
         StopButton.Visibility = Visibility.Visible;
         Bar.Visibility = Visibility.Visible;
         Bar.Maximum = _files.Count;
         Bar.Value = 0;
 
-        foreach (var row in _files) row.Status = Loc.Get("BpWaiting");
-
         try
         {
+            if (printer.PaperSizes.Count == 0)
+            {
+                // Возможности ещё не читались: дочитать перед стартом, не блокируя окно.
+                StatusText.Text = Loc.Get("PrinterProbing");
+                var fresh = await _printers.ReadAsync(
+                    printer.PrinterName, WindowsPrinterService.DefaultTimeout, _cts.Token);
+                _cts.Token.ThrowIfCancellationRequested();
+                StatusText.Text = "";
+                if (fresh == null)
+                {
+                    ErrorDialog.Show(this, Loc.Get("BpTitle"), Loc.Get("PrinterNotResponding"), "");
+                    return;
+                }
+                printer = fresh;
+            }
+
+            var paper = ChoosePaper(profile, printer);
+            if (paper == null)
+            {
+                ErrorDialog.Show(this, Loc.Get("BpTitle"), Loc.Get("BpNoPaper"), "");
+                return;
+            }
+
+            // Непечатаемые поля выбранной бумаги. Без них «уменьшать крупные»
+            // считал печатаемым весь лист, и пакет обрезал края страниц, хотя
+            // тот же профиль из центра печати печатал их целиком.
+            if (!printer.HardMarginsByPaper.ContainsKey(paper.Name))
+            {
+                var margins = await _printers.ReadHardMarginsAsync(
+                    printer.PrinterName, paper, WindowsPrinterService.DefaultTimeout, _cts.Token);
+                _cts.Token.ThrowIfCancellationRequested();
+                if (margins != null)
+                {
+                    printer = printer with
+                    {
+                        HardMarginsByPaper = new Dictionary<string, MarginsPt>(printer.HardMarginsByPaper)
+                        {
+                            [paper.Name] = margins.Value,
+                        },
+                    };
+                }
+            }
+
+            foreach (var row in _files) row.Status = Loc.Get("BpWaiting");
+
             var items = _files.Select(f => new BatchPrintItem(f.Path)).ToList();
             var progress = new Progress<BatchPrintProgress>(p =>
             {
@@ -196,7 +204,11 @@ public partial class BatchPrintDialog : Window
         finally
         {
             _running = false;
-            StartButton.IsEnabled = true;
+            _cts.Dispose();
+            _cts = null;
+            AddButton.IsEnabled = RemoveButton.IsEnabled = true;
+            ProfileBox.IsEnabled = PrinterBox.IsEnabled = true;
+            UpdateRunAvailability();
             StopButton.Visibility = Visibility.Collapsed;
             Bar.Visibility = Visibility.Collapsed;
         }
@@ -227,10 +239,17 @@ public partial class BatchPrintDialog : Window
         StatusText.Text = Loc.Get("PrintCancelling");
     }
 
-    private void UpdateStatus() =>
+    private void UpdateRunAvailability() =>
+        StartButton.IsEnabled = !_running && _files.Count > 0
+            && ProfileBox.SelectedItem is PrintProfile && PrinterBox.SelectedItem is PrinterCapabilities;
+
+    private void UpdateStatus()
+    {
         StatusText.Text = _files.Count == 0
             ? Loc.Get("BpEmpty")
             : Loc.F("BpCount", _files.Count);
+        UpdateRunAvailability();
+    }
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {

@@ -48,7 +48,7 @@ public partial class App : System.Windows.Application
         // Файлы прошлых переносов страниц в Проводник больше никому не нужны.
         try
         {
-            if (Directory.Exists(AppPaths.DragOutFolder))
+            if (_singleInstance.IsPrimary && Directory.Exists(AppPaths.DragOutFolder))
                 Directory.Delete(AppPaths.DragOutFolder, recursive: true);
         }
         catch (Exception ex)

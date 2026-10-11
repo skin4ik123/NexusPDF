@@ -2,6 +2,7 @@ name: NexusPDF functional and visual audit
 on:
   push:
     branches: [codex/nexuspdf-full-audit]
+    paths-ignore: [docs/**, README.md, CHANGELOG.md]
   workflow_dispatch:
 permissions:
   contents: read
@@ -32,7 +33,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force artifacts/ui-audit | Out-Null
-          $probe = Start-Process tests/NexusPdf.DesktopAuditProbe/bin/Release/net10.0-windows/win-x64/NexusPdf.DesktopAuditProbe.exe -ArgumentList 'artifacts/ui-audit' -PassThru -RedirectStandardOutput artifacts/ui-audit/console.log -RedirectStandardError artifacts/ui-audit/errors.log
+          $probe = Start-Process tests/NexusPdf.DesktopAuditProbe/bin/Release/net10.0-windows/win-x64/NexusPdf.DesktopAuditProbe.exe -ArgumentList 'artifacts/ui-audit --verify' -PassThru -RedirectStandardOutput artifacts/ui-audit/console.log -RedirectStandardError artifacts/ui-audit/errors.log
           if (-not $probe.WaitForExit(180000)) {
             Stop-Process -Id $probe.Id -Force
             throw 'Desktop audit timed out; partial screenshots and logs are retained.'

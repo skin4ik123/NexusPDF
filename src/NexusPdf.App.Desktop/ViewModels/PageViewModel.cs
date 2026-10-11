@@ -408,6 +408,7 @@ public sealed partial class PageViewModel : ObservableObject
         try
         {
             var raw = await _owner.Document.RenderLogicalPageAsync(LogicalIndex, pixelWidth, pixelHeight, cts.Token);
+            cts.Token.ThrowIfCancellationRequested();
             // В журнал попадают только МЕДЛЕННЫЕ страницы. Обычный рендер —
             // это десятки миллисекунд; всё, что заметно дольше, означает либо
             // тяжёлую страницу, либо занятый поток интерфейса, и разбираться в
@@ -502,6 +503,7 @@ public sealed partial class PageViewModel : ObservableObject
         try
         {
             var raw = await _owner.Document.RenderLogicalPageAsync(LogicalIndex, wanted, pixelHeight, cts.Token);
+            cts.Token.ThrowIfCancellationRequested();
             var bitmap = BitmapFactory.ToBitmapSource(raw);
             _owner.Cache.Store(key, bitmap);
             if (!cts.IsCancellationRequested)

@@ -2407,6 +2407,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     public async Task RunSearchAsync(bool preservePosition = false)
     {
+        _findDebounceCts?.Cancel();
         _searchCts?.Cancel();
         var cts = new CancellationTokenSource();
         _searchCts = cts;
@@ -2563,6 +2564,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     private void OnSessionChanged()
     {
         RebuildPages();
+        if (_selectionPage != null && !Pages.Contains(_selectionPage)) ClearTextSelection();
+        if (SelectedObject is { } selected && !Pages.Contains(selected.Page)) ClearObjectSelection();
         // Ссылка на активную страницу формы указывает на пересозданный список.
         if (_formActivePage is { } stale)
         {
@@ -2935,6 +2938,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     public async ValueTask DisposeAsync()
     {
+        _rerenderTimer?.Stop();
+        _thumbSizeTimer?.Stop();
         _findDebounceCts?.Cancel();
         _searchCts?.Cancel();
         foreach (var page in Pages)

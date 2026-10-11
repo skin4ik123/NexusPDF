@@ -1,6 +1,10 @@
 using System.IO;
+using System.Globalization;
+using System.ComponentModel;
+using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using NexusPdf.App.Desktop.ViewModels;
 
 namespace NexusPdf.App.Desktop.Views;
@@ -11,6 +15,16 @@ public partial class MainWindow : Window
     private WindowState _preFullScreenState;
 
     public MainViewModel ViewModel { get; }
+
+    public static readonly DependencyProperty ShowResponsiveQuickPanelLabelsProperty =
+        DependencyProperty.Register(nameof(ShowResponsiveQuickPanelLabels), typeof(bool), typeof(MainWindow),
+            new PropertyMetadata(true));
+
+    public bool ShowResponsiveQuickPanelLabels
+    {
+        get => (bool)GetValue(ShowResponsiveQuickPanelLabelsProperty);
+        private set => SetValue(ShowResponsiveQuickPanelLabelsProperty, value);
+    }
 
     public MainWindow(MainViewModel viewModel)
     {
@@ -23,6 +37,46 @@ public partial class MainWindow : Window
         // Реестр команд проверяет себя в конструкторе: команда без обработчика
         // обязана обнаружиться на запуске, а не пустым пунктом меню у пользователя.
         _ = ViewModel.Ux;
+        ViewModel.QuickPanel.Items.CollectionChanged += OnQuickPanelItemsChanged;
+        ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        Closed += (_, _) =>
+        {
+            ViewModel.QuickPanel.Items.CollectionChanged -= OnQuickPanelItemsChanged;
+            ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        };
+        UpdateQuickPanelLabels();
+    }
+
+    private void OnQuickPanelItemsChanged(object? sender, NotifyCollectionChangedEventArgs e) => UpdateQuickPanelLabels();
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainViewModel.ShowQuickPanelLabels)) UpdateQuickPanelLabels();
+    }
+
+    private void OnQuickPanelSizeChanged(object sender, SizeChangedEventArgs e) => UpdateQuickPanelLabels();
+
+    private void UpdateQuickPanelLabels()
+    {
+        if (QuickPanelScroll == null || QuickPanelScroll.ActualWidth <= 0) return;
+        var padding = (Thickness)FindResource("UxToolPadding");
+        var margin = (Thickness)FindResource("UxToolMargin");
+        var glyphWidth = (double)FindResource("UxGlyphSize");
+        var targetWidth = (double)FindResource("UxTouchTarget");
+        var typeface = new Typeface(FontFamily, FontStyle, FontWeight, FontStretch);
+        var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        var fullWidth = ViewModel.QuickPanel.Items.Sum(item => item.IsSeparator ? 13 :
+            Math.Max(targetWidth, padding.Left + padding.Right + margin.Left + margin.Right + 4 + glyphWidth + 6 +
+                new FormattedText(item.Title, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+                    typeface, FontSize, Brushes.Black, dpi).WidthIncludingTrailingWhitespace));
+        ShowResponsiveQuickPanelLabels = ViewModel.ShowQuickPanelLabels && fullWidth <= QuickPanelScroll.ActualWidth;
+    }
+
+    private void OnQuickPanelMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (QuickPanelScroll.ScrollableWidth <= 0) return;
+        QuickPanelScroll.ScrollToHorizontalOffset(QuickPanelScroll.HorizontalOffset - e.Delta);
+        e.Handled = true;
     }
 
     /// <summary>

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Collections.Specialized;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -13,6 +14,8 @@ using NexusPdf.App.Desktop.Services.Ux;
 using NexusPdf.App.Desktop.ViewModels;
 using NexusPdf.App.Desktop.Views;
 using NexusPdf.Application;
+using NexusPdf.Domain;
+using NexusPdf.Export;
 using NexusPdf.Infrastructure;
 using NexusPdf.Pdf.Abstractions;
 using NexusPdf.Pdf.Pdfium;
@@ -31,11 +34,13 @@ internal static class Program
     private static byte[] _pixels = null!;
     private static string _imagePath = "";
     private static ExternalImageEditor _editor = null!;
+    private static bool _verify;
 
     [STAThread]
     private static int Main(string[] args)
     {
         _output = Path.GetFullPath(args.FirstOrDefault() ?? "artifacts/ui-audit");
+        _verify = args.Contains("--verify");
         Directory.CreateDirectory(_output);
         var app = new ProbeApp();
         foreach (var theme in new[] { "Light", "Styles" })
@@ -69,7 +74,7 @@ internal static class Program
                 app.Shutdown();
             }
         });
-        Dispatcher.Run();
+        app.Run();
         return exitCode;
     }
 
@@ -140,14 +145,26 @@ internal static class Program
                 Console.WriteLine("DIALOG ERROR " + type.Name + ": " + cause.Message);
             }
         }
+        if (_verify)
+        {
+            await InspectDialogAsync(typeof(ExportDocumentDialog), excel: true);
+            ThemeManager.Apply("dark");
+            foreach (var type in new[] { typeof(AboutDialog), typeof(ExportImagesDialog), typeof(OptimizeDocumentDialog), typeof(PrintCenterDialog), typeof(BatchDialog) })
+                await InspectDialogAsync(type, suffix: "-dark");
+            ThemeManager.Apply("light");
+            await VerifyWorkflowsAsync();
+        }
         _editor.Dispose();
         await _main.ViewModel.TryCloseAllAsync();
         _main.Close();
         await _services.DisposeAsync();
+        Require(!Results.Any(r => JsonSerializer.SerializeToElement(r).GetProperty("Kind").GetString()
+            is "unhandled" or "dialog-error"), "Every production window opens without an exception");
+        Require(BindingErrors.Count == 0, "All visible controls have valid WPF bindings");
         Console.WriteLine("UI audit completed; " + Results.Count + " reports, " + BindingErrors.Count + " binding errors.");
     }
 
-    private static async Task InspectDialogAsync(Type type)
+    private static async Task InspectDialogAsync(Type type, bool excel = false, string suffix = "")
     {
         // Public factories configure the real window; close it after capturing.
         var factory = type.GetMethods(BindingFlags.Public | BindingFlags.Static)
@@ -156,16 +173,29 @@ internal static class Program
             .FirstOrDefault();
         if (factory == null) throw new InvalidOperationException("No public dialog factory: " + type.Name);
         var parameters = factory.GetParameters().Select(Argument).ToArray();
+        if (excel)
+            parameters[Array.FindIndex(factory.GetParameters(), p => p.Name == "forWord")] = false;
+        if (_verify && type == typeof(ExportImagesDialog))
+            parameters[Array.FindIndex(factory.GetParameters(), p => p.Name == "selectedPages")] = new[] { 2, 0, 2 };
         var captured = false;
+        Exception? captureError = null;
         var attempts = 0;
-        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        var name = (excel ? "ExportExcelDialog" : type.Name) + suffix;
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(
+            type == typeof(OptimizeDocumentDialog) || type == typeof(PrintCenterDialog) ? 1800 : 500) };
         timer.Tick += (_, _) =>
         {
             if (System.Windows.Application.Current.Windows.OfType<Window>()
                 .FirstOrDefault(w => w.GetType() == type && w.IsVisible) is { } window)
             {
                 timer.Stop();
-                try { Capture(window, type.Name); captured = true; }
+                try
+                {
+                    Capture(window, name);
+                    captured = true;
+                    if (_verify) VerifyDialogControls(window, name);
+                }
+                catch (Exception e) { captureError = e; }
                 finally { window.Close(); }
             }
             else if (++attempts > 30)
@@ -178,10 +208,67 @@ internal static class Program
         timer.Start();
         try
         {
-            if (factory.Invoke(null, parameters) is Task pending) await pending;
+            var result = factory.Invoke(null, parameters);
+            if (result is Task pending) await pending;
+            if (captureError != null) throw captureError;
             if (!captured) throw new InvalidOperationException("Factory returned without a visible window");
+            if (_verify && result is ExportImagesRequest images)
+                Require(images.Pages!.SequenceEqual(new[] { 1, 2 }) && images.Jpeg && images.JpegQuality == 80,
+                    name + " exports only the chosen pages with the chosen JPEG quality");
+            if (_verify && result is ExportDocumentRequest document)
+                Require(document.Pages!.SequenceEqual(new[] { 1, 2 }), name + " exports only the chosen pages");
         }
         finally { timer.Stop(); }
+    }
+
+    private static void VerifyDialogControls(Window window, string name)
+    {
+        if (window is ExportDocumentDialog or ExportImagesDialog)
+        {
+            var all = (RadioButton)window.FindName("ScopeAll");
+            var current = (RadioButton)window.FindName("ScopeCurrent");
+            var range = (RadioButton)window.FindName("ScopeRange");
+            var box = (TextBox)window.FindName("RangeBox");
+            var export = (Button)window.FindName("ExportButton");
+            if (window is ExportImagesDialog)
+                Require(range.IsChecked == true && box.Text == "1,3", name + " preselects organizer pages without duplicates");
+            range.IsChecked = true;
+            box.Text = "";
+            Require(!export.IsEnabled, name + " rejects an empty range");
+            box.Text = "99";
+            Require(!export.IsEnabled, name + " rejects pages outside the document");
+            current.IsChecked = true;
+            Require(range.IsChecked == false && all.IsChecked == false && export.IsEnabled, name + " switches to the current page cleanly");
+            all.IsChecked = true;
+            Require(range.IsChecked == false && current.IsChecked == false && export.IsEnabled, name + " switches to all pages cleanly");
+            range.IsChecked = true;
+            box.Text = window is ExportImagesDialog ? "2-3,3" : "2-3";
+            Require(export.IsEnabled && all.IsChecked == false && current.IsChecked == false, name + " accepts a valid range");
+            if (window is ExportImagesDialog)
+            {
+                ((RadioButton)window.FindName("FormatJpeg")).IsChecked = true;
+                var quality = (ComboBox)window.FindName("QualityCombo");
+                quality.SelectedIndex = 0;
+                window.UpdateLayout();
+                Require(quality.IsVisible, name + " exposes JPEG quality only for JPEG");
+            }
+            Capture(window, name + "-configured");
+            export.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        }
+        if (window is BatchDialog)
+            Require(!((Button)window.FindName("RunButton")).IsEnabled, name + " disables processing an empty batch");
+        if (window is BatchPrintDialog)
+            Require(!((Button)window.FindName("StartButton")).IsEnabled, name + " disables printing an empty batch");
+        if (window is CompareDialog)
+            Require(!((Button)window.FindName("RunButton")).IsEnabled, name + " waits for both comparison files");
+        if (window is AboutDialog or SignatureLibraryDialog)
+        {
+            var root = (FrameworkElement)window.Content;
+            root.UpdateLayout();
+            Require(Descendants(root).OfType<Button>().Where(b => b.IsVisible).All(b =>
+                b.TransformToAncestor(root).TransformBounds(new Rect(b.RenderSize)).Left >= -1),
+                name + " keeps every action within the visible window");
+        }
     }
 
     private static object? Argument(ParameterInfo parameter)
@@ -208,6 +295,7 @@ internal static class Program
         if (type == typeof(IReadOnlyList<PdfAttachment>)) return new[] { new PdfAttachment(0, "Приложение.pdf", 81920), new PdfAttachment(1, "Таблица.xlsx", 15360) };
         if (type == typeof(IReadOnlyList<PdfLayer>)) return new[] { new PdfLayer("1 0 R", "Основной чертёж", true), new PdfLayer("2 0 R", "Размеры и примечания", true), new PdfLayer("3 0 R", "Дополнительный слой", false) };
         if (type == typeof(IReadOnlyList<DocumentViewModel>)) return new[] { _document };
+        if (parameter.HasDefaultValue && parameter.DefaultValue == null) return null;
         if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IReadOnlyList<>))
             return Array.CreateInstance(type.GetGenericArguments()[0], 0);
         if (type == typeof(int)) return name.Contains("Count", StringComparison.OrdinalIgnoreCase) ? 3 : 0;
@@ -234,6 +322,87 @@ internal static class Program
         return new PrintJobPlan { JobName = "Проверка", PrinterName = caps.PrinterName, Capabilities = caps,
             Sheets = layout.ApplyDuplexPairing(sheets, DuplexMode.Manual, new LayoutSettings().Imposition),
             Duplex = DuplexMode.Manual };
+    }
+
+    private static async Task VerifyWorkflowsAsync()
+    {
+        var jpegPixels = new byte[600 * 800 * 4];
+        new Random(42).NextBytes(jpegPixels);
+        for (var i = 3; i < jpegPixels.Length; i += 4) jpegPixels[i] = 255;
+        File.WriteAllBytes(Path.Combine(_output, "compressed-photo.jpg"), ImageEncoder.EncodeJpeg(jpegPixels, 600, 800, 10));
+        var original = _document.Pages.ToArray();
+        _document.IsFindVisible = true;
+        _document.FindQuery = "NexusPDF";
+        await _document.RunSearchAsync();
+        Require(_document.Matches.Count == 3, "Search finds all fixture pages");
+        _document.CurrentPageNumber = 3;
+        var actions = new List<NotifyCollectionChangedAction>();
+        NotifyCollectionChangedEventHandler listener = (_, e) => actions.Add(e.Action);
+        _document.Pages.CollectionChanged += listener;
+        _document.Document.Session.Apply(new AddOverlayOperation(0, new NoteAnnotationDraft(40, 90, "Audit note", "NexusPDF")));
+        Require(ReferenceEquals(original[1], _document.Pages[1]) && ReferenceEquals(original[2], _document.Pages[2]),
+            "Unchanged page models and thumbnails survive a note");
+        Require(actions.SequenceEqual(new[] { NotifyCollectionChangedAction.Replace }), "A note updates one page without resetting the document");
+        await WaitUntilAsync(() => _document.Matches.Count == 3, "Search refreshes after an edit");
+        Require(_document.CurrentPageNumber == 3, "Automatic search refresh preserves reading position");
+        _document.IsBusy = true;
+        _document.UndoCommand.Execute(null);
+        Require(_document.Document.Session.Model.Pages[0].OverlayList.Count == 1, "Busy documents reject Ctrl+Z");
+        _document.IsBusy = false;
+        _document.UndoCommand.Execute(null);
+        Require(!_document.IsDirty, "Undo restores the clean document");
+        _document.Pages.CollectionChanged -= listener;
+        _document.FindQuery = "";
+        _document.IsFindVisible = false;
+        Capture(_main, "verified-reader");
+
+        var refs = _document.Document.Session.Model.Pages.ToArray();
+        _document.Document.Session.Apply(new InsertPagesOperation(3,
+            Enumerable.Range(0, 297).Select(i => refs[i % refs.Length]).ToArray()));
+        var before = _document.Pages.ToArray();
+        var watch = Stopwatch.StartNew();
+        _document.Document.Session.Apply(new AddOverlayOperation(150, new NoteAnnotationDraft(40, 90, "Performance", "NexusPDF")));
+        watch.Stop();
+        var kept = before.Where((page, i) => ReferenceEquals(page, _document.Pages[i])).Count();
+        Require(kept == 299, "Editing a 300-page document keeps the other 299 pages");
+        Results.Add(new { Kind = "performance", Pages = 300, Reused = kept, Milliseconds = watch.Elapsed.TotalMilliseconds });
+        _document.Document.Session.Undo();
+        _document.Document.Session.Undo();
+        Require(_document.PageCount == 3 && !_document.IsDirty, "Large-document edits undo without losing pages");
+
+        var page = new TextOverlay("NEXUS PDF 12345", 30, 480, 36, 0xFF000000, 0);
+        var textPdf = Path.Combine(_output, "ocr-text-source.pdf");
+        await _services.Engine.ComposeAsync(new[] { new ComposedPage(_document.Document.PrimaryHandle, 0, 0,
+            new PageOverlay[] { page }) }, textPdf, CancellationToken.None);
+        RenderedPageImage raster;
+        await using (var handle = await _services.Engine.OpenAsync(textPdf, null, CancellationToken.None))
+            raster = await handle.RenderPageAsync(0, 900, 1200, 0, CancellationToken.None);
+        var scanPath = Path.Combine(_output, "ocr-scan.pdf");
+        await _services.Engine.CreateImageDocumentAsync(new[] { new ImagePageSpec(raster.Bgra, raster.PixelWidth, raster.PixelHeight, 450, 600) },
+            scanPath, CancellationToken.None);
+        await using var scan = await OpenedDocument.OpenAsync(_services.Engine, scanPath, null, CancellationToken.None);
+        Require(string.IsNullOrWhiteSpace(await scan.PrimaryHandle.GetPageTextAsync(0, CancellationToken.None)), "OCR fixture has no native text");
+        _services.ApplyOcrSettings("tesseract", "cyrillic");
+        Require(_services.Ocr.IsAvailable && _services.OcrEngine.Id == "tesseract", "Changing the OCR engine takes effect");
+        var target = Path.Combine(_output, "ocr-switch.docx");
+        var summary = await _services.Convert.ExportToWordAsync(scan, target, null, new WordExportOptions(KeepImages: false),
+            new PageAnalysisOptions(RecognizeScans: true), null, CancellationToken.None);
+        using var word = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(target, false);
+        Require(summary.RecognizedPages == 1 && word.MainDocumentPart!.Document!.InnerText.Contains("NEXUS", StringComparison.OrdinalIgnoreCase),
+            "Word export recognizes scans after switching the OCR engine");
+    }
+
+    private static void Require(bool condition, string description)
+    {
+        Results.Add(new { Kind = "check", Description = description, Passed = condition });
+        if (!condition) throw new InvalidOperationException(description);
+        Console.WriteLine("PASS " + description);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, string description)
+    {
+        for (var i = 0; i < 100 && !condition(); i++) await Task.Delay(50);
+        Require(condition(), description);
     }
 
     private static void Capture(Window window, string name)

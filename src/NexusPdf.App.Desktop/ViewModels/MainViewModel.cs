@@ -796,6 +796,7 @@ public sealed partial class MainViewModel : ObservableObject
         doc.CancelPlacement(); // курсор-прицел не должен жить во время сохранения
         doc.IsBusy = true;
         doc.StatusText = Loc.Get("SavingStatus");
+        doc.Busy.Start(Loc.Get("SavingStatus"), canCancel: false);
         try
         {
             // Сохранение правит копию файла на месте: форма, закладки, вложения

@@ -72,8 +72,9 @@
         <!-- Быстрая панель собирается из реестра команд по списку из настроек:
              названия, значки, подсказки и доступность у неё те же, что у
              одноимённых пунктов меню, а состав пользователь меняет сам. -->
-        <ScrollViewer Grid.Column="0" HorizontalScrollBarVisibility="Hidden"
+        <ScrollViewer x:Name="QuickPanelScroll" Grid.Column="0" HorizontalScrollBarVisibility="Auto"
                       VerticalScrollBarVisibility="Disabled" Focusable="False"
+                      SizeChanged="OnQuickPanelSizeChanged" PreviewMouseWheel="OnQuickPanelMouseWheel"
                       Visibility="{Binding ShowQuickPanel, Converter={StaticResource BoolToVis}}">
         <ItemsControl ItemsSource="{Binding QuickPanel.Items}">
           <ItemsControl.ItemsPanel>
@@ -94,7 +95,7 @@
                     <TextBlock Style="{StaticResource ToolGlyph}" Text="{Binding Glyph}"/>
                     <TextBlock Text="{Binding Title}" Margin="6,0,0,0"
                                VerticalAlignment="Center"
-                               Visibility="{Binding DataContext.ShowQuickPanelLabels,
+                               Visibility="{Binding ShowResponsiveQuickPanelLabels,
                                             RelativeSource={RelativeSource AncestorType=Window},
                                             Converter={StaticResource BoolToVis}}"/>
                   </StackPanel>
