@@ -1021,6 +1021,7 @@
   "DragOutDone": "Страницы {0} переданы файлом «{1}».",
   "DragOutFileName": "{0} — стр. {1}.pdf",
   "FormDone": "Готово",
+  "FormQuickHint": "Щёлкните поле и вводите. Tab — далее, Shift+Tab — назад.",
   "FormDoneHint": "Закончить заполнение: подсветка полей гаснет, набранное остаётся в документе",
   "OrganizeRotateLeftTip": "Повернуть влево (Ctrl+L)",
   "OrganizeRotateRightTip": "Повернуть вправо (Ctrl+R)",

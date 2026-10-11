@@ -1021,6 +1021,7 @@
   "DragOutDone": "Сторінки {0} передано файлом «{1}».",
   "DragOutFileName": "{0} — стор. {1}.pdf",
   "FormDone": "Готово",
+  "FormQuickHint": "Клацніть поле й вводьте. Tab — далі, Shift+Tab — назад.",
   "FormDoneHint": "Завершити заповнення: підсвічування полів зникає, набране лишається в документі",
   "OrganizeRotateLeftTip": "Повернути ліворуч (Ctrl+L)",
   "OrganizeRotateRightTip": "Повернути праворуч (Ctrl+R)",

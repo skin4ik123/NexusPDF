@@ -1021,6 +1021,7 @@
   "DragOutDone": "Pages {0} handed over as “{1}”.",
   "DragOutFileName": "{0} — pages {1}.pdf",
   "FormDone": "Done",
+  "FormQuickHint": "Click a field and type. Tab — next, Shift+Tab — previous.",
   "FormDoneHint": "Finish filling: field highlighting goes away, what you typed stays in the document",
   "OrganizeRotateLeftTip": "Rotate left (Ctrl+L)",
   "OrganizeRotateRightTip": "Rotate right (Ctrl+R)",

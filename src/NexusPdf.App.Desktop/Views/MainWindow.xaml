@@ -264,9 +264,10 @@
                     Visibility="{Binding IsGroupForms, Converter={StaticResource BoolToVis}}">
           <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE762;" VerticalAlignment="Center"
                      Foreground="{DynamicResource Accent}"/>
-          <TextBlock Text="{l:Loc FormHint}" VerticalAlignment="Center" Margin="8,0,12,0"
+          <TextBlock Text="{l:Loc FormQuickHint}" ToolTip="{l:Loc FormHint}"
+                     VerticalAlignment="Center" Margin="8,0,12,0"
                      FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
-          <Button Style="{StaticResource ToolButton}" Command="{Binding SelectToolGroupCommand}"
+          <Button x:Name="FormsDoneButton" Style="{StaticResource ToolButton}" Command="{Binding SelectToolGroupCommand}"
                   CommandParameter="Forms" ToolTip="{l:Loc FormDoneHint}">
             <StackPanel Orientation="Horizontal">
               <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE73E;"/>
@@ -497,7 +498,7 @@
         <ToggleButton Style="{StaticResource RailButton}" Tag="&#xE932;" Content="{l:Loc RailEdit}"
                       IsChecked="{Binding IsGroupEdit, Mode=OneWay}"
                       Command="{Binding SelectToolGroupCommand}" CommandParameter="Edit"/>
-        <ToggleButton Style="{StaticResource RailButton}" Tag="&#xE762;" Content="{l:Loc RailForms}"
+        <ToggleButton x:Name="FormsRailButton" Style="{StaticResource RailButton}" Tag="&#xE762;" Content="{l:Loc RailForms}"
                       IsChecked="{Binding IsGroupForms, Mode=OneWay}"
                       Command="{Binding SelectToolGroupCommand}" CommandParameter="Forms"
                       Visibility="{Binding ActiveDocument.HasAcroForm, FallbackValue=Collapsed,

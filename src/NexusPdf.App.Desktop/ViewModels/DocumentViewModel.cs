@@ -870,6 +870,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             HasAcroForm = false;
             return false;
         }
+        if (IsBusy) return false;
         // Заполнение несовместимо с остальными инструментами мыши.
         CancelPlacement();
         StopMeasurement();

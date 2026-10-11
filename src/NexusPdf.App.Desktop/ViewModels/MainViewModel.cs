@@ -1527,8 +1527,9 @@ public sealed partial class MainViewModel : ObservableObject
     private bool _railChanging;
 
     [RelayCommand]
-    private void SelectToolGroup(string? name)
+    private async Task SelectToolGroup(string? name)
     {
+        if (ActiveDocument is { IsBusy: true }) return;
         if (!Enum.TryParse<ToolGroup>(name, out var group))
             return;
         var chosen = ActiveToolGroup == group ? ToolGroup.None : group;
@@ -1556,22 +1557,21 @@ public sealed partial class MainViewModel : ObservableObject
             // «Формы» — тоже режим: открыли группу, и поля уже заполняются. Раньше
             // после неё приходилось искать и нажимать ещё одну кнопку наверху.
             if (chosen == ToolGroup.Forms)
-                _ = EnterFormsFromRailAsync(doc);
+                await doc.EnterFormModeAsync();
             else if (doc.IsFormMode)
-                _ = doc.ExitFormModeAsync();
+                await doc.ExitFormModeAsync();
         }
         finally
         {
             _railChanging = false;
+            SyncRailWithDocument(ActiveDocument);
         }
     }
 
     private async Task EnterFormsFromRailAsync(DocumentViewModel doc)
     {
         await doc.EnterFormModeAsync();
-        // Не включилось (документ занят) — рельс не должен обещать режим, которого нет.
-        if (!doc.IsFormMode && ReferenceEquals(doc, ActiveDocument) && ActiveToolGroup == ToolGroup.Forms)
-            ActiveToolGroup = ToolGroup.None;
+        if (ReferenceEquals(doc, ActiveDocument)) SyncRailWithDocument(doc);
     }
 
     /// <summary>

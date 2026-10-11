@@ -335,7 +335,8 @@ internal static class Program
         _document.FindQuery = "NexusPDF";
         await _document.RunSearchAsync();
         Require(_document.Matches.Count == 3, "Search finds all fixture pages");
-        _document.CurrentPageNumber = 3;
+        _document.GoToPage(3);
+        await WaitUntilAsync(() => _document.CurrentPageNumber == 3, "Page navigation scrolls to the third page");
         var actions = new List<NotifyCollectionChangedAction>();
         NotifyCollectionChangedEventHandler listener = (_, e) => actions.Add(e.Action);
         _document.Pages.CollectionChanged += listener;
@@ -398,7 +399,7 @@ internal static class Program
         _document.CurrentPageNumber = 1;
         foreach (var group in new[] { "Comment", "Edit", "Measure", "Protect" })
         {
-            _main.ViewModel.SelectToolGroupCommand.Execute(group);
+            await _main.ViewModel.SelectToolGroupCommand.ExecuteAsync(group);
             await Task.Delay(120);
             Capture(_main, "main-" + group.ToLowerInvariant());
         }
@@ -464,22 +465,68 @@ internal static class Program
         await _main.ViewModel.OpenFilesAsync(new[] { formPath });
         var form = _main.ViewModel.ActiveDocument!;
         await form.DetectFormsAsync();
-        Require(await form.EnterFormModeAsync(), "Actual AcroForm controls are available in the reader");
+        await ClickFormsButtonAsync("FormsRailButton");
+        Require(form.IsFormMode && _main.ViewModel.IsGroupForms,
+            "One click on Forms immediately enables actual AcroForm fields");
+        _main.UpdateLayout();
+        var done = (Button)_main.FindName("FormsDoneButton");
+        var bounds = done.TransformToAncestor(_main).TransformBounds(new Rect(done.RenderSize));
+        Require(done.IsVisible && bounds.Right <= _main.ActualWidth && bounds.Left >= 0,
+            "The short form hint keeps Done visible within the window");
+        await WaitForReaderAsync();
+        Capture(_main, "main-forms-one-click");
         await form.FormClickAsync(form.Pages[0], 200, 72, 1);
         foreach (var character in "FORM VALUE") await form.FormCharAsync(character, 1);
+        await form.FormKeyAsync(0x09, 1);
+        foreach (var character in "NEXT") await form.FormCharAsync(character, 1);
+        Require((await form.Document.PrimaryHandle.GetFormFieldValuesAsync(0, CancellationToken.None))
+            .Any(field => field.Name == "text2" && field.Value == "NEXT"), "Tab moves input to the next PDF field");
+        await form.FormKeyAsync(0x09, 1, shift: true);
+        await form.FormKeyAsync(0x23, 1);
+        await form.FormCharAsync('!', 1);
         await form.ReleaseFormFieldAsync(1);
         await WaitUntilAsync(() => form.CurrentPageTextInfo == Loc.F("PropFormFields", 3),
             "A form page is described as fields rather than a scan");
         await WaitForReaderAsync();
         Capture(_main, "main-filled-form");
         Require((await form.Document.PrimaryHandle.GetFormFieldValuesAsync(0, CancellationToken.None))
-            .Any(field => field.Name == "text1" && field.Value == "FORM VALUE"), "Typing into a form updates the actual PDF field");
+            .Any(field => field.Name == "text1" && field.Value == "FORM VALUE!"), "Shift+Tab returns input to the previous PDF field");
+        await ClickFormsButtonAsync("FormsDoneButton");
+        Require(!form.IsFormMode && !_main.ViewModel.IsGroupForms && form.IsDirty,
+            "Done exits filling and keeps edited field values unsaved until Save");
+        await WaitForReaderAsync();
+        Capture(_main, "main-forms-done");
         await _main.ViewModel.SaveCommand.ExecuteAsync(null);
         Require(!form.IsDirty, "Saving the filled form clears its unsaved state");
         await using var saved = await _services.Engine.OpenAsync(formPath, null, CancellationToken.None);
-        Require((await saved.GetFormFieldValuesAsync(0, CancellationToken.None)).Any(field => field.Value == "FORM VALUE"),
-            "The filled form retains its value after reopening the saved file");
+        var savedFields = await saved.GetFormFieldValuesAsync(0, CancellationToken.None);
+        Require(savedFields.Any(field => field.Name == "text1" && field.Value == "FORM VALUE!") &&
+            savedFields.Any(field => field.Name == "text2" && field.Value == "NEXT"),
+            "Both filled fields retain their values after exiting and reopening the saved file");
+        await form.DetectFormsAsync();
+        await form.FillFieldAtAsync(form.Pages[0], 200, 72, 1);
+        Require(form.IsFormMode && form.HasActiveFormPage && !_main.ViewModel.IsGroupForms && !form.IsDirty,
+            "Clicking a field in the reader enables filling without a toolbar step or false unsaved state");
+        await form.EscapeFormAsync(1);
+        Require(form.IsFormMode && !form.HasActiveFormPage, "First Escape releases the field without disabling filling");
+        await form.EscapeFormAsync(1);
+        Require(!form.IsFormMode, "Second Escape exits filling");
+        form.IsBusy = true;
+        await ClickFormsButtonAsync("FormsRailButton");
+        Require(!form.IsFormMode && !_main.ViewModel.IsGroupForms, "A busy document cannot enter filling or show a misleading Forms toolbar");
+        form.IsBusy = false;
         _main.ViewModel.ActiveDocument = _document;
+    }
+
+    private static async Task ClickFormsButtonAsync(string name)
+    {
+        var button = (System.Windows.Controls.Primitives.ButtonBase)_main.FindName(name);
+        _main.UpdateLayout();
+        Require(button.IsVisible && button.IsEnabled, name + " is available as an actual WPF action");
+        typeof(System.Windows.Controls.Primitives.ButtonBase).GetMethod("OnClick", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(button, null);
+        await (_main.ViewModel.SelectToolGroupCommand.ExecutionTask ?? Task.CompletedTask);
+        await _main.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.DataBind);
     }
 
     private static async Task CheckPropertiesAsync(string expected)
