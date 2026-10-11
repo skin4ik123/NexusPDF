@@ -1201,7 +1201,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             var text = await handle.GetPageTextAsync(pageIndex, CancellationToken.None);
             var letters = text.Count(char.IsLetterOrDigit);
             var fields = letters == 0
-                ? (await handle.GetFormFieldValuesAsync(pageIndex, CancellationToken.None)).Count
+                ? (await handle.GetFormFieldAreasAsync(pageIndex, 0, CancellationToken.None)).Count
                 : 0;
             if (version != _pagePropertiesVersion) return;
             CurrentPageTextInfo = letters switch
