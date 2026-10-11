@@ -6,7 +6,7 @@
         xmlns:vm="clr-namespace:NexusPdf.App.Desktop.ViewModels"
         xmlns:views="clr-namespace:NexusPdf.App.Desktop.Views"
         Title="{Binding WindowTitle}"
-        Icon="/NexusPdf.App.Desktop;component/Assets/app.ico"
+        Icon="/NexusPdf;component/Assets/app.ico"
         Width="1200" Height="800" MinWidth="860" MinHeight="560"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBg}"
