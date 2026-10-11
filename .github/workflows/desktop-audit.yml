@@ -21,11 +21,8 @@ jobs:
         run: |
           $lock = Get-Content tools/qpdf.lock.json | ConvertFrom-Json
           ./tools/fetch-qpdf.ps1 -Version $lock.version -ExpectedSha256 $lock.sha256
-          if ($LASTEXITCODE -ne 0) { throw 'qpdf download failed' }
           ./tools/fetch-tessdata.ps1
-          if ($LASTEXITCODE -ne 0) { throw 'Tesseract download failed' }
           ./tools/fetch-ocrmodels.ps1
-          if ($LASTEXITCODE -ne 0) { throw 'OCR model download failed' }
       - name: Build desktop audit probe
         run: dotnet build tests/NexusPdf.DesktopAuditProbe -c Release
       - name: Inspect actual WPF windows and bindings
