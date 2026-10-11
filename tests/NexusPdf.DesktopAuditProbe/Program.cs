@@ -37,7 +37,8 @@ internal static class Program
     {
         _output = Path.GetFullPath(args.FirstOrDefault() ?? "artifacts/ui-audit");
         Directory.CreateDirectory(_output);
-        var app = new NexusPdf.App.Desktop.App();
+        System.Windows.Application.ResourceAssembly = typeof(NexusPdf.App.Desktop.App).Assembly;
+        var app = new ProbeApp();
         app.InitializeComponent();
         app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
         Loc.Load("ru");
@@ -258,6 +259,12 @@ internal static class Program
             yield return child;
             foreach (var nested in Descendants(child)) yield return nested;
         }
+    }
+
+    private sealed class ProbeApp : NexusPdf.App.Desktop.App
+    {
+        protected override void OnStartup(StartupEventArgs e) { }
+        protected override void OnExit(ExitEventArgs e) { }
     }
 
     private sealed class BindingListener : TraceListener
