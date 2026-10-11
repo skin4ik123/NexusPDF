@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="../../src/NexusPdf.App.Desktop/ViewModels/BulkObservableCollection.cs" Link="BulkObservableCollection.cs" />
   </ItemGroup>
 
   <ItemGroup>

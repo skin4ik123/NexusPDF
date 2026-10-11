@@ -35,7 +35,18 @@ public sealed partial class PageViewModel : ObservableObject
         SizePt = sizePt;
     }
 
-    public int LogicalIndex { get; }
+    public int LogicalIndex { get; private set; }
+
+    internal void SetLogicalIndex(int index)
+    {
+        if (LogicalIndex == index) return;
+        CancelAll();
+        _pendingKey = null;
+        LogicalIndex = index;
+        OnPropertyChanged(nameof(LogicalIndex));
+        OnPropertyChanged(nameof(PageNumber));
+        OnPropertyChanged(nameof(AccessibleName));
+    }
     /// <summary>Документ, которому принадлежит страница: нужен переносу между документами.</summary>
     public DocumentViewModel Owner => _owner;
 
@@ -446,14 +457,16 @@ public sealed partial class PageViewModel : ObservableObject
 
     /// <summary>Ширина растра, в которой миниатюра нарисована (или рисуется).</summary>
     private int _thumbRenderedWidth;
-    private int _thumbPendingWidth;
+    private int _thumbFormVersion = -1;
+    private string? _thumbPendingKey;
 
     public async void EnsureThumbnail()
     {
         // Правки должны быть видны и на миниатюре: иначе список страниц
         // показывает документ, которого уже нет.
         var overlays = _owner.Document.GetOverlaySignature(LogicalIndex);
-        if (_thumbOverlays != overlays)
+        var formVersion = _owner.FormRenderVersion;
+        if (_thumbOverlays != overlays || _thumbFormVersion != formVersion)
         {
             ThumbImage = null;
             _thumbOverlays = overlays;
@@ -464,27 +477,28 @@ public sealed partial class PageViewModel : ObservableObject
         var wanted = _owner.ThumbPixelWidth;
         if (ThumbImage != null && _thumbRenderedWidth == wanted)
             return;
-        if (_thumbCts is { IsCancellationRequested: false } && _thumbPendingWidth == wanted)
-            return;
 
         var scale = wanted / Math.Max(1.0, SizePt.WidthPoints);
         var pixelHeight = Math.Max(16, (int)(SizePt.HeightPoints * scale));
 
         var key = RenderCache.MakeKey(PageRef.SourceId, PageRef.SourcePageIndex, PageRef.RotationOffset, wanted)
-                  + ":f" + _owner.FormRenderVersion + ":o" + overlays;
+                  + ":f" + formVersion + ":o" + overlays;
+        if (_thumbCts is { IsCancellationRequested: false } && _thumbPendingKey == key)
+            return;
         if (_owner.Cache.TryGet(key) is { } cached)
         {
             _thumbCts?.Cancel();
             _thumbCts = null;
             ThumbImage = cached;
             _thumbRenderedWidth = wanted;
+            _thumbFormVersion = formVersion;
             return;
         }
 
         _thumbCts?.Cancel();
         var cts = new CancellationTokenSource();
         _thumbCts = cts;
-        _thumbPendingWidth = wanted;
+        _thumbPendingKey = key;
         try
         {
             var raw = await _owner.Document.RenderLogicalPageAsync(LogicalIndex, wanted, pixelHeight, cts.Token);
@@ -494,6 +508,7 @@ public sealed partial class PageViewModel : ObservableObject
             {
                 ThumbImage = bitmap;
                 _thumbRenderedWidth = wanted;
+                _thumbFormVersion = formVersion;
             }
         }
         catch (OperationCanceledException) { }
@@ -504,14 +519,18 @@ public sealed partial class PageViewModel : ObservableObject
         finally
         {
             if (_thumbCts == cts)
+            {
                 _thumbCts = null;
+                _thumbPendingKey = null;
+            }
         }
     }
 
     /// <summary>Миниатюра есть, но под другой размер карточки — перерисовать; не было — не трогать (её закажет показ).</summary>
     public void RefreshThumbnailIfStale()
     {
-        if (ThumbImage != null && _thumbRenderedWidth != _owner.ThumbPixelWidth)
+        if (ThumbImage != null && (_thumbRenderedWidth != _owner.ThumbPixelWidth
+                                  || _thumbFormVersion != _owner.FormRenderVersion))
             EnsureThumbnail();
     }
 

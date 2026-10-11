@@ -32,7 +32,7 @@ public partial class DocPropertiesDialog : Window
                 var info = new FileInfo(path);
                 rows.Add(new Row(Loc.Get("PropsPath"), path));
                 rows.Add(new Row(Loc.Get("PropsFileSize"),
-                    $"{info.Length / 1024.0 / 1024.0:0.##} МБ ({info.Length:N0} Б)"));
+                    $"{info.Length / 1024.0 / 1024.0:0.##} {Loc.Get("UnitMb")} ({info.Length:N0} {Loc.Get("UnitB")})"));
             }
             rows.Add(new Row(Loc.Get("PropsPages"), document.PageCount.ToString(CultureInfo.InvariantCulture)));
 

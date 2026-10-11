@@ -38,7 +38,9 @@ internal static class Program
         _output = Path.GetFullPath(args.FirstOrDefault() ?? "artifacts/ui-audit");
         Directory.CreateDirectory(_output);
         var app = new ProbeApp();
-        app.InitializeComponent();
+        foreach (var theme in new[] { "Light", "Styles" })
+            app.Resources.MergedDictionaries.Add(new ResourceDictionary
+                { Source = new Uri("/NexusPdf;component/Themes/" + theme + ".xaml", UriKind.Relative) });
         app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
         Loc.Load("ru");
         WindowScreenFit.HookAllWindows();
@@ -202,6 +204,9 @@ internal static class Program
         if (type == typeof(DocumentImageProfile)) return DocumentImageProfile.Unknown;
         if (type == typeof(PrintJobPlan)) return ManualPlan();
         if (type == typeof(Func<string, Task<bool>>)) return new Func<string, Task<bool>>(_ => Task.FromResult(true));
+        if (type == typeof(Func<int, Task<byte[]>>)) return new Func<int, Task<byte[]>>(_ => Task.FromResult(new byte[128]));
+        if (type == typeof(IReadOnlyList<PdfAttachment>)) return new[] { new PdfAttachment(0, "Приложение.pdf", 81920), new PdfAttachment(1, "Таблица.xlsx", 15360) };
+        if (type == typeof(IReadOnlyList<PdfLayer>)) return new[] { new PdfLayer("1 0 R", "Основной чертёж", true), new PdfLayer("2 0 R", "Размеры и примечания", true), new PdfLayer("3 0 R", "Дополнительный слой", false) };
         if (type == typeof(IReadOnlyList<DocumentViewModel>)) return new[] { _document };
         if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IReadOnlyList<>))
             return Array.CreateInstance(type.GetGenericArguments()[0], 0);
@@ -260,7 +265,7 @@ internal static class Program
         }
     }
 
-    private sealed class ProbeApp : NexusPdf.App.Desktop.App
+    private sealed class ProbeApp : System.Windows.Application
     {
         protected override void OnStartup(StartupEventArgs e) { }
         protected override void OnExit(ExitEventArgs e) { }

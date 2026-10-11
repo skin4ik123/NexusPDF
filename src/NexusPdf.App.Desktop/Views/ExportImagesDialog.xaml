@@ -19,6 +19,26 @@
                    Foreground="{DynamicResource TextBrush}"/>
     </StackPanel>
 
+    <StackPanel Margin="0,12,0,0">
+      <StackPanel.Style>
+        <Style TargetType="StackPanel">
+          <Setter Property="Visibility" Value="Collapsed"/>
+          <Style.Triggers>
+            <DataTrigger Binding="{Binding IsChecked, ElementName=FormatJpeg}" Value="True">
+              <Setter Property="Visibility" Value="Visible"/>
+            </DataTrigger>
+          </Style.Triggers>
+        </Style>
+      </StackPanel.Style>
+      <TextBlock Text="{l:Loc ExportJpegQuality}" Foreground="{DynamicResource TextSecondary}" FontSize="12" Margin="0,0,0,4"/>
+      <ComboBox x:Name="QualityCombo" Width="120" HorizontalAlignment="Left" SelectedIndex="1"
+                AutomationProperties.Name="{l:Loc ExportJpegQuality}">
+        <ComboBoxItem Content="80"/>
+        <ComboBoxItem Content="90"/>
+        <ComboBoxItem Content="100"/>
+      </ComboBox>
+    </StackPanel>
+
     <TextBlock Text="{l:Loc ExportDpi}" Foreground="{DynamicResource TextSecondary}" FontSize="12"
                Margin="0,12,0,4"/>
     <ComboBox x:Name="DpiCombo" AutomationProperties.Name="{l:Loc ExportDpi}" Width="120" HorizontalAlignment="Left" SelectedIndex="1">
@@ -28,14 +48,23 @@
     </ComboBox>
 
     <StackPanel Margin="0,12,0,0">
-      <RadioButton x:Name="ScopeAll" Content="{l:Loc ExportScopeAll}" IsChecked="True"
+      <RadioButton x:Name="ScopeAll" Content="{l:Loc ExportScopeAll}" IsChecked="True" GroupName="Pages" Checked="OnScopeChanged"
                    Foreground="{DynamicResource TextBrush}"/>
-      <RadioButton x:Name="ScopeCurrent" Content="{l:Loc ExportScopeCurrent}" Margin="0,6,0,0"
+      <RadioButton x:Name="ScopeCurrent" Content="{l:Loc ExportScopeCurrent}" Margin="0,6,0,0" GroupName="Pages" Checked="OnScopeChanged"
                    Foreground="{DynamicResource TextBrush}"/>
+      <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+        <RadioButton x:Name="ScopeRange" Content="{l:Loc ExportScopeRange}" GroupName="Pages" Checked="OnScopeChanged"
+                     VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}"/>
+        <TextBox x:Name="RangeBox" Width="170" Margin="10,0,0,0" Style="{StaticResource ThemedTextBox}"
+                 IsEnabled="{Binding IsChecked, ElementName=ScopeRange}" TextChanged="OnRangeChanged"
+                 AutomationProperties.Name="{l:Loc ExportScopeRange}"/>
+      </StackPanel>
+      <TextBlock x:Name="RangeHint" Foreground="{DynamicResource TextSecondary}" FontSize="11"
+                 Margin="0,4,0,0" TextWrapping="Wrap"/>
     </StackPanel>
 
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
-      <Button Content="{l:Loc ExportAction}" Style="{StaticResource PrimaryButton}" MinWidth="130"
+      <Button x:Name="ExportButton" Content="{l:Loc ExportAction}" Style="{StaticResource PrimaryButton}" MinWidth="130"
               IsDefault="True" Click="OnExport"/>
       <Button Content="{l:Loc Cancel}" Style="{StaticResource LinkButton}" Margin="8,0,0,0" IsCancel="True"/>
     </StackPanel>

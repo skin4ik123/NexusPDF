@@ -51,7 +51,7 @@ public sealed class ConvertService
         IProgress<(int Done, int Total)>? progress,
         CancellationToken ct)
     {
-        if (dpi is < 24 or > 1200)
+        if (!double.IsFinite(dpi) || dpi is < 24 or > 1200)
             throw new ArgumentOutOfRangeException(nameof(dpi), "DPI должен быть в пределах 24–1200.");
         var targets = logicalIndices ?? Enumerable.Range(0, document.Session.Model.Pages.Count).ToList();
         var done = 0;
@@ -83,7 +83,7 @@ public sealed class ConvertService
             ct.ThrowIfCancellationRequested();
             // Текст берётся со страницы С ПРАВКАМИ: экспорт сразу после
             // распознавания не должен молча отдавать пустой исходный лист.
-            var (handle, pageIndex) = await document.ResolveTextPageAsync(i, ct).ConfigureAwait(false);
+            var (handle, pageIndex, _) = await document.ResolveExportPageAsync(i, ct).ConfigureAwait(false);
             var text = await handle.GetPageTextAsync(pageIndex, ct).ConfigureAwait(false);
             if (i > 0)
                 builder.AppendLine().AppendLine($"===== Страница {i + 1} =====");
@@ -110,6 +110,7 @@ public sealed class ConvertService
         IProgress<(int Done, int Total)>? progress,
         CancellationToken ct)
     {
+        using var recognition = analysis.RecognizeScans ? _ocr?.BeginOperation() : null;
         var targets = logicalIndices ??
                       Enumerable.Range(0, document.Session.Model.Pages.Count).ToList();
         if (targets.Count == 0)
@@ -130,11 +131,19 @@ public sealed class ConvertService
             progress?.Report((i + 1, targets.Count));
         }
 
-        return XlsxExporter.Write(targetPath, pages, options) with
-        {
-            ScannedPages = scans,
-            RecognizedPages = recognized,
-        };
+        ExcelExportSummary? summary = null;
+        await SafeFileReplace.WriteAndReplaceAsync(targetPath,
+            temporary =>
+            {
+                ct.ThrowIfCancellationRequested();
+                summary = XlsxExporter.Write(temporary, pages, options) with
+                {
+                    ScannedPages = scans,
+                    RecognizedPages = recognized,
+                };
+                return Task.CompletedTask;
+            }, _ => Task.CompletedTask, keepBackup: false, ct).ConfigureAwait(false);
+        return summary!;
     }
 
     /// <summary>Разобранная страница вместе со всем, что нужно писателям.</summary>
@@ -155,15 +164,13 @@ public sealed class ConvertService
         OpenedDocument document, int logical, PageAnalysisOptions analysis,
         bool keepLinks, bool withImages, bool withNotes, CancellationToken ct)
     {
-        var (handle, pageIndex) = await document.ResolveTextPageAsync(logical, ct).ConfigureAwait(false);
+        var (handle, pageIndex, extra) = await document.ResolveExportPageAsync(logical, ct).ConfigureAwait(false);
         var descriptor = handle.Info.Pages[pageIndex];
 
         // Размер движок отдаёт уже с учётом /Rotate, а координаты объектов —
         // нет. Поэтому размер разворачивается обратно в «сырой», объекты
         // поворачиваются вперёд, и всё сходится в одной системе координат.
         var ownRotation = await handle.GetPageRotationAsync(pageIndex, ct).ConfigureAwait(false);
-        var baked = document.GetOverlaySignature(logical) != 0;
-        var extra = baked ? 0 : document.Session.Model.Pages[logical].RotationOffset;
         var rotation = PageRotation.Normalize(ownRotation + extra);
 
         var (rawWidth, rawHeight) = PageRotation.Size(
@@ -232,28 +239,33 @@ public sealed class ConvertService
         IProgress<(int Done, int Total)>? progress,
         CancellationToken ct)
     {
+        using var recognition = analysis.RecognizeScans ? _ocr?.BeginOperation() : null;
         var targets = logicalIndices ??
                       Enumerable.Range(0, document.Session.Model.Pages.Count).ToList();
         if (targets.Count == 0)
             throw new InvalidOperationException("Нет страниц для экспорта.");
 
-        using var writer = new DocxExporter(targetPath, options);
-        var scans = 0;
-        var recognized = 0;
-        for (var i = 0; i < targets.Count; i++)
-        {
-            ct.ThrowIfCancellationRequested();
-            var page = await ReadPageAsync(document, targets[i], analysis, options.KeepLinks,
-                options.KeepImages, options.KeepComments, ct).ConfigureAwait(false);
-            if (page.WasScan) scans++;
-            if (page.Recognized) recognized++;
-
-            writer.AddPage(page.Layout, page.Links, page.Notes, page.Images, targets.Count);
-            progress?.Report((i + 1, targets.Count));
-        }
-
-        writer.Finish();
-        return writer.Summary with { ScannedPages = scans, RecognizedPages = recognized };
+        WordExportSummary? summary = null;
+        await SafeFileReplace.WriteAndReplaceAsync(targetPath,
+            async temporary =>
+            {
+                using var writer = new DocxExporter(temporary, options);
+                var scans = 0;
+                var recognized = 0;
+                for (var i = 0; i < targets.Count; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var page = await ReadPageAsync(document, targets[i], analysis, options.KeepLinks,
+                        options.KeepImages, options.KeepComments, ct).ConfigureAwait(false);
+                    if (page.WasScan) scans++;
+                    if (page.Recognized) recognized++;
+                    writer.AddPage(page.Layout, page.Links, page.Notes, page.Images, targets.Count);
+                    progress?.Report((i + 1, targets.Count));
+                }
+                writer.Finish();
+                summary = writer.Summary with { ScannedPages = scans, RecognizedPages = recognized };
+            }, _ => Task.CompletedTask, keepBackup: false, ct).ConfigureAwait(false);
+        return summary!;
     }
 
     /// <summary>

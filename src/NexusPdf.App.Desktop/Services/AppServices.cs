@@ -28,7 +28,7 @@ public sealed class AppServices : IAsyncDisposable
         PrintJobs = new NexusPdf.App.Desktop.Services.Printing.PrintJobService();
         PrintQueue = new NexusPdf.App.Desktop.Services.Printing.PrintQueueService();
         Signatures = new SignatureStore();
-        OcrEngine = CreateRecognizer(settings);
+        OcrEngine = new NexusPdf.Ocr.RetainedTextRecognizer(CreateRecognizer(settings));
         Ocr = new OcrService(OcrEngine);
         Convert = new ConvertService(engine, Ocr);
         Layers = new LayerService(Qpdf);
@@ -95,11 +95,12 @@ public sealed class AppServices : IAsyncDisposable
         SaveSettings();
 
         var previous = OcrEngine;
-        OcrEngine = CreateRecognizer(Settings);
+        OcrEngine = new NexusPdf.Ocr.RetainedTextRecognizer(CreateRecognizer(Settings));
         Ocr = new OcrService(OcrEngine);
+        Convert = new ConvertService(Engine, Ocr);
         previous.Dispose();
     }
-    public ConvertService Convert { get; }
+    public ConvertService Convert { get; private set; }
     public LayerService Layers { get; }
 
     public void SaveSettings()
@@ -116,6 +117,7 @@ public sealed class AppServices : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        PrintQueue.Dispose();
         OcrEngine.Dispose();
         await Engine.DisposeAsync();
     }

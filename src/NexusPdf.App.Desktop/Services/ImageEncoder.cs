@@ -104,13 +104,13 @@ public static class ImageEncoder
         return stream.ToArray();
     }
 
-    public static byte[] Encode(RenderedPageImage image, bool jpeg, double dpi)
+    public static byte[] Encode(RenderedPageImage image, bool jpeg, double dpi, int jpegQuality = 90)
     {
         var source = BitmapSource.Create(
             image.PixelWidth, image.PixelHeight, dpi, dpi,
             PixelFormats.Bgra32, null, image.Bgra, image.Stride);
         BitmapEncoder encoder = jpeg
-            ? new JpegBitmapEncoder { QualityLevel = 90 }
+            ? new JpegBitmapEncoder { QualityLevel = Math.Clamp(jpegQuality, 1, 100) }
             : new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(source));
         using var stream = new MemoryStream();

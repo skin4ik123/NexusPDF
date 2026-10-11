@@ -69,8 +69,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     public bool IsDirty => Document.Session.IsDirty || _formModified;
     public int PageCount => Pages.Count;
-    public bool CanUndo => Document.Session.History.CanUndo;
-    public bool CanRedo => Document.Session.History.CanRedo;
+    public bool CanUndo => !IsBusy && Document.Session.History.CanUndo;
+    public bool CanRedo => !IsBusy && Document.Session.History.CanRedo;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ZoomPercentText))]
@@ -215,6 +215,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     private string _statusText = Loc.Get("Ready");
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanUndo))]
+    [NotifyPropertyChangedFor(nameof(CanRedo))]
     private bool _isBusy;
 
     /// <summary>
@@ -235,30 +237,32 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     partial void OnFindQueryChanged(string value)
     {
-        Matches = Array.Empty<SearchMatch>();
-        _currentMatch = -1;
-        FindStatus = "";
-        ClearHighlights();
+        ClearSearch();
 
         // Поиск по мере ввода: ждать Enter, как раньше, — лишний шаг, которого
         // нет ни в одном современном просмотрщике. Пауза гасит поиск на каждую
         // букву при наборе.
+        ScheduleSearch();
+    }
+
+    private void ScheduleSearch(bool preservePosition = false)
+    {
         _findDebounceCts?.Cancel();
-        if (string.IsNullOrWhiteSpace(value))
+        if (string.IsNullOrWhiteSpace(FindQuery))
             return;
         var cts = new CancellationTokenSource();
         _findDebounceCts = cts;
-        _ = RunSearchAfterPauseAsync(cts);
+        _ = RunSearchAfterPauseAsync(cts, preservePosition);
     }
 
-    private async Task RunSearchAfterPauseAsync(CancellationTokenSource cts)
+    private async Task RunSearchAfterPauseAsync(CancellationTokenSource cts, bool preservePosition)
     {
         try
         {
             await Task.Delay(350, cts.Token);
             if (!ReferenceEquals(cts, _findDebounceCts))
                 return;
-            await RunSearchAsync();
+            await RunSearchAsync(preservePosition);
         }
         catch (OperationCanceledException)
         {
@@ -2253,6 +2257,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     [RelayCommand]
     private void Undo()
     {
+        if (IsBusy) return;
         // После отмены прежние номера указывают на другие страницы: оставить
         // их выбранными значит подставить под следующую команду не то.
         _organizeSelectionAfterRebuild = Array.Empty<int>();
@@ -2262,6 +2267,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     [RelayCommand]
     private void Redo()
     {
+        if (IsBusy) return;
         _organizeSelectionAfterRebuild = Array.Empty<int>();
         Document.Session.Redo();
     }
@@ -2399,7 +2405,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         await ShowCurrentMatchAsync();
     }
 
-    public async Task RunSearchAsync()
+    public async Task RunSearchAsync(bool preservePosition = false)
     {
         _searchCts?.Cancel();
         var cts = new CancellationTokenSource();
@@ -2427,26 +2433,31 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             }
             else
             {
-                _currentMatch = 0;
-                await ShowCurrentMatchAsync();
+                _currentMatch = preservePosition
+                    ? Math.Max(0, result.ToList().FindIndex(m => m.LogicalPageIndex >= CurrentPageNumber - 1))
+                    : 0;
+                await ShowCurrentMatchAsync(cts.Token, navigate: !preservePosition);
             }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             Serilog.Log.Warning(ex, "Поиск прерван ошибкой");
-            FindStatus = Loc.Get("NoMatches");
+            if (!cts.IsCancellationRequested && ReferenceEquals(cts, _searchCts))
+                FindStatus = Loc.Get("NoMatches");
         }
         finally
         {
-            StatusText = Loc.Get("Ready");
+            if (ReferenceEquals(cts, _searchCts)) StatusText = Loc.Get("Ready");
         }
     }
 
-    private async Task ShowCurrentMatchAsync()
+    private async Task ShowCurrentMatchAsync(CancellationToken ct = default, bool navigate = true)
     {
         if (_currentMatch < 0 || _currentMatch >= Matches.Count) return;
         var match = Matches[_currentMatch];
+        var matches = Matches;
+        var stamp = Document.Session.ChangeStamp;
         if (match.LogicalPageIndex >= Pages.Count) return; // страницы изменились после поиска
         FindStatus = Loc.F("MatchesFound", _currentMatch + 1, Matches.Count);
 
@@ -2459,20 +2470,25 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             // исходный лист не знает этих символов, и подсветка либо
             // пропадала, либо вставала не на то слово.
             var (handle, pageIndex) = await Document.ResolveTextPageAsync(
-                match.LogicalPageIndex, CancellationToken.None);
+                match.LogicalPageIndex, ct);
             var rects = await handle.GetTextRectsAsync(
-                pageIndex, match.CharIndex, match.Length, CancellationToken.None);
+                pageIndex, match.CharIndex, match.Length, ct);
+            if (ct.IsCancellationRequested || !ReferenceEquals(matches, Matches) ||
+                stamp != Document.Session.ChangeStamp) return;
             page.Highlights = rects
                 .Select(r => TransformRectToDiu(r, page))
                 .ToList();
             _highlightedPage = page;
         }
+        catch (OperationCanceledException) { return; }
         catch (Exception ex)
         {
             Serilog.Log.Warning(ex, "Не удалось получить прямоугольники подсветки");
         }
 
-        GoToPage(match.LogicalPageIndex + 1);
+        if (navigate && !ct.IsCancellationRequested && ReferenceEquals(matches, Matches) &&
+            stamp == Document.Session.ChangeStamp)
+            GoToPage(match.LogicalPageIndex + 1);
     }
 
     /// <summary>
@@ -2534,6 +2550,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     private void ClearSearch()
     {
+        _findDebounceCts?.Cancel();
         _searchCts?.Cancel();
         Matches = Array.Empty<SearchMatch>();
         _currentMatch = -1;
@@ -2563,6 +2580,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         OnPropertyChanged(nameof(CanUndo));
         OnPropertyChanged(nameof(CanRedo));
         ClearSearch();
+        if (IsFindVisible) ScheduleSearch(preservePosition: true);
         RemapBookmarks(); // страницы могли переставить или удалить
         DropRestoreOffer();
         if (IsCommentsVisible)
@@ -2846,10 +2864,9 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     private void RebuildPages()
     {
-        foreach (var page in Pages)
-            page.CancelAll();
-
         var model = Document.Session.Model;
+        var previous = Pages.GroupBy(p => p.PageRef)
+            .ToDictionary(g => g.Key, g => new Queue<PageViewModel>(g));
 
         // Выбор в организаторе переживает пересборку. Команда, знающая, куда
         // уехали страницы, называет новый выбор сама; иначе он переносится по
@@ -2868,16 +2885,26 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         {
             for (var i = 0; i < model.Pages.Count; i++)
             {
-                rebuilt.Add(new PageViewModel(this, i, model.Pages[i], Document.GetLogicalPageSize(i))
+                var reference = model.Pages[i];
+                var size = Document.GetLogicalPageSize(i);
+                var page = previous.TryGetValue(reference, out var candidates) && candidates.Count > 0
+                    ? candidates.Dequeue()
+                    : new PageViewModel(this, i, reference, size);
+                if (page.SizePt != size)
                 {
-                    IsOrganizeSelected = selected.Contains(i),
-                });
+                    page.CancelAll();
+                    page = new PageViewModel(this, i, reference, size);
+                }
+                page.SetLogicalIndex(i);
+                page.IsOrganizeSelected = selected.Contains(i);
+                rebuilt.Add(page);
             }
+            foreach (var removed in previous.Values.SelectMany(q => q)) removed.CancelAll();
             PagesRebuilding?.Invoke(this, EventArgs.Empty);
             // Одно уведомление на весь список: триста отдельных добавлений держали
             // поток интерфейса секунду, и всё это время документ не показывался.
             var started = System.Diagnostics.Stopwatch.StartNew();
-            Pages.ReplaceAll(rebuilt);
+            Pages.Reconcile(rebuilt);
             if (rebuilt.Count > 50)
                 Serilog.Log.Debug("Список из {Count} страниц собран за {Ms:N0} мс",
                     rebuilt.Count, started.Elapsed.TotalMilliseconds);
@@ -2887,6 +2914,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             _rebuildingPages = false;
         }
         RecountOrganizeSelection();
+        foreach (var page in Pages)
+        {
+            page.RefreshIfShown();
+            page.RefreshThumbnailIfStale();
+        }
         PagesRebuilt?.Invoke(this, EventArgs.Empty);
 
         OnPropertyChanged(nameof(PageCount));
@@ -2903,6 +2935,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     public async ValueTask DisposeAsync()
     {
+        _findDebounceCts?.Cancel();
         _searchCts?.Cancel();
         foreach (var page in Pages)
             page.CancelAll();

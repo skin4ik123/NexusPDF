@@ -187,6 +187,7 @@ public sealed class SaveService
             ct);
         if (backupPath != null)
             document.BackupTaken = true;
+        document.PreserveTemporaryFile(fullTarget);
 
         // Пока файл записывался, человек мог продолжить работу. Тогда документ
         // НЕ переоткрывается из записанного файла (это стёрло бы новые правки):

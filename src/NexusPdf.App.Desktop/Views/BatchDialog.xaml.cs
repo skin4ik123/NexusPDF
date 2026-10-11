@@ -8,6 +8,7 @@ using NexusPdf.App.Desktop.Localization;
 using NexusPdf.App.Desktop.Services;
 using NexusPdf.Application;
 using NexusPdf.Export;
+using NexusPdf.Infrastructure;
 using NexusPdf.Pdf.Abstractions;
 using Serilog;
 
@@ -260,8 +261,10 @@ public partial class BatchDialog : Window
                         async (image, pageIndex, effectiveDpi, token) =>
                         {
                             var file = Path.Combine(imagesDir, $"{baseName}-{pageIndex + 1:000}.png");
-                            await File.WriteAllBytesAsync(file,
-                                ImageEncoder.Encode(image, jpeg: false, effectiveDpi), token);
+                            var bytes = ImageEncoder.Encode(image, jpeg: false, effectiveDpi);
+                            await SafeFileReplace.WriteAndReplaceAsync(file,
+                                tmp => File.WriteAllBytesAsync(tmp, bytes, token), _ => Task.CompletedTask,
+                                keepBackup: false, token);
                         },
                         null, ct);
                 }

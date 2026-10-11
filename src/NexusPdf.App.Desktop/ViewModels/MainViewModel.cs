@@ -10,6 +10,7 @@ using NexusPdf.App.Desktop.Services;
 using NexusPdf.App.Desktop.Views;
 using NexusPdf.Application;
 using NexusPdf.Export;
+using NexusPdf.Infrastructure;
 using NexusPdf.Pdf.Abstractions;
 using Serilog;
 
@@ -339,11 +340,12 @@ public sealed partial class MainViewModel : ObservableObject
         if (RejectIfTargetOpenAnywhere(save.FileName)) return;
 
         _convertBusy = true;
+        var temporaryParts = new List<string>();
         try
         {
             var temp = NexusPdf.Infrastructure.AppPaths.DroppedFilesFolder;
             Directory.CreateDirectory(temp);
-            var parts = new List<string>();
+            var parts = temporaryParts;
             var run = new List<string>();
 
             async Task FlushImagesAsync()
@@ -353,8 +355,8 @@ public sealed partial class MainViewModel : ObservableObject
                 run.Clear();
                 var specs = await Task.Run(() => batch.Select(ImageEncoder.DecodeAsPageSpec).ToList());
                 var part = Path.Combine(temp, $"images-{Guid.NewGuid():N}.pdf");
-                await _services.Convert.CreateFromImagesAsync(specs, part, CancellationToken.None);
                 parts.Add(part);
+                await _services.Convert.CreateFromImagesAsync(specs, part, CancellationToken.None);
             }
 
             foreach (var file in files)
@@ -370,7 +372,9 @@ public sealed partial class MainViewModel : ObservableObject
             await FlushImagesAsync();
 
             if (parts.Count == 1)
-                File.Copy(parts[0], save.FileName, overwrite: true);
+                await SafeFileReplace.WriteAndReplaceAsync(save.FileName,
+                    tmp => { File.Copy(parts[0], tmp); return Task.CompletedTask; },
+                    _ => Task.CompletedTask, keepBackup: false, CancellationToken.None);
             else
                 await _services.Convert.MergeAsync(parts, save.FileName, CancellationToken.None);
 
@@ -385,6 +389,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         finally
         {
+            foreach (var part in temporaryParts) SafeFileReplace.TryDelete(part);
             _convertBusy = false;
         }
     }
@@ -2108,14 +2113,13 @@ public sealed partial class MainViewModel : ObservableObject
     private async Task ExportImages()
     {
         if (ActiveDocument is not { } doc || doc.IsBusy) return;
-        var request = ExportImagesDialog.Show(OwnerWindow);
+        var request = ExportImagesDialog.Show(OwnerWindow, doc.PageCount, doc.CurrentPageNumber - 1,
+            doc.OrganizeSelectedPages.Select(p => p.LogicalIndex).ToArray());
         if (request == null) return;
         var folder = new OpenFolderDialog { Title = Loc.Get("ExportImagesPickFolder") };
         if (folder.ShowDialog(OwnerWindow) != true) return;
 
-        IReadOnlyList<int>? targets = request.CurrentOnly && doc.PageCount > 0
-            ? new[] { Math.Clamp(doc.CurrentPageNumber - 1, 0, doc.PageCount - 1) }
-            : null;
+        var targets = request.Pages;
         doc.IsBusy = true;
         try
         {
@@ -2133,7 +2137,10 @@ public sealed partial class MainViewModel : ObservableObject
                 async (image, pageIndex, effectiveDpi, ct) =>
                 {
                     var path = Path.Combine(folder.FolderName, $"{prefix}-{pageIndex + 1:000}.{extension}");
-                    await File.WriteAllBytesAsync(path, ImageEncoder.Encode(image, request.Jpeg, effectiveDpi), ct);
+                    var bytes = ImageEncoder.Encode(image, request.Jpeg, effectiveDpi, request.JpegQuality);
+                    await SafeFileReplace.WriteAndReplaceAsync(path,
+                        tmp => File.WriteAllBytesAsync(tmp, bytes, ct), _ => Task.CompletedTask,
+                        keepBackup: false, ct);
                 },
                 new Progress<(int Done, int Total)>(p =>
                 {

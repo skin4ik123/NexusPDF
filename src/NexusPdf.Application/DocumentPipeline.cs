@@ -185,6 +185,7 @@ public sealed partial class DocumentToolsService
 
             var bytesAfter = new FileInfo(current).Length;
             var pageCount = await document.SwitchToProcessedFileAsync(_renderEngine, current, ct).ConfigureAwait(false);
+            document.OwnTemporaryFile(current);
             // Итоговый файл теперь источник страниц вкладки — удалять его нельзя.
             intermediates.Remove(current);
 
