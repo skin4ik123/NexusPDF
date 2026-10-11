@@ -43,7 +43,14 @@ function Find-Button([string]$Pattern) {
 
 function Invoke-Button([string]$Pattern) {
     $button = Find-Button $Pattern
-    ([System.Windows.Automation.InvokePattern]$button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
+    $action = $null
+    if ($button.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$action)) {
+        ([System.Windows.Automation.InvokePattern]$action).Invoke()
+    } elseif ($button.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$action)) {
+        ([System.Windows.Automation.TogglePattern]$action).Toggle()
+    } else {
+        throw "Installed button has no invocation or toggle pattern: $Pattern"
+    }
 }
 
 function Wait-RenderedFixture([string]$Stage) {
