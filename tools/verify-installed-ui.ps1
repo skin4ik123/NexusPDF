@@ -9,7 +9,17 @@ Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient,
 Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System;
 using System.Drawing;
+using System.Runtime.InteropServices;
 public static class NexusPdfFixtureScreen {
+    [DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")]
+    private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
+    public static void Click(int x, int y) {
+        if (!SetCursorPos(x, y)) throw new InvalidOperationException("Cannot position the desktop pointer.");
+        mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
+        mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
+    }
     public static int CountBlueSamples(int left, int top, int width, int height) {
         using (var bitmap = new Bitmap(width, height)) {
             using (var graphics = Graphics.FromImage(bitmap))
@@ -47,7 +57,11 @@ function Invoke-Button([string]$Pattern) {
     if ($button.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$action)) {
         ([System.Windows.Automation.InvokePattern]$action).Invoke()
     } elseif ($button.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$action)) {
-        ([System.Windows.Automation.TogglePattern]$action).Toggle()
+        # WPF TogglePattern changes IsChecked but does not execute the button's
+        # command. These panel buttons use a one-way binding plus a command.
+        $point = $button.GetClickablePoint()
+        [NexusPdfFixtureScreen]::Click([int][Math]::Round($point.X), [int][Math]::Round($point.Y))
+        Start-Sleep -Milliseconds 200
     } else {
         throw "Installed button has no invocation or toggle pattern: $Pattern"
     }
@@ -137,6 +151,7 @@ try {
             throw "Installed reader did not load its PDF: $($process.MainWindowTitle)"
         }
         Wait-RenderedFixture 'initial reader'
+        Invoke-Button '^Свойства объекта$'
         Invoke-Button '^Инструменты$'
         $searchCondition = New-Object System.Windows.Automation.PropertyCondition(
             [System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'ToolsSearch')
@@ -153,6 +168,7 @@ try {
             Wait-RenderedFixture "undo rotation $round without reopening the reader"
         }
         Invoke-Button '^Инструменты$'
+        Invoke-Button '^Свойства объекта$'
         Start-Sleep -Milliseconds 300
         Wait-RenderedFixture 'reader after repeated changes'
         Capture-Desktop 'installed-after-render-regressions'
