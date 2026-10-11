@@ -62,8 +62,9 @@ public partial class ExportImagesDialog : Window
         if (RangeBox == null || RangeHint == null || ExportButton == null) return;
         var ranged = ScopeRange.IsChecked == true;
         var parsed = PageRangeParser.Parse(RangeBox.Text, _pageCount);
+        var unique = parsed.Indices.Distinct().ToArray();
         ExportButton.IsEnabled = !ranged || parsed.IsValid;
         RangeHint.Text = !ranged ? Loc.F("ExportRangeHint", _pageCount)
-            : parsed.Error ?? Loc.F("ExportRangeChosen", parsed.Indices.Distinct().Count(), parsed.Normalized);
+            : parsed.Error ?? Loc.F("ExportRangeChosen", unique.Length, PageRangeParser.Normalize(unique));
     }
 }

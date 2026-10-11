@@ -2868,7 +2868,19 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     private void RebuildPages()
     {
         var model = Document.Session.Model;
-        var previous = Pages.GroupBy(p => p.PageRef)
+        var sizes = Enumerable.Range(0, model.Pages.Count).Select(Document.GetLogicalPageSize).ToArray();
+        var unchanged = new Dictionary<int, PageViewModel>();
+        var reserved = new HashSet<PageViewModel>();
+        // Identical page references are common after duplication. Reserve
+        // unchanged positions first: otherwise replacing one duplicate shifts
+        // the entire reuse queue and invalidates many unrelated thumbnails.
+        for (var i = 0; i < Math.Min(Pages.Count, model.Pages.Count); i++)
+        {
+            if (Pages[i].PageRef != model.Pages[i] || Pages[i].SizePt != sizes[i]) continue;
+            unchanged[i] = Pages[i];
+            reserved.Add(Pages[i]);
+        }
+        var previous = Pages.Where(p => !reserved.Contains(p)).GroupBy(p => p.PageRef)
             .ToDictionary(g => g.Key, g => new Queue<PageViewModel>(g));
 
         // Выбор в организаторе переживает пересборку. Команда, знающая, куда
@@ -2889,8 +2901,9 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             for (var i = 0; i < model.Pages.Count; i++)
             {
                 var reference = model.Pages[i];
-                var size = Document.GetLogicalPageSize(i);
-                var page = previous.TryGetValue(reference, out var candidates) && candidates.Count > 0
+                var size = sizes[i];
+                var page = unchanged.TryGetValue(i, out var stationary) ? stationary
+                    : previous.TryGetValue(reference, out var candidates) && candidates.Count > 0
                     ? candidates.Dequeue()
                     : new PageViewModel(this, i, reference, size);
                 if (page.SizePt != size)
@@ -2904,8 +2917,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             }
             foreach (var removed in previous.Values.SelectMany(q => q)) removed.CancelAll();
             PagesRebuilding?.Invoke(this, EventArgs.Empty);
-            // Одно уведомление на весь список: триста отдельных добавлений держали
-            // поток интерфейса секунду, и всё это время документ не показывался.
+            // Малые правки дают точечные события; массовая перестановка —
+            // один Reset вместо сотен отдельных уведомлений.
             var started = System.Diagnostics.Stopwatch.StartNew();
             Pages.Reconcile(rebuilt);
             if (rebuilt.Count > 50)

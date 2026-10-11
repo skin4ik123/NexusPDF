@@ -11,5 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/NexusPdf.App.Desktop/NexusPdf.App.Desktop.csproj" />
+    <Compile Include="../NexusPdf.PdfEngineTests/PdfFixture.cs" Link="PdfFixture.cs" />
+    <Using Include="System.IO" />
   </ItemGroup>
 </Project>

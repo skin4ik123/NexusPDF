@@ -364,8 +364,8 @@ internal static class Program
         _document.Document.Session.Apply(new AddOverlayOperation(150, new NoteAnnotationDraft(40, 90, "Performance", "NexusPDF")));
         watch.Stop();
         var kept = before.Where((page, i) => ReferenceEquals(page, _document.Pages[i])).Count();
-        Require(kept == 299, "Editing a 300-page document keeps the other 299 pages");
         Results.Add(new { Kind = "performance", Pages = 300, Reused = kept, Milliseconds = watch.Elapsed.TotalMilliseconds });
+        Require(kept == 299, "Editing a 300-page document keeps the other 299 pages");
         _document.Document.Session.Undo();
         _document.Document.Session.Undo();
         Require(_document.PageCount == 3 && !_document.IsDirty, "Large-document edits undo without losing pages");
@@ -390,6 +390,82 @@ internal static class Program
         using var word = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(target, false);
         Require(summary.RecognizedPages == 1 && word.MainDocumentPart!.Document!.InnerText.Contains("NEXUS", StringComparison.OrdinalIgnoreCase),
             "Word export recognizes scans after switching the OCR engine");
+        await InspectReaderToolsAsync();
+    }
+
+    private static async Task InspectReaderToolsAsync()
+    {
+        _document.CurrentPageNumber = 1;
+        foreach (var group in new[] { "Comment", "Edit", "Measure", "Protect" })
+        {
+            _main.ViewModel.SelectToolGroupCommand.Execute(group);
+            await Task.Delay(120);
+            Capture(_main, "main-" + group.ToLowerInvariant());
+        }
+        _main.ViewModel.ActiveToolGroup = MainViewModel.ToolGroup.None;
+        _document.StopMeasurement();
+        _document.IsFindVisible = true;
+        _document.FindQuery = "NexusPDF";
+        await _document.RunSearchAsync();
+        Capture(_main, "main-search");
+        _document.FindQuery = "";
+        _document.IsFindVisible = false;
+
+        _document.Document.Session.Apply(new AddOverlayOperation(0, new NoteAnnotationDraft(40, 90, "Заметка для проверки", "NexusPDF")));
+        await _document.ToggleCommentsCommand.ExecuteAsync(null);
+        Capture(_main, "main-comments-panel");
+        _document.IsCommentsVisible = false;
+        _document.Document.Session.Undo();
+
+        var text = new TextOverlay("Текст для правки", 60, 410, 24, 0xFF000000, 0);
+        _document.Document.Session.Apply(new AddOverlayOperation(0, text));
+        var box = OverlayGeometry.BoundsOf(text)!.Value;
+        Require(_document.SelectObjectAt(_document.Pages[0], box.XPt + box.WidthPt / 2, box.YPt + box.HeightPt / 2),
+            "Added text can be selected and its properties inspected");
+        Capture(_main, "main-object-properties");
+        _document.ClearObjectSelection();
+        _document.Document.Session.Undo();
+
+        _main.ViewModel.Panels = _main.ViewModel.Panels with { Tools = true, Properties = false };
+        foreach (var group in _main.ViewModel.Tools.Groups) group.IsExpanded = true;
+        _main.UpdateLayout();
+        var items = Descendants(_main).OfType<ItemsControl>().First(c => ReferenceEquals(c.ItemsSource, _main.ViewModel.Tools.Groups));
+        DependencyObject parent = items;
+        while (parent is not ScrollViewer) parent = VisualTreeHelper.GetParent(parent);
+        var scroll = (ScrollViewer)parent;
+        var frame = 1;
+        for (var offset = 0.0; offset <= scroll.ScrollableHeight + 1; offset += Math.Max(100, scroll.ViewportHeight - 50))
+        {
+            scroll.ScrollToVerticalOffset(offset);
+            await Task.Delay(80);
+            Capture(_main, "main-all-tools-" + frame++);
+        }
+        scroll.ScrollToBottom();
+        await Task.Delay(80);
+        Capture(_main, "main-all-tools-last");
+        foreach (var group in _main.ViewModel.Tools.Groups) group.IsExpanded = false;
+        _main.ViewModel.Panels = PanelLayout.Default;
+
+        var fixture = NexusPdf.PdfEngineTests.PdfFixture.WriteFormTrioToTemp("form-fixture.pdf");
+        var formPath = Path.Combine(_output, "form-fixture.pdf");
+        File.Copy(fixture, formPath);
+        Directory.Delete(Path.GetDirectoryName(fixture)!, recursive: true);
+        await _main.ViewModel.OpenFilesAsync(new[] { formPath });
+        var form = _main.ViewModel.ActiveDocument!;
+        await form.DetectFormsAsync();
+        Require(await form.EnterFormModeAsync(), "Actual AcroForm controls are available in the reader");
+        await form.FormClickAsync(form.Pages[0], 200, 72, 1);
+        foreach (var character in "FORM VALUE") await form.FormCharAsync(character, 1);
+        await form.ReleaseFormFieldAsync(1);
+        Capture(_main, "main-filled-form");
+        Require((await form.Document.PrimaryHandle.GetFormFieldValuesAsync(0, CancellationToken.None))
+            .Any(field => field.Name == "text1" && field.Value == "FORM VALUE"), "Typing into a form updates the actual PDF field");
+        await _main.ViewModel.SaveCommand.ExecuteAsync(null);
+        Require(!form.IsDirty, "Saving the filled form clears its unsaved state");
+        await using var saved = await _services.Engine.OpenAsync(formPath, null, CancellationToken.None);
+        Require((await saved.GetFormFieldValuesAsync(0, CancellationToken.None)).Any(field => field.Value == "FORM VALUE"),
+            "The filled form retains its value after reopening the saved file");
+        _main.ViewModel.ActiveDocument = _document;
     }
 
     private static void Require(bool condition, string description)
