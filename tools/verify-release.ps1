@@ -79,10 +79,46 @@ foreach ($pdf in Get-ChildItem $output -File -Filter '*.pdf') {
 }
 Assert (@(Get-ChildItem $output -Recurse -File | Where-Object Name -like '*.nexustmp-*').Count -eq 0) 'Installed commands leave no incomplete output files'
 
-$products = @(Get-ChildItem HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall | Get-ItemProperty | Where-Object DisplayName -eq 'NexusPDF')
-Assert ($products.Count -eq 1 -and $products[0].DisplayVersion -eq $Version) 'Reinstallation leaves one correctly versioned application entry'
-$remove = Start-Process msiexec.exe -ArgumentList @('/x', $products[0].PSChildName, '/qn', '/norestart', '/l*v', "$evidence/uninstall.log") -PassThru -Wait
+# Windows Installer owns registration; its API covers per-user and per-machine
+# contexts without assuming where a particular Windows version exposes ARP.
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class NexusPdfReleaseProducts {
+    [DllImport("msi.dll", CharSet = CharSet.Unicode)]
+    private static extern uint MsiEnumRelatedProducts(string upgradeCode, uint reserved, uint index, StringBuilder productCode);
+    [DllImport("msi.dll", CharSet = CharSet.Unicode)]
+    private static extern uint MsiGetProductInfo(string productCode, string property, StringBuilder value, ref uint length);
+    public static string[] Related() {
+        var products = new List<string>();
+        for (uint index = 0; ; index++) {
+            var code = new StringBuilder(39);
+            var result = MsiEnumRelatedProducts("{7C6E2B7A-9A1E-4F2B-B4B0-3E62D8C5A101}", 0, index, code);
+            if (result == 259) return products.ToArray();
+            if (result != 0) throw new InvalidOperationException("MSI enumeration failed: " + result);
+            products.Add(code.ToString());
+        }
+    }
+    public static string Info(string code, string property) {
+        var value = new StringBuilder(256);
+        uint length = (uint)value.Capacity;
+        var result = MsiGetProductInfo(code, property, value, ref length);
+        if (result != 0) throw new InvalidOperationException("MSI product info failed: " + result);
+        return value.ToString();
+    }
+}
+'@
+$products = @([NexusPdfReleaseProducts]::Related() | ForEach-Object {
+    @{ Code = $_; Version = [NexusPdfReleaseProducts]::Info($_, 'VersionString');
+       Assignment = [NexusPdfReleaseProducts]::Info($_, 'AssignmentType') }
+})
+$products | ConvertTo-Json | Set-Content -Encoding UTF8 "$evidence/registered-products.json"
+Assert ($products.Count -eq 1 -and $products[0].Version -eq $Version) 'Reinstallation leaves one correctly versioned application entry'
+$remove = Start-Process msiexec.exe -ArgumentList @('/x', $products[0].Code, '/qn', '/norestart', '/l*v', "$evidence/uninstall.log") -PassThru -Wait
 Assert ($remove.ExitCode -in 0, 3010) 'The delivered application uninstalls normally'
 Assert (-not (Test-Path $exe)) 'Uninstall removes the application executable'
+Assert ([NexusPdfReleaseProducts]::Related().Length -eq 0) 'Uninstall clears Windows Installer registration'
 Assert (Test-Path "$output/compressed-twice.pdf") 'Uninstall preserves user export files'
 Write-Host 'Release installer, real installed WPF UI and every CLI command verified.'
