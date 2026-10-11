@@ -13,7 +13,7 @@ processor. No account, no upload, no subscription.
 
 [![Version](https://img.shields.io/github/v/tag/skin4ik123/NexusPDF?label=version&sort=semver&color=6366f1&style=flat-square)](https://nexus.internetdeco.com) [![Windows](https://img.shields.io/badge/Windows%2010%20%C2%B7%2011-64--bit-0ea5e9?style=flat-square&logo=windows&logoColor=white)](https://nexus.internetdeco.com) [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?style=flat-square&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/download) [![Licence](https://img.shields.io/badge/licence-AGPL--3.0-7c3aed?style=flat-square)](LICENSE) [![Telemetry](https://img.shields.io/badge/telemetry-none-10b981?style=flat-square)](#privacy)
 
-**[Download](https://nexus.internetdeco.com)** · [Website](https://nexus.internetdeco.com) · [Changelog](https://nexus.internetdeco.com/changelog) · [Support the work](#support-the-work)
+**[Download NexusPDF 0.27.0](https://github.com/skin4ik123/NexusPDF/releases/download/v0.27.0/NexusPDF-Setup-0.27.0.exe)** · [Website](https://nexus.internetdeco.com) · [Changelog](https://nexus.internetdeco.com/changelog) · [Support the work](#support-the-work)
 
 <img src="docs/images/main.png" alt="NexusPDF main window">
 
