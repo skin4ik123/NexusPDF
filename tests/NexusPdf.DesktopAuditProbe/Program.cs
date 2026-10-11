@@ -129,6 +129,7 @@ internal static class Program
             .OrderBy(t => t.Name))
         {
             if (type == typeof(MainWindow)) continue;
+            Console.WriteLine("INSPECT " + type.Name);
             try { await InspectDialogAsync(type); }
             catch (Exception e)
             {
@@ -244,6 +245,8 @@ internal static class Program
             (e is Button || e is TextBox || e is ComboBox)).Select(e => new
             { Type = e.GetType().Name, e.Name, e.IsEnabled, e.ActualWidth, e.ActualHeight }).ToArray();
         Results.Add(new { Kind = "screenshot", Window = name, Width = width, Height = height, Controls = controls });
+        File.WriteAllText(Path.Combine(_output, "audit-progress.json"), JsonSerializer.Serialize(
+            new { Results, BindingErrors }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine("CAPTURE " + name + " " + width + "x" + height);
     }
 

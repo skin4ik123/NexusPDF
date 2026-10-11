@@ -5,6 +5,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: nexuspdf-audit-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   windows:
     runs-on: windows-latest
@@ -26,7 +29,16 @@ jobs:
       - name: Build desktop audit probe
         run: dotnet build tests/NexusPdf.DesktopAuditProbe -c Release
       - name: Inspect actual WPF windows and bindings
-        run: dotnet run --project tests/NexusPdf.DesktopAuditProbe -c Release --no-build -- artifacts/ui-audit
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts/ui-audit | Out-Null
+          $probe = Start-Process tests/NexusPdf.DesktopAuditProbe/bin/Release/net10.0-windows/win-x64/NexusPdf.DesktopAuditProbe.exe -ArgumentList 'artifacts/ui-audit' -PassThru -RedirectStandardOutput artifacts/ui-audit/console.log -RedirectStandardError artifacts/ui-audit/errors.log
+          if (-not $probe.WaitForExit(180000)) {
+            Stop-Process -Id $probe.Id -Force
+            throw 'Desktop audit timed out; partial screenshots and logs are retained.'
+          }
+          Get-Content artifacts/ui-audit/console.log
+          if ($probe.ExitCode -ne 0) { throw "Desktop audit failed: $($probe.ExitCode)" }
       - name: Upload visual audit
         if: always()
         uses: actions/upload-artifact@v4
