@@ -328,10 +328,12 @@ public sealed partial class PageViewModel : ObservableObject
 
     /// <summary>Карточка сейчас в визуальном дереве — на экране или рядом с ним.</summary>
     private bool _shown;
+    private int _attachedViewCount;
 
     /// <summary>Карточка появилась на экране — нужен растр под её размер.</summary>
     public void Attach(double dpiScale)
     {
+        _attachedViewCount++;
         _shown = true;
         EnsureImage(dpiScale);
     }
@@ -339,6 +341,7 @@ public sealed partial class PageViewModel : ObservableObject
     /// <summary>Карточка ушла с экрана — растр отпускается (хранить ли его, решает кэш).</summary>
     public void Detach()
     {
+        if (_attachedViewCount == 0 || --_attachedViewCount > 0) return;
         _shown = false;
         ReleaseImage();
     }
@@ -366,6 +369,7 @@ public sealed partial class PageViewModel : ObservableObject
     /// </summary>
     public async void EnsureImage(double dpiScale)
     {
+        if (!IsCurrentPage()) return;
         EnsureThumbnail();
 
         var pixelWidth = Math.Max(16, (int)Math.Round(WidthDiu * dpiScale));
@@ -377,6 +381,7 @@ public sealed partial class PageViewModel : ObservableObject
         if (_renderedPixelWidth == pixelWidth && _renderedFormVersion == formVersion
             && _renderedOverlays == overlays && Image != null)
         {
+            CancelRender();
             ScalingMode = System.Windows.Media.BitmapScalingMode.NearestNeighbor;
             return;
         }
@@ -385,11 +390,11 @@ public sealed partial class PageViewModel : ObservableObject
                   + ":f" + formVersion + ":o" + overlays;
         // Ровно этот растр уже рисуется — повторный запрос только отменил бы
         // почти готовую работу и начал её заново.
-        if (IsRendering && _pendingKey == key)
+        if (_renderCts is { IsCancellationRequested: false } && IsRendering && _pendingKey == key)
             return;
         if (_owner.Cache.TryGet(key) is { } cached)
         {
-            _renderCts?.Cancel();
+            CancelRender();
             Image = cached;
             _renderedPixelWidth = pixelWidth;
             _renderedFormVersion = formVersion;
@@ -409,6 +414,7 @@ public sealed partial class PageViewModel : ObservableObject
         {
             var raw = await _owner.Document.RenderLogicalPageAsync(LogicalIndex, pixelWidth, pixelHeight, cts.Token);
             cts.Token.ThrowIfCancellationRequested();
+            if (!IsCurrentPage()) return;
             // В журнал попадают только МЕДЛЕННЫЕ страницы. Обычный рендер —
             // это десятки миллисекунд; всё, что заметно дольше, означает либо
             // тяжёлую страницу, либо занятый поток интерфейса, и разбираться в
@@ -450,10 +456,23 @@ public sealed partial class PageViewModel : ObservableObject
         {
             if (_renderCts == cts)
             {
+                _renderCts = null;
                 IsRendering = false;
                 _pendingKey = null;
             }
+            cts.Dispose();
         }
+    }
+
+    private bool IsCurrentPage() =>
+        (uint)LogicalIndex < (uint)_owner.Document.Session.Model.Pages.Count &&
+        _owner.Document.Session.Model.Pages[LogicalIndex] == PageRef;
+
+    private void CancelRender()
+    {
+        _renderCts?.Cancel();
+        _pendingKey = null;
+        IsRendering = false;
     }
 
     /// <summary>Ширина растра, в которой миниатюра нарисована (или рисуется).</summary>
@@ -463,6 +482,7 @@ public sealed partial class PageViewModel : ObservableObject
 
     public async void EnsureThumbnail()
     {
+        if (!IsCurrentPage()) return;
         // Правки должны быть видны и на миниатюре: иначе список страниц
         // показывает документ, которого уже нет.
         var overlays = _owner.Document.GetOverlaySignature(LogicalIndex);
@@ -504,6 +524,7 @@ public sealed partial class PageViewModel : ObservableObject
         {
             var raw = await _owner.Document.RenderLogicalPageAsync(LogicalIndex, wanted, pixelHeight, cts.Token);
             cts.Token.ThrowIfCancellationRequested();
+            if (!IsCurrentPage()) return;
             var bitmap = BitmapFactory.ToBitmapSource(raw);
             _owner.Cache.Store(key, bitmap);
             if (!cts.IsCancellationRequested)
@@ -525,6 +546,7 @@ public sealed partial class PageViewModel : ObservableObject
                 _thumbCts = null;
                 _thumbPendingKey = null;
             }
+            cts.Dispose();
         }
     }
 
@@ -555,7 +577,7 @@ public sealed partial class PageViewModel : ObservableObject
     /// <summary>Страница ушла из видимой области — полноразмерный растр отпускаем (кэш решает, хранить ли его).</summary>
     public void ReleaseImage()
     {
-        _renderCts?.Cancel();
+        CancelRender();
         Image = null;
         _renderedPixelWidth = 0;
         ScalingMode = System.Windows.Media.BitmapScalingMode.HighQuality;
@@ -563,7 +585,7 @@ public sealed partial class PageViewModel : ObservableObject
 
     public void CancelAll()
     {
-        _renderCts?.Cancel();
+        CancelRender();
         _thumbCts?.Cancel();
     }
 }

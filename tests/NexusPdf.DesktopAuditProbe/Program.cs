@@ -587,6 +587,15 @@ internal static class Program
         var text = new TextOverlay("AUTOMATIC RENDER", 60, 300, 24, 0xFF000000, 0);
         _document.Document.Session.Apply(new AddOverlayOperation(0, text));
         await WaitForVisiblePageAsync("Adding text renders automatically");
+        var draft = (TextOverlay)_document.Document.Session.Model.Pages[0].OverlayList[0];
+        _document.Document.Session.Apply(new ReplaceOverlayOperation(0, draft, draft with { Text = "EDITED RENDER", ColorArgb = 0xFFCC0000 }));
+        await WaitForVisiblePageAsync("Editing an existing text overlay renders automatically");
+        _document.Document.Session.Apply(new RemoveOverlaysOperation(new[] { 0 }));
+        await WaitForVisiblePageAsync("Removing overlays renders automatically");
+        _document.UndoCommand.Execute(null);
+        await WaitForVisiblePageAsync("Undoing overlay removal renders automatically");
+        _document.UndoCommand.Execute(null);
+        await WaitForVisiblePageAsync("Undoing text replacement renders automatically");
         _document.UndoCommand.Execute(null);
         await WaitForVisiblePageAsync("Removing added text by Undo renders automatically");
         _document.Document.Session.Apply(new DuplicatePagesOperation(new[] { 0 }));
@@ -604,6 +613,45 @@ internal static class Program
         Require(!_document.IsDirty && _document.PageCount == 3, "Repeated render checks preserve the original document");
         Capture(_main, "render-after-repeated-actions");
 
+        _document.IsOrganizeMode = true;
+        await Task.Delay(200);
+        _document.Document.Session.Apply(new AddOverlayOperation(1, new NoteAnnotationDraft(40, 90, "Thumbnail regression", "NexusPDF")));
+        await WaitUntilAsync(() => _document.Pages[1].ThumbImage != null, "Editing a page in the organizer refreshes its thumbnail automatically");
+        _document.UndoCommand.Execute(null);
+        await WaitUntilAsync(() => _document.Pages[1].ThumbImage != null, "Undo refreshes the organizer thumbnail automatically");
+        _document.IsOrganizeMode = false;
+        await WaitForVisiblePageAsync("Returning from the organizer renders the reader automatically");
+
+        var references = _document.Document.Session.Model.Pages.ToArray();
+        _document.Document.Session.Apply(new InsertPagesOperation(3,
+            Enumerable.Range(0, 297).Select(i => references[i % references.Length]).ToArray()));
+        await WaitForVisiblePageAsync("A bulk insertion preserves rendering of reused page models");
+        _document.GoToPage(150);
+        await WaitUntilAsync(() => _document.CurrentPageNumber == 150, "Virtualized scrolling reaches page 150");
+        await WaitForVisiblePageAsync("A recycled card renders page 150 automatically");
+        _document.Document.Session.Apply(new AddOverlayOperation(149, new NoteAnnotationDraft(40, 90, "Page 150 edit", "NexusPDF")));
+        await WaitForVisiblePageAsync("Editing page 150 renders automatically in a 300-page document");
+        _document.UndoCommand.Execute(null);
+        await WaitForVisiblePageAsync("Undo renders page 150 automatically");
+        _document.GoToPage(1);
+        await WaitUntilAsync(() => _document.CurrentPageNumber == 1, "Virtualized scrolling returns to the first page");
+        _document.UndoCommand.Execute(null);
+        await WaitForVisiblePageAsync("A bulk reset renders reused page models automatically");
+        for (var i = 0; i < 8; i++)
+        {
+            _document.Document.Session.Apply(new RotatePagesOperation(new[] { 0 }, 1));
+            _document.UndoCommand.Execute(null);
+        }
+        await WaitForVisiblePageAsync("A burst of sixteen page changes finishes rendering the final state");
+        var zoom = _document.Zoom;
+        _document.SetZoom(zoom * 1.2);
+        _document.SetZoom(zoom);
+        await WaitForVisiblePageAsync("Rapid zoom changes finish rendering the final scale");
+        Require(!_document.IsDirty && _document.PageCount == 3, "Bulk, recycled and rapid render checks preserve all original pages");
+        Capture(_main, "render-after-300-pages-and-rapid-actions");
+
+        await VerifyRecycledThumbnailAsync();
+
         // All three calls happen on the same UI turn, before an awaited render
         // can resume: an already-cancelled request must not block a new one.
         var page = new PageViewModel(_document, 0, _document.Document.Session.Model.Pages[0], _document.Document.GetLogicalPageSize(0));
@@ -613,8 +661,41 @@ internal static class Program
         page.Attach(_document.DpiScale);
         await WaitUntilAsync(() => page.Image != null && !page.IsRendering,
             "A page detached and immediately reattached finishes rendering");
+        page.Attach(_document.DpiScale);
         page.Detach();
+        Require(page.Image != null, "Detaching one presenter keeps the page image used by another presenter");
+        page.Detach();
+        Require(page.Image == null && !page.IsRendering, "Detaching the last presenter releases its image and rendering state");
         page.CancelAll();
+    }
+
+    private static async Task VerifyRecycledThumbnailAsync()
+    {
+        var pages = Enumerable.Range(0, 3).Select(i => new PageViewModel(_document, i,
+            _document.Document.Session.Model.Pages[i], _document.Document.GetLogicalPageSize(i))).ToArray();
+        _document.Cache.RemoveSource(pages[0].PageRef.SourceId);
+        var host = new Border { DataContext = pages[0] };
+        ViewBehaviors.SetRenderThumbnail(host, true);
+        var window = new Window { Owner = _main, Width = 180, Height = 240, Content = host, ShowInTaskbar = false };
+        try
+        {
+            window.Show();
+            await WaitUntilAsync(() => pages[0].ThumbImage != null, "A thumbnail-only presenter renders on loading");
+            host.DataContext = pages[1];
+            await WaitUntilAsync(() => pages[1].ThumbImage != null, "A loaded thumbnail-only presenter renders its replacement model");
+            Require(pages[1].Image == null, "Thumbnail replacement does not depend on a full-page render request");
+            ViewBehaviors.SetRenderThumbnail(host, false);
+            host.DataContext = pages[2];
+            await Task.Delay(100);
+            Require(pages[2].ThumbImage == null, "Disabling thumbnail rendering removes the context listener");
+            ViewBehaviors.SetRenderThumbnail(host, true);
+            await WaitUntilAsync(() => pages[2].ThumbImage != null, "Enabling thumbnail rendering on an already-loaded presenter renders immediately");
+        }
+        finally
+        {
+            window.Close();
+            foreach (var page in pages) page.CancelAll();
+        }
     }
 
     private static async Task WaitForVisiblePageAsync(string description)
