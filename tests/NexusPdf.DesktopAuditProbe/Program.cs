@@ -37,7 +37,6 @@ internal static class Program
     {
         _output = Path.GetFullPath(args.FirstOrDefault() ?? "artifacts/ui-audit");
         Directory.CreateDirectory(_output);
-        System.Windows.Application.ResourceAssembly = typeof(NexusPdf.App.Desktop.App).Assembly;
         var app = new ProbeApp();
         app.InitializeComponent();
         app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
