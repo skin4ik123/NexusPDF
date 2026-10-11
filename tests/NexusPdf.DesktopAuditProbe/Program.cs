@@ -326,6 +326,7 @@ internal static class Program
 
     private static async Task VerifyWorkflowsAsync()
     {
+        await VerifyPageRenderingAsync();
         var jpegPixels = new byte[600 * 800 * 4];
         new Random(42).NextBytes(jpegPixels);
         for (var i = 3; i < jpegPixels.Length; i += 4) jpegPixels[i] = 255;
@@ -547,9 +548,100 @@ internal static class Program
         await Task.Delay(250);
         var document = _main.ViewModel.ActiveDocument!;
         var page = document.Pages[Math.Clamp(document.CurrentPageNumber - 1, 0, document.Pages.Count - 1)];
-        page.EnsureImage(document.DpiScale);
         await WaitUntilAsync(() => page.Image != null && !page.IsRendering, "Reader finishes rendering before visual inspection");
         _main.UpdateLayout();
+    }
+
+    private static async Task VerifyPageRenderingAsync()
+    {
+        _document.GoToPage(1);
+        await WaitUntilAsync(() => _document.CurrentPageNumber == 1, "Rendering regression starts on the first visible page");
+        await WaitForVisiblePageAsync("Initial page renders automatically");
+        Capture(_main, "render-before-edit");
+        var original = _document.Pages.ToArray();
+        var initialImage = original[0].Image;
+
+        _document.Document.Session.Apply(new AddOverlayOperation(0, new NoteAnnotationDraft(40, 90, "Render regression", "NexusPDF")));
+        await WaitForVisiblePageAsync("A note renders automatically after replacing the visible page model");
+        Require(!ReferenceEquals(_document.Pages[0].Image, initialImage) &&
+            ReferenceEquals(_document.Pages[1], original[1]) && ReferenceEquals(_document.Pages[2], original[2]),
+            "Editing refreshes the affected raster and preserves the other page models");
+        Capture(_main, "render-after-note");
+        _document.Document.Session.Undo();
+        await WaitForVisiblePageAsync("Undoing a note restores the page automatically");
+
+        for (var i = 0; i < 3; i++)
+        {
+            _document.Document.Session.Apply(new RotatePagesOperation(new[] { 0 }, 1));
+            await WaitForVisiblePageAsync("Rotation " + (i + 1) + " renders automatically");
+            Require(_document.Pages[0].Image!.PixelWidth > _document.Pages[0].Image!.PixelHeight,
+                "A rotated page displays the landscape raster");
+            _document.UndoCommand.Execute(null);
+            await WaitForVisiblePageAsync("Undo rotation " + (i + 1) + " renders automatically");
+            _document.RedoCommand.Execute(null);
+            await WaitForVisiblePageAsync("Redo rotation " + (i + 1) + " renders automatically");
+            _document.UndoCommand.Execute(null);
+            await WaitForVisiblePageAsync("Restoring rotation " + (i + 1) + " renders automatically");
+        }
+
+        var text = new TextOverlay("AUTOMATIC RENDER", 60, 300, 24, 0xFF000000, 0);
+        _document.Document.Session.Apply(new AddOverlayOperation(0, text));
+        await WaitForVisiblePageAsync("Adding text renders automatically");
+        _document.UndoCommand.Execute(null);
+        await WaitForVisiblePageAsync("Removing added text by Undo renders automatically");
+        _document.Document.Session.Apply(new DuplicatePagesOperation(new[] { 0 }));
+        await WaitForVisiblePageAsync("Duplicating a page keeps the reader rendered");
+        _document.UndoCommand.Execute(null);
+        await WaitForVisiblePageAsync("Undoing page duplication keeps the reader rendered");
+        _document.Document.Session.Apply(new DeletePagesOperation(new[] { 0 }));
+        await WaitForVisiblePageAsync("Deleting the current page renders its replacement");
+        _document.UndoCommand.Execute(null);
+        await WaitForVisiblePageAsync("Undoing deletion renders the restored page");
+        _document.Document.Session.Apply(new MovePagesOperation(new[] { 0 }, 3));
+        await WaitForVisiblePageAsync("Moving the current page renders the new visible page");
+        _document.UndoCommand.Execute(null);
+        await WaitForVisiblePageAsync("Undoing a page move renders automatically");
+        Require(!_document.IsDirty && _document.PageCount == 3, "Repeated render checks preserve the original document");
+        Capture(_main, "render-after-repeated-actions");
+
+        // All three calls happen on the same UI turn, before an awaited render
+        // can resume: an already-cancelled request must not block a new one.
+        var page = new PageViewModel(_document, 0, _document.Document.Session.Model.Pages[0], _document.Document.GetLogicalPageSize(0));
+        _document.Cache.RemoveSource(page.PageRef.SourceId);
+        page.Attach(_document.DpiScale);
+        page.Detach();
+        page.Attach(_document.DpiScale);
+        await WaitUntilAsync(() => page.Image != null && !page.IsRendering,
+            "A page detached and immediately reattached finishes rendering");
+        page.Detach();
+        page.CancelAll();
+    }
+
+    private static async Task WaitForVisiblePageAsync(string description)
+    {
+        await _main.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Loaded);
+        _main.UpdateLayout();
+        var page = _document.Pages[Math.Clamp(_document.CurrentPageNumber - 1, 0, _document.Pages.Count - 1)];
+        // Never call EnsureImage here: doing so hid a missing visual-lifecycle
+        // request in the earlier audit while actual users saw "Rendering".
+        for (var i = 0; i < 100 && (page.Image == null || page.IsRendering || page.ThumbImage == null); i++)
+            await Task.Delay(50);
+        if (page.Image == null || page.IsRendering || page.ThumbImage == null)
+        {
+            Results.Add(new { Kind = "render-state", Description = description, page.LogicalIndex, page.IsRendering,
+                HasImage = page.Image != null, HasThumbnail = page.ThumbImage != null,
+                IsAttached = typeof(PageViewModel).GetField("_shown", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page),
+                VisibleCards = Descendants(_main).OfType<FrameworkElement>().Count(e =>
+                    e.IsVisible && ViewBehaviors.GetRenderFullPage(e) && ReferenceEquals(e.DataContext, page)) });
+            Capture(_main, "render-regression-failure");
+        }
+        Require(page.Image != null && !page.IsRendering && page.ThumbImage != null, description);
+        var bitmap = page.Image!;
+        var expected = await _document.Document.RenderLogicalPageAsync(page.LogicalIndex, bitmap.PixelWidth, bitmap.PixelHeight, CancellationToken.None);
+        var pixels = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4];
+        bitmap.CopyPixels(pixels, bitmap.PixelWidth * 4, 0);
+        Require(expected.Stride == bitmap.PixelWidth * 4 && pixels.AsSpan().SequenceEqual(expected.Bgra),
+            description + ": the displayed pixels match the current PDF contents");
     }
 
     private static void Require(bool condition, string description)
