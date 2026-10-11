@@ -479,8 +479,6 @@ internal static class Program
         foreach (var character in "FORM VALUE") await form.FormCharAsync(character, 1);
         await form.FormKeyAsync(0x09, 1);
         foreach (var character in "NEXT") await form.FormCharAsync(character, 1);
-        Require((await form.Document.PrimaryHandle.GetFormFieldValuesAsync(0, CancellationToken.None))
-            .Any(field => field.Name == "text2" && field.Value == "NEXT"), "Tab moves input to the next PDF field");
         await form.FormKeyAsync(0x09, 1, shift: true);
         await form.FormKeyAsync(0x23, 1);
         await form.FormCharAsync('!', 1);
@@ -489,8 +487,12 @@ internal static class Program
             "A form page is described as fields rather than a scan");
         await WaitForReaderAsync();
         Capture(_main, "main-filled-form");
-        Require((await form.Document.PrimaryHandle.GetFormFieldValuesAsync(0, CancellationToken.None))
-            .Any(field => field.Name == "text1" && field.Value == "FORM VALUE!"), "Shift+Tab returns input to the previous PDF field");
+        // PDFium commits the edit buffer when focus leaves the field. Check
+        // committed values without interrupting the actual Tab/Shift+Tab flow.
+        var typedFields = await form.Document.PrimaryHandle.GetFormFieldValuesAsync(0, CancellationToken.None);
+        Results.Add(new { Kind = "form-values", Fields = typedFields.Select(field => new { field.Name, field.Value }).ToArray() });
+        Require(typedFields.Any(field => field.Name == "text2" && field.Value == "NEXT"), "Tab moves input to the next PDF field");
+        Require(typedFields.Any(field => field.Name == "text1" && field.Value == "FORM VALUE!"), "Shift+Tab returns input to the previous PDF field");
         await ClickFormsButtonAsync("FormsDoneButton");
         Require(!form.IsFormMode && !_main.ViewModel.IsGroupForms && form.IsDirty,
             "Done exits filling and keeps edited field values unsaved until Save");
