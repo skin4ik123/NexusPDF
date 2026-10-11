@@ -19,11 +19,14 @@ function Capture-Desktop([string]$Name) {
 }
 
 function Find-Dialog([int]$ProcessId, [string]$Pattern) {
-    $condition = New-Object System.Windows.Automation.PropertyCondition(
+    $processCondition = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ProcessId)
-    for ($attempt = 0; $attempt -lt 80; $attempt++) {
+    $windowCondition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Window)
+    $condition = New-Object System.Windows.Automation.AndCondition($processCondition, $windowCondition)
+    for ($attempt = 0; $attempt -lt 200; $attempt++) {
         $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-            [System.Windows.Automation.TreeScope]::Children, $condition)
+            [System.Windows.Automation.TreeScope]::Descendants, $condition)
         foreach ($window in $windows) {
             if ($window.Current.Name -match $Pattern) { return $window }
         }
@@ -49,7 +52,7 @@ try {
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
     $buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
     $names = @($buttons | ForEach-Object { $_.Current.Name })
-    $names | ConvertTo-Json | Set-Content (Join-Path $Output $(if ($Setup) { 'setup-actions.json' } else { 'installed-actions.json' }))
+    $names | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Output $(if ($Setup) { 'setup-actions.json' } else { 'installed-actions.json' }))
     Capture-Desktop $(if ($Setup) { 'setup-window' } else { 'installed-reader' })
     if (-not $Setup) {
         if ($names.Count -lt 8 -or $process.MainWindowTitle -notmatch 'fixture.*NexusPDF') {
@@ -82,7 +85,20 @@ try {
     if (-not $process.WaitForExit(20000)) { throw 'Installed window did not close normally' }
     if ($process.ExitCode -ne 0) { throw "Installed UI returned $($process.ExitCode)" }
     Write-Host 'Actual installed windows opened and closed normally.'
+} catch {
+    Capture-Desktop 'installed-ui-failure'
+    $windowCondition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Window)
+    [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants, $windowCondition) |
+        ForEach-Object { @{ Name = $_.Current.Name; ProcessId = $_.Current.ProcessId; Offscreen = $_.Current.IsOffscreen } } |
+        ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Output 'failure-windows.json')
+    throw
 } finally {
+    if (-not $Setup) {
+        $logFolder = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'NexusPDF/Logs'
+        if (Test-Path $logFolder) { Copy-Item $logFolder (Join-Path $Output 'installed-logs') -Recurse -Force -ErrorAction SilentlyContinue }
+    }
     $process.Refresh()
     if (-not $process.HasExited) { $process.Kill() }
 }
