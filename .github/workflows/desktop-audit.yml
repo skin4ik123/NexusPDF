@@ -40,6 +40,14 @@ jobs:
           }
           Get-Content artifacts/ui-audit/console.log
           if ($probe.ExitCode -ne 0) { throw "Desktop audit failed: $($probe.ExitCode)" }
+      - name: Verify page changes in the ordinary production application
+        shell: pwsh
+        run: |
+          $profileRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'NexusPDF'
+          New-Item -ItemType Directory -Force $profileRoot | Out-Null
+          @{ Language = 'ru'; Theme = 'light'; SingleInstance = $true; UiDensity = 'compact' } | ConvertTo-Json | Set-Content (Join-Path $profileRoot 'settings.json')
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/verify-installed-ui.ps1 -Exe src/NexusPdf.App.Desktop/bin/Release/net10.0-windows/win-x64/NexusPdf.exe -Output artifacts/ui-audit/production-ui -Document artifacts/ui-audit/fixture.pdf
+          if ($LASTEXITCODE -ne 0) { throw 'The production application failed its actual screen/render checks.' }
       - name: Upload visual audit
         if: always()
         uses: actions/upload-artifact@v4

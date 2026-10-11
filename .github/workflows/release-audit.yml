@@ -87,7 +87,7 @@ jobs:
           cd delivered
           sha256sum --check ../evidence/artifacts/release-sha256.txt
           cd ..
-          cp docs/RELEASE-0.27.0.md release-notes.md
+          cp "docs/RELEASE-$version.md" release-notes.md
           printf '\nSHA-256: `%s`\n' "$(cut -d ' ' -f 1 evidence/artifacts/release-sha256.txt)" >> release-notes.md
           gh release create "v$version" "delivered/NexusPDF-Setup-$version.exe" --target "$GITHUB_SHA" --title "NexusPDF $version" --notes-file release-notes.md --draft
           gh release edit "v$version" --draft=false --latest
