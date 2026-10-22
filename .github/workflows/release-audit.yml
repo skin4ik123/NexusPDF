@@ -1,7 +1,7 @@
 name: NexusPDF validated installer
+# Запуск вручную с main: ветки codex/nexuspdf-full-audit, с которой выпуск
+# раньше шёл по коммиту «[release]», больше нет (она в теге archive/*).
 on:
-  push:
-    branches: [codex/nexuspdf-full-audit]
   workflow_dispatch:
 permissions:
   contents: read
@@ -10,7 +10,6 @@ concurrency:
   cancel-in-progress: true
 jobs:
   windows:
-    if: contains(github.event.head_commit.message, '[release]') || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 55
     env:
@@ -81,8 +80,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/codex/nexuspdf-full-audit" --jq '.object.sha')
-          if [[ "$current" != "$GITHUB_SHA" ]]; then exit 0; fi
+          # Публикуется только проверенная вершина main: запуск с другой ветки
+          # или после того, как main ушёл вперёд, релиз не выпускает.
+          if [[ "$GITHUB_REF_NAME" != "main" ]]; then echo "Release is published only from main."; exit 1; fi
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [[ "$current" != "$GITHUB_SHA" ]]; then echo "main moved on; not publishing."; exit 1; fi
           version=$(python -c 'import xml.etree.ElementTree as e; print(e.parse("Directory.Build.props").findtext("PropertyGroup/Version"))')
           cd delivered
           sha256sum --check ../evidence/artifacts/release-sha256.txt
