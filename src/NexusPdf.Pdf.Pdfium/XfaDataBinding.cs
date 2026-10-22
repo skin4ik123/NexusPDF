@@ -39,6 +39,14 @@ public sealed class XfaDataBinding
     private const string XhtmlNamespace = "http://www.w3.org/1999/xhtml";
     private const string XsiNamespace = "http://www.w3.org/2001/XMLSchema-instance";
 
+    // Шаблон приходит из файла — недоверенные данные. Без пределов глубокая
+    // вложенность роняла бы программу переполнением стека, а вложенные
+    // повторы (occur) и огромный номер в dataRef раздували бы память.
+    private const int MaxDepth = 256;
+    private const int MaxContainers = 200_000;
+    private const int MaxRefParts = 64;
+    private const int MaxNewSiblings = 1_000;
+
     private readonly XElement _rootSubform;
     private readonly string? _datasets;
     private readonly IReadOnlyDictionary<string, string?> _writable;
@@ -218,6 +226,14 @@ public sealed class XfaDataBinding
         public readonly Dictionary<(DataNode Scope, string Name), int> Virtual = new();
         public DataNode Record = null!;
         public DataNode Data = null!;
+        public int Visited;
+
+        /// <summary>Счёт контейнеров всего слияния: предел против вложенных повторов.</summary>
+        public void Visit()
+        {
+            if (++Visited > MaxContainers)
+                throw new FormatException("Шаблон XFA слишком велик.");
+        }
     }
 
     private Bound Bind(XDocument datasets)
@@ -240,10 +256,10 @@ public sealed class XfaDataBinding
         var rootName = NameOr(_rootSubform, "#subform");
         var rootPath = (_rootSubform.Attribute("name") != null ? rootName : "#subform") + "[0]";
         if (BindOf(_rootSubform).Match == "none")
-            WalkUnbound(_rootSubform, rootPath, bound, "привязка none у корневой подформы");
+            WalkUnbound(_rootSubform, rootPath, bound, "привязка none у корневой подформы", depth: 0);
         else
             Walk(_rootSubform, rootPath, new Dictionary<string, int>(StringComparer.Ordinal),
-                bound.Record, new List<DataNode>(), inPageSet: false, bound);
+                bound.Record, new List<DataNode>(), inPageSet: false, bound, depth: 0);
         return bound;
     }
 
@@ -257,14 +273,15 @@ public sealed class XfaDataBinding
     /// Дети для SOM-имён: области и наборы подформ в именах не участвуют —
     /// их содержимое считается детьми родителя.
     /// </summary>
-    private static IEnumerable<XElement> SomChildren(XElement e)
+    private static IEnumerable<XElement> SomChildren(XElement e, int depth = 0)
     {
+        CheckDepth(depth);
         foreach (var c in e.Elements())
         {
             var t = c.Name.LocalName;
             if (t is "area" or "subformSet")
             {
-                foreach (var nested in SomChildren(c))
+                foreach (var nested in SomChildren(c, depth + 1))
                     yield return nested;
             }
             else if (Containers.Contains(t))
@@ -274,9 +291,16 @@ public sealed class XfaDataBinding
         }
     }
 
-    private void Walk(XElement container, string prefix, Dictionary<string, int> names,
-        DataNode scope, List<DataNode> ancestors, bool inPageSet, Bound bound)
+    private static void CheckDepth(int depth)
     {
+        if (depth > MaxDepth)
+            throw new FormatException("Шаблон XFA вложен слишком глубоко.");
+    }
+
+    private void Walk(XElement container, string prefix, Dictionary<string, int> names,
+        DataNode scope, List<DataNode> ancestors, bool inPageSet, Bound bound, int depth)
+    {
+        CheckDepth(depth);
         var classes = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var child in SomChildren(container))
         {
@@ -285,6 +309,7 @@ public sealed class XfaDataBinding
             var instances = type == "subform" ? InstanceCount(child) : 1;
             for (var instance = 0; instance < instances; instance++)
             {
+                bound.Visit();
                 // Индекс у именованного узла — номер среди одноимённых в той же
                 // области имён (сквозь прозрачные безымянные подформы); у
                 // безымянного — номер среди соседей того же класса.
@@ -312,54 +337,56 @@ public sealed class XfaDataBinding
                     // Мастер-страницы — своя область имён, и в обычное слияние
                     // данных их поля не входят.
                     Walk(child, path, new Dictionary<string, int>(StringComparer.Ordinal),
-                        scope, ancestors, inPageSet: true, bound);
+                        scope, ancestors, inPageSet: true, bound, depth + 1);
                 }
                 else if (bind.Match == "none")
                 {
                     // Подформа без привязки: её поля связываются относительно
                     // той же группы данных, что и она сама.
-                    WalkOrReset(child, path, name, names, scope, ancestors, inPageSet, bound);
+                    WalkOrReset(child, path, name, names, scope, ancestors, inPageSet, bound, depth + 1);
                 }
                 else if (bind.Match == "dataRef")
                 {
                     var target = ResolveRef(bind.Ref, scope, bound, instance);
                     if (target == null)
-                        WalkUnbound(child, path, bound, "непонятный dataRef подформы: " + bind.Ref);
+                        WalkUnbound(child, path, bound, "непонятный dataRef подформы: " + bind.Ref, depth + 1);
                     else
                         Walk(child, path, new Dictionary<string, int>(StringComparer.Ordinal),
-                            target, Append(ancestors, scope), inPageSet, bound);
+                            target, Append(ancestors, scope), inPageSet, bound, depth + 1);
                 }
                 else if (!string.IsNullOrEmpty(name) && type == "subform" &&
                          child.Attribute("scope")?.Value != "none")
                 {
                     var group = TakeOnce(scope, name!, bound, wantGroup: true);
                     Walk(child, path, new Dictionary<string, int>(StringComparer.Ordinal),
-                        group, Append(ancestors, scope), inPageSet, bound);
+                        group, Append(ancestors, scope), inPageSet, bound, depth + 1);
                 }
                 else
                 {
                     // Безымянная подформа прозрачна и для имён, и для данных;
                     // страница мастер-набора — своя область имён, но не группа данных.
-                    WalkOrReset(child, path, name, names, scope, ancestors, inPageSet, bound);
+                    WalkOrReset(child, path, name, names, scope, ancestors, inPageSet, bound, depth + 1);
                 }
             }
         }
     }
 
     private void WalkOrReset(XElement child, string path, string? name, Dictionary<string, int> names,
-        DataNode scope, List<DataNode> ancestors, bool inPageSet, Bound bound) =>
+        DataNode scope, List<DataNode> ancestors, bool inPageSet, Bound bound, int depth) =>
         Walk(child, path, string.IsNullOrEmpty(name) ? names : new Dictionary<string, int>(StringComparer.Ordinal),
-            scope, ancestors, inPageSet, bound);
+            scope, ancestors, inPageSet, bound, depth);
 
     private static List<DataNode> Append(List<DataNode> list, DataNode node) => new(list) { node };
 
     /// <summary>Все поля ветки — без места в данных (ветку записать нельзя).</summary>
-    private static void WalkUnbound(XElement container, string prefix, Bound bound, string reason)
+    private static void WalkUnbound(XElement container, string prefix, Bound bound, string reason, int depth)
     {
+        CheckDepth(depth);
         var names = new Dictionary<string, int>(StringComparer.Ordinal);
         var classes = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var child in SomChildren(container))
         {
+            bound.Visit();
             var type = child.Name.LocalName;
             var name = child.Attribute("name")?.Value;
             string segment;
@@ -378,7 +405,7 @@ public sealed class XfaDataBinding
             if (type is "field" or "exclGroup")
                 bound.Fields[path] = new BoundField(child, null, reason);
             else
-                WalkUnbound(child, path, bound, reason);
+                WalkUnbound(child, path, bound, reason, depth + 1);
         }
     }
 
@@ -506,6 +533,7 @@ public sealed class XfaDataBinding
             text.StartsWith('!') || text.StartsWith("xfa.", StringComparison.Ordinal))
             return null;
         var parts = text.Split('.');
+        if (parts.Length > MaxRefParts) return null;
         DataNode node;
         var first = 0;
         switch (parts[0])
@@ -534,6 +562,9 @@ public sealed class XfaDataBinding
             }
             if (name.Length == 0 || !XmlNameIsValid(name)) return null;
             var existing = node.Element?.Elements().Where(e => e.Name.LocalName == name).ToList();
+            // Пустые узлы перед нужным создаются, но не тысячами: такой номер —
+            // не бланк, а мусор или атака.
+            if (index - (existing?.Count ?? 0) > MaxNewSiblings) return null;
             node = existing != null && index < existing.Count
                 ? DataNode.Existing(existing[index])
                 : DataNode.Virtual(node, name, index);
