@@ -324,12 +324,35 @@ internal sealed class PdfiumXfaHybrid
 
     private readonly record struct Packet(string Name, string? Content);
 
+    private const int MaxPackets = 256;
+    private const ulong MaxPacketBytes = 16UL * 1024 * 1024;
+
+    /// <summary>
+    /// Пакеты XFA. Содержимое читается только у нужных — шаблона и данных
+    /// (или у единственного потока со всем XDP): остальные не нужны, а их
+    /// объём не должен расходовать память.
+    /// </summary>
     private static List<Packet> ReadPackets(FpdfDocumentT document)
     {
         var count = fpdfview.FPDF_GetXFAPacketCount(document);
+        if (count > MaxPackets)
+            throw new FormatException("В XFA слишком много пакетов.");
         var result = new List<Packet>(Math.Max(0, count));
+        ulong total = 0;
         for (var i = 0; i < count; i++)
-            result.Add(new Packet(PacketName(document, i), PacketContent(document, i)));
+        {
+            var name = PacketName(document, i);
+            var needed = name is "template" or "datasets" || (count == 1 && name.Length == 0);
+            string? content = null;
+            if (needed)
+            {
+                content = PacketContent(document, i, out var size);
+                total += size;
+                if (total > 2 * MaxPacketBytes)
+                    throw new FormatException("Пакеты XFA слишком велики.");
+            }
+            result.Add(new Packet(name, content));
+        }
         return result;
     }
 
@@ -349,15 +372,17 @@ internal sealed class PdfiumXfaHybrid
         }
     }
 
-    private static string? PacketContent(FpdfDocumentT document, int index)
+    private static string? PacketContent(FpdfDocumentT document, int index, out ulong size)
     {
         ulong needed = 0;
+        size = 0;
         if (fpdfview.FPDF_GetXFAPacketContent(document, index, IntPtr.Zero, 0, ref needed) == 0 || needed == 0)
             return null;
         // Разобранный XML занимает в памяти на порядок больше текста; бланки
         // весят единицы мегабайт, больше — не форма, а мусор или атака.
-        if (needed > 16UL * 1024 * 1024)
+        if (needed > MaxPacketBytes)
             throw new FormatException("Пакет XFA слишком велик.");
+        size = needed;
         var bytes = new byte[needed];
         var handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
         try

@@ -46,8 +46,18 @@ public sealed class XfaDataBinding
     private const int MaxContainers = 200_000;
     private const int MaxRefParts = 64;
     private const int MaxNewSiblings = 1_000;
+    // Сколько узлов данных слияние может запланировать к созданию всего:
+    // больше, чем контейнеров, чтобы обычный пустой бланк в него помещался.
+    private const int MaxPlannedNodes = 250_000;
+    private const int MaxNameLength = 512;
+    private const int MaxRefLength = 4_096;
+    private const long MaxPathChars = 32_000_000;
 
     private readonly XElement _rootSubform;
+    // Привязка каждого элемента шаблона и элементы с id (для use="#id"):
+    // считаются один раз, а не заново на каждом экземпляре повтора.
+    private readonly Dictionary<XElement, BindInfo> _binds = new();
+    private Dictionary<string, XElement>? _ids;
     private readonly string? _datasets;
     private readonly IReadOnlyDictionary<string, string?> _writable;
     private readonly IReadOnlyList<IReadOnlyList<string>> _shared;
@@ -227,12 +237,31 @@ public sealed class XfaDataBinding
         public DataNode Record = null!;
         public DataNode Data = null!;
         public int Visited;
+        public int Planned;
+        public long PathChars;
 
         /// <summary>Счёт контейнеров всего слияния: предел против вложенных повторов.</summary>
         public void Visit()
         {
             if (++Visited > MaxContainers)
                 throw new FormatException("Шаблон XFA слишком велик.");
+        }
+
+        /// <summary>Общий счёт символов в именах полей: длинные имена × повторы не раздувают память.</summary>
+        public void CountPath(string path)
+        {
+            PathChars += path.Length;
+            if (PathChars > MaxPathChars)
+                throw new FormatException("Шаблон XFA слишком велик.");
+        }
+
+        /// <summary>Запланировать создание узлов; false — общий предел исчерпан.</summary>
+        public bool Plan(int nodes)
+        {
+            if (nodes <= 0) return true;
+            if (Planned + (long)nodes > MaxPlannedNodes) return false;
+            Planned += nodes;
+            return true;
         }
     }
 
@@ -305,7 +334,7 @@ public sealed class XfaDataBinding
         foreach (var child in SomChildren(container))
         {
             var type = child.Name.LocalName;
-            var name = child.Attribute("name")?.Value;
+            var name = NameOf(child);
             var instances = type == "subform" ? InstanceCount(child) : 1;
             for (var instance = 0; instance < instances; instance++)
             {
@@ -326,6 +355,7 @@ public sealed class XfaDataBinding
                 }
                 classes[type] = classes.GetValueOrDefault(type) + 1;
                 var path = prefix + "." + segment;
+                bound.CountPath(path);
                 var bind = BindOf(child);
 
                 if (type is "field" or "exclGroup")
@@ -349,7 +379,7 @@ public sealed class XfaDataBinding
                 {
                     var target = ResolveRef(bind.Ref, scope, bound, instance);
                     if (target == null)
-                        WalkUnbound(child, path, bound, "непонятный dataRef подформы: " + bind.Ref, depth + 1);
+                        WalkUnbound(child, path, bound, "непонятный dataRef подформы", depth + 1);
                     else
                         Walk(child, path, new Dictionary<string, int>(StringComparer.Ordinal),
                             target, Append(ancestors, scope), inPageSet, bound, depth + 1);
@@ -388,7 +418,7 @@ public sealed class XfaDataBinding
         {
             bound.Visit();
             var type = child.Name.LocalName;
-            var name = child.Attribute("name")?.Value;
+            var name = NameOf(child);
             string segment;
             if (!string.IsNullOrEmpty(name))
             {
@@ -402,6 +432,7 @@ public sealed class XfaDataBinding
             }
             classes[type] = classes.GetValueOrDefault(type) + 1;
             var path = prefix + "." + segment;
+            bound.CountPath(path);
             if (type is "field" or "exclGroup")
                 bound.Fields[path] = new BoundField(child, null, reason);
             else
@@ -425,10 +456,17 @@ public sealed class XfaDataBinding
 
     private BindInfo BindOf(XElement container)
     {
+        if (_binds.TryGetValue(container, out var cached)) return cached;
         var bind = container.Elements().FirstOrDefault(e => e.Name.LocalName == "bind")
                    ?? PrototypeBind(container);
-        if (bind == null) return new BindInfo("once", null);
-        return new BindInfo(bind.Attribute("match")?.Value ?? "once", bind.Attribute("ref")?.Value);
+        var reference = bind?.Attribute("ref")?.Value;
+        // Слишком длинная ссылка — не путь в данных, а мусор: место не определить.
+        if (reference is { Length: > MaxRefLength }) reference = null;
+        var info = bind == null
+            ? new BindInfo("once", null)
+            : new BindInfo(bind.Attribute("match")?.Value ?? "once", reference);
+        _binds[container] = info;
+        return info;
     }
 
     /// <summary>Привязка, унаследованная от прототипа (use="#id").</summary>
@@ -436,9 +474,30 @@ public sealed class XfaDataBinding
     {
         var use = container.Attribute("use")?.Value;
         if (string.IsNullOrEmpty(use) || !use.StartsWith('#')) return null;
-        var id = use[1..];
-        var proto = _rootSubform.Document?.Descendants().FirstOrDefault(e => e.Attribute("id")?.Value == id);
-        return proto?.Elements().FirstOrDefault(e => e.Name.LocalName == "bind");
+        _ids ??= BuildIds();
+        return _ids.TryGetValue(use[1..], out var proto)
+            ? proto.Elements().FirstOrDefault(e => e.Name.LocalName == "bind")
+            : null;
+    }
+
+    private Dictionary<string, XElement> BuildIds()
+    {
+        var ids = new Dictionary<string, XElement>(StringComparer.Ordinal);
+        foreach (var e in _rootSubform.Document?.Descendants() ?? Enumerable.Empty<XElement>())
+        {
+            if (e.Attribute("id")?.Value is { } id)
+                ids.TryAdd(id, e);
+        }
+        return ids;
+    }
+
+    /// <summary>Имя контейнера; слишком длинное — не бланк, и шаблон не принимается.</summary>
+    private static string? NameOf(XElement container)
+    {
+        var name = container.Attribute("name")?.Value;
+        if (name is { Length: > MaxNameLength })
+            throw new FormatException("В шаблоне XFA слишком длинное имя.");
+        return name;
     }
 
     private BoundField BindField(XElement field, string? name, BindInfo bind, DataNode scope,
@@ -457,7 +516,7 @@ public sealed class XfaDataBinding
             case "dataRef":
                 var target = ResolveRef(bind.Ref, scope, bound, instance);
                 return target == null
-                    ? new BoundField(field, null, "непонятный dataRef: " + bind.Ref)
+                    ? new BoundField(field, null, "непонятный dataRef")
                     : new BoundField(field, target, null);
             default:
                 if (inPageSet)
@@ -516,6 +575,8 @@ public sealed class XfaDataBinding
         var existing = scope.Element?.Elements().Count(e => e.Name.LocalName == name) ?? 0;
         var key = (scope, name);
         bound.Virtual.TryGetValue(key, out var allocated);
+        if (!bound.Plan(1))
+            throw new FormatException("Шаблон XFA слишком велик.");
         bound.Virtual[key] = allocated + 1;
         return DataNode.Virtual(scope, name, existing + allocated);
     }
@@ -564,7 +625,9 @@ public sealed class XfaDataBinding
             var existing = node.Element?.Elements().Where(e => e.Name.LocalName == name).ToList();
             // Пустые узлы перед нужным создаются, но не тысячами: такой номер —
             // не бланк, а мусор или атака.
-            if (index - (existing?.Count ?? 0) > MaxNewSiblings) return null;
+            // long: номер int.MaxValue + 1 иначе перевернулся бы в отрицательный.
+            var missing = (long)index + 1 - (existing?.Count ?? 0);
+            if (missing > MaxNewSiblings || !bound.Plan((int)Math.Max(0, missing))) return null;
             node = existing != null && index < existing.Count
                 ? DataNode.Existing(existing[index])
                 : DataNode.Virtual(node, name, index);

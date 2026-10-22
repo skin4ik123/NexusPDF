@@ -207,6 +207,30 @@ public sealed class XfaDataBindingTests
             Data(""));
         Assert.False(binding.CanWrite("form1[0].Far[0]"));
         Assert.False(binding.CanWrite("form1[0].Long[0]"));
+
+        // Номер на границе int: без длинной арифметики он «перевернулся» бы
+        // в отрицательный и прошёл бы проверку.
+        var edge = XfaDataBinding.Create(Template(
+            Field("Edge", "<bind match=\"dataRef\" ref=\"$record.Item[2147483647]\"/>")), Data(""));
+        Assert.False(edge.CanWrite("form1[0].Edge[0]"));
+    }
+
+    [Fact]
+    public void Many_Data_References_Share_One_Budget()
+    {
+        // По отдельности каждая ссылка в пределе, вместе — нет: лишние не пишутся.
+        var fields = string.Concat(Enumerable.Range(0, 400).Select(i =>
+            Field($"F{i}", $"<bind match=\"dataRef\" ref=\"$record.G{i}.Item[999]\"/>")));
+        var binding = XfaDataBinding.Create(Template(fields), Data(""));
+        var writable = Enumerable.Range(0, 400).Count(i => binding.CanWrite($"form1[0].F{i}[0]"));
+        Assert.InRange(writable, 1, 399);
+    }
+
+    [Fact]
+    public void Overlong_Names_Are_Refused()
+    {
+        var name = new string('n', 10_000);
+        Assert.Throws<FormatException>(() => XfaDataBinding.Create(Template(Field(name)), Data("")));
     }
 
     [Fact]
