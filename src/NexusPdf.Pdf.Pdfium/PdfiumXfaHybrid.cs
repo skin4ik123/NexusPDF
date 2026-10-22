@@ -354,7 +354,9 @@ internal sealed class PdfiumXfaHybrid
         ulong needed = 0;
         if (fpdfview.FPDF_GetXFAPacketContent(document, index, IntPtr.Zero, 0, ref needed) == 0 || needed == 0)
             return null;
-        if (needed > 64UL * 1024 * 1024)
+        // Разобранный XML занимает в памяти на порядок больше текста; бланки
+        // весят единицы мегабайт, больше — не форма, а мусор или атака.
+        if (needed > 16UL * 1024 * 1024)
             throw new FormatException("Пакет XFA слишком велик.");
         var bytes = new byte[needed];
         var handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);

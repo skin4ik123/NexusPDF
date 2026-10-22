@@ -176,6 +176,40 @@ public sealed class XfaDataBindingTests
     }
 
     [Fact]
+    public void Deep_Nesting_Is_Refused_Instead_Of_Crashing()
+    {
+        // Переполнение стека в .NET не перехватывается — программа упала бы.
+        var deep = string.Concat(Enumerable.Repeat("<subform>", 5_000)) + Field("A") +
+                   string.Concat(Enumerable.Repeat("</subform>", 5_000));
+        Assert.Throws<FormatException>(() => XfaDataBinding.Create(Template(deep), Data("")));
+
+        var deepAreas = string.Concat(Enumerable.Repeat("<area>", 5_000)) + Field("A") +
+                        string.Concat(Enumerable.Repeat("</area>", 5_000));
+        Assert.Throws<FormatException>(() => XfaDataBinding.Create(Template(deepAreas), Data("")));
+    }
+
+    [Fact]
+    public void Nested_Repeats_Cannot_Blow_Up_Memory()
+    {
+        // 10 000 × 10 000 × 10 000 экземпляров — предел общий, а не на уровень.
+        const string occur = "<occur min=\"10000\" initial=\"10000\" max=\"-1\"/>";
+        var bomb = $"<subform name=\"L1\">{occur}<subform name=\"L2\">{occur}" +
+                   $"<subform name=\"L3\">{occur}{Field("A")}</subform></subform></subform>";
+        Assert.Throws<FormatException>(() => XfaDataBinding.Create(Template(bomb), Data("")));
+    }
+
+    [Fact]
+    public void A_Huge_Data_Reference_Index_Is_Not_Written()
+    {
+        var binding = XfaDataBinding.Create(Template(
+                Field("Far", "<bind match=\"dataRef\" ref=\"$record.Item[2000000000]\"/>") +
+                Field("Long", "<bind match=\"dataRef\" ref=\"$record." + string.Join(".", Enumerable.Repeat("a", 100)) + "\"/>")),
+            Data(""));
+        Assert.False(binding.CanWrite("form1[0].Far[0]"));
+        Assert.False(binding.CanWrite("form1[0].Long[0]"));
+    }
+
+    [Fact]
     public void Whole_Xdp_Stream_Is_Split_And_Reassembled()
     {
         var xdp = "<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\">" + Template(Field("A")) + Data("<A>old</A>") +
