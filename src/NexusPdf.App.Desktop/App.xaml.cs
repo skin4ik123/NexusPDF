@@ -79,7 +79,9 @@ public partial class App : System.Windows.Application
         var crashed = CrashSentinel.PreviousSessionCrashed();
         CrashSentinel.MarkSessionStarted();
 
-        _services = new AppServices(new PdfiumRenderEngine(), settings, store);
+        // MuPDF дописывает данные XFA гибридных форм — их показывает Adobe Reader.
+        _services = new AppServices(
+            new PdfiumRenderEngine(new NexusPdf.Pdf.MuPdf.MuPdfXfaPacketWriter()), settings, store);
         Log.Debug("Запуск: службы созданы за {Elapsed:N0} мс", Elapsed());
 
         DispatcherUnhandledException += (_, args) =>

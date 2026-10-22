@@ -475,6 +475,253 @@ public static class PdfFixture
         return path;
     }
 
+    /// <summary>Какая форма: обычный AcroForm, гибрид AcroForm + XFA или целиком динамическая XFA.</summary>
+    public enum XfaKind { None, Hybrid, Dynamic }
+
+    /// <summary>
+    /// Заполненная форма с одним текстовым полем [100 600 400 640] и значением
+    /// в /V, /AP и (если есть XFA) в пакете datasets — так устроены бланки,
+    /// сохранённые Adobe. Hybrid — /XFA без NeedsRendering (FPDF_GetFormType
+    /// = 3), Dynamic — NeedsRendering и ни одного AcroForm-виджета (= 2).
+    /// </summary>
+    public static byte[] BuildXfaForm(XfaKind kind, string value)
+    {
+        var template =
+            "<template xmlns=\"http://www.xfa.org/schema/xfa-template/2.8/\">" +
+            "<subform name=\"form1\" layout=\"tb\"><pageSet><pageArea name=\"Page1\">" +
+            "<contentArea x=\"0pt\" y=\"0pt\" w=\"612pt\" h=\"792pt\"/></pageArea></pageSet>" +
+            "<subform name=\"Page1\"><field name=\"Name\" x=\"100pt\" y=\"152pt\" w=\"300pt\" h=\"40pt\">" +
+            "<ui><textEdit/></ui></field></subform></subform></template>";
+        var datasets =
+            "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\"><xfa:data>" +
+            $"<form1><Page1><Name>{value}</Name></Page1></form1></xfa:data></xfa:datasets>";
+        var appearance = $"/Tx BMC q BT /Helv 12 Tf 0 g 2 14 Td ({value}) Tj ET Q EMC";
+        var widgets = kind != XfaKind.Dynamic;
+        var xfa = kind == XfaKind.None
+            ? ""
+            : " /XFA [(preamble) 7 0 R (template) 8 0 R (datasets) 9 0 R (postamble) 10 0 R]";
+
+        var objects = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R" + (kind == XfaKind.Dynamic ? " /NeedsRendering true" : "") +
+            $" /AcroForm << /Fields [{(widgets ? "4 0 R" : "")}] /DA (/Helv 12 Tf 0 g)" +
+            $" /DR << /Font << /Helv 5 0 R >> >>{xfa} >> >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]" + (widgets ? " /Annots [4 0 R]" : "") +
+            " /Resources << /Font << /Helv 5 0 R >> >> >>",
+            // Имя поля — SOM-путь, как у полей, созданных из XFA-шаблона.
+            $"<< /Type /Annot /Subtype /Widget /FT /Tx /T (form1[0].Page1[0].Name[0]) /V ({value}) " +
+            "/Rect [100 600 400 640] /F 4 /DA (/Helv 12 Tf 0 g) /AP << /N 6 0 R >> >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 300 40] /Resources << /Font << /Helv 5 0 R >> >> " +
+            $"/Length {appearance.Length} >>\nstream\n{appearance}\nendstream",
+        };
+        foreach (var packet in new[] { "<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\">", template, datasets, "</xdp:xdp>" })
+            objects.Add($"<< /Length {packet.Length} >>\nstream\n{packet}\nendstream");
+
+        var buffer = new MemoryStream();
+        void WriteRaw(string s) => buffer.Write(Encoding.ASCII.GetBytes(s));
+        WriteRaw("%PDF-1.7\n");
+        buffer.Write(new byte[] { (byte)'%', 0xE2, 0xE3, 0xCF, 0xD3, (byte)'\n' });
+        var offsets = new long[objects.Count + 1];
+        for (var i = 0; i < objects.Count; i++)
+        {
+            offsets[i + 1] = buffer.Position;
+            WriteRaw($"{i + 1} 0 obj\n{objects[i]}\nendobj\n");
+        }
+        var xrefPosition = buffer.Position;
+        WriteRaw($"xref\n0 {objects.Count + 1}\n");
+        WriteRaw("0000000000 65535 f \n");
+        for (var i = 1; i <= objects.Count; i++)
+            WriteRaw($"{offsets[i]:0000000000} 00000 n \n");
+        WriteRaw($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xrefPosition}\n%%EOF\n");
+        return buffer.ToArray();
+    }
+
+    public static string WriteXfaFormToTemp(string fileName, XfaKind kind, string value)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, fileName);
+        File.WriteAllBytes(path, BuildXfaForm(kind, value));
+        return path;
+    }
+
+    /// <summary>
+    /// Гибридная форма со всеми видами привязки XFA, как у бланков Adobe
+    /// LiveCycle. Поля (прямоугольники в PDF-координатах, страница 612×792):
+    /// <list type="bullet">
+    /// <item>Page1: Name [100 700 400 730]; Vessel (global) [100 650 400 680];
+    /// флажок Agree [100 600 130 630], items 1/0; переключатели Choice: A
+    /// [100 550 130 580] = «alpha», B [200 550 230 580] = «beta»; Note
+    /// (привязка none) [100 500 400 530];</item>
+    /// <item>безымянная подформа (#subform[1]): Row[0] в области [100 450 400 480]
+    /// со значением «first»; Row[1] [100 400 400 430]; Vessel (global)
+    /// [100 350 400 380]; Code (dataRef $record.Extra.Code) [100 300 400 330].</item>
+    /// </list>
+    /// В datasets есть Page1/Name, Page1/Agree, Row «first» и пустой Vessel;
+    /// остального нет — узлы создаются при записи.
+    /// </summary>
+    public static byte[] BuildRichHybrid()
+    {
+        const string template =
+            "<template xmlns=\"http://www.xfa.org/schema/xfa-template/3.3/\"><subform name=\"form1\" layout=\"tb\">" +
+            "<pageSet><pageArea name=\"Page1\"><contentArea x=\"0pt\" y=\"0pt\" w=\"612pt\" h=\"792pt\"/>" +
+            "<field name=\"Footer\"><ui><textEdit/></ui></field></pageArea></pageSet>" +
+            "<subform name=\"Page1\">" +
+            "<field name=\"Name\"><ui><textEdit/></ui></field>" +
+            "<field name=\"Vessel\"><ui><textEdit/></ui><bind match=\"global\"/></field>" +
+            "<field name=\"Agree\"><ui><checkButton/></ui><items><integer>1</integer><integer>0</integer></items></field>" +
+            "<exclGroup name=\"Choice\">" +
+            "<field name=\"A\"><ui><checkButton shape=\"round\"/></ui><items><text>alpha</text></items></field>" +
+            "<field name=\"B\"><ui><checkButton shape=\"round\"/></ui><items><text>beta</text></items></field>" +
+            "</exclGroup>" +
+            "<field name=\"Note\"><ui><textEdit/></ui><bind match=\"none\"/></field>" +
+            "</subform>" +
+            "<subform><area><field name=\"Row\"><ui><textEdit/></ui></field></area>" +
+            "<field name=\"Row\"><ui><textEdit/></ui></field>" +
+            "<field name=\"Vessel\"><ui><textEdit/></ui><bind match=\"global\"/></field>" +
+            "<field name=\"Code\"><ui><textEdit/></ui><bind match=\"dataRef\" ref=\"$record.Extra.Code\"/></field>" +
+            "</subform></subform></template>";
+        const string datasets =
+            "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\"><xfa:data><form1>" +
+            "<Page1><Name/><Agree>0</Agree></Page1><Row>first</Row><Vessel/></form1></xfa:data></xfa:datasets>";
+
+        static string Text(string name, string rect, string value = "") =>
+            $"<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /V ({value}) /Rect [{rect}] /F 4 /DA (/Helv 12 Tf 0 g) >>";
+        static string Radio(int parent, string rect, string state) =>
+            $"<< /Type /Annot /Subtype /Widget /Parent {parent} 0 R /Rect [{rect}] /F 4 /AS /Off " +
+            $"/MK << /CA (l) >> /DA (/ZaDb 0 Tf 0 g) /AP << /N << /{state} 13 0 R /Off 14 0 R >> >> >>";
+        const string on = "0 g 5 5 20 20 re f";
+        var objects = new List<string>
+        {
+            // 1 каталог: поля и XFA
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [6 0 R 7 0 R 8 0 R 9 0 R 12 0 R 15 0 R 16 0 R 17 0 R 18 0 R] " +
+            "/NeedAppearances true /DA (/Helv 12 Tf 0 g) /DR << /Font << /Helv 4 0 R /ZaDb 5 0 R >> >> " +
+            "/XFA [(preamble) 19 0 R (template) 20 0 R (datasets) 21 0 R (postamble) 22 0 R] >> >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] " +
+            "/Annots [6 0 R 7 0 R 8 0 R 10 0 R 11 0 R 12 0 R 15 0 R 16 0 R 17 0 R 18 0 R] " +
+            "/Resources << /Font << /Helv 4 0 R >> >> >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /ZapfDingbats >>",
+            Text("form1[0].Page1[0].Name[0]", "100 700 400 730"),
+            Text("form1[0].Page1[0].Vessel[0]", "100 650 400 680"),
+            "<< /Type /Annot /Subtype /Widget /FT /Btn /T (form1[0].Page1[0].Agree[0]) /V /Off /AS /Off " +
+            "/Rect [100 600 130 630] /F 4 /MK << /CA (4) >> /DA (/ZaDb 0 Tf 0 g) /AP << /N << /1 13 0 R /Off 14 0 R >> >> >>",
+            // 9: группа переключателей, 10–11: её виджеты
+            "<< /FT /Btn /Ff 49152 /T (form1[0].Page1[0].Choice[0]) /V /Off /Kids [10 0 R 11 0 R] >>",
+            Radio(9, "100 550 130 580", "alpha"),
+            Radio(9, "200 550 230 580", "beta"),
+            Text("form1[0].Page1[0].Note[0]", "100 500 400 530"),
+            $"<< /Type /XObject /Subtype /Form /BBox [0 0 30 30] /Length {on.Length} >>\nstream\n{on}\nendstream",
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 30 30] /Length 0 >>\nstream\n\nendstream",
+            Text("form1[0].#subform[1].Row[0]", "100 450 400 480", "first"),
+            Text("form1[0].#subform[1].Row[1]", "100 400 400 430"),
+            Text("form1[0].#subform[1].Vessel[0]", "100 350 400 380"),
+            Text("form1[0].#subform[1].Code[0]", "100 300 400 330"),
+        };
+        foreach (var packet in new[] { "<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\">", template, datasets, "</xdp:xdp>" })
+            objects.Add($"<< /Length {packet.Length} >>\nstream\n{packet}\nendstream");
+
+        var buffer = new MemoryStream();
+        void WriteRaw(string s) => buffer.Write(Encoding.ASCII.GetBytes(s));
+        WriteRaw("%PDF-1.7\n");
+        buffer.Write(new byte[] { (byte)'%', 0xE2, 0xE3, 0xCF, 0xD3, (byte)'\n' });
+        var offsets = new long[objects.Count + 1];
+        for (var i = 0; i < objects.Count; i++)
+        {
+            offsets[i + 1] = buffer.Position;
+            WriteRaw($"{i + 1} 0 obj\n{objects[i]}\nendobj\n");
+        }
+        var xrefPosition = buffer.Position;
+        WriteRaw($"xref\n0 {objects.Count + 1}\n");
+        WriteRaw("0000000000 65535 f \n");
+        for (var i = 1; i <= objects.Count; i++)
+            WriteRaw($"{offsets[i]:0000000000} 00000 n \n");
+        WriteRaw($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xrefPosition}\n%%EOF\n");
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Двухстраничная гибридная форма. Страница 1: флажок Agree [100 600 130 630]
+    /// и Vessel (global) [100 650 400 680]; страница 2: Name [100 700 400 730] и
+    /// второй Vessel (global) там же, где на первой.
+    /// </summary>
+    public static byte[] BuildTwoPageHybrid()
+    {
+        const string template =
+            "<template xmlns=\"http://www.xfa.org/schema/xfa-template/3.3/\"><subform name=\"form1\">" +
+            "<subform name=\"Page1\">" +
+            "<field name=\"Agree\"><ui><checkButton/></ui><items><integer>1</integer><integer>0</integer></items></field>" +
+            "<field name=\"Vessel\"><ui><textEdit/></ui><bind match=\"global\"/></field></subform>" +
+            "<subform name=\"Page2\"><field name=\"Name\"><ui><textEdit/></ui></field>" +
+            "<field name=\"Vessel\"><ui><textEdit/></ui><bind match=\"global\"/></field></subform>" +
+            "</subform></template>";
+        const string datasets =
+            "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\"><xfa:data><form1>" +
+            "<Page1><Agree>0</Agree></Page1><Page2><Name/></Page2><Vessel/></form1></xfa:data></xfa:datasets>";
+        static string Text(string name, string rect) =>
+            $"<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /V () /Rect [{rect}] /F 4 /DA (/Helv 12 Tf 0 g) >>";
+        const string on = "0 g 5 5 20 20 re f";
+        var objects = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [6 0 R 7 0 R 8 0 R 9 0 R] " +
+            "/NeedAppearances true /DA (/Helv 12 Tf 0 g) /DR << /Font << /Helv 5 0 R /ZaDb 10 0 R >> >> " +
+            "/XFA [(preamble) 13 0 R (template) 14 0 R (datasets) 15 0 R (postamble) 16 0 R] >> >>",
+            "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [6 0 R 7 0 R] /Resources << /Font << /Helv 5 0 R >> >> >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [8 0 R 9 0 R] /Resources << /Font << /Helv 5 0 R >> >> >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+            "<< /Type /Annot /Subtype /Widget /FT /Btn /T (form1[0].Page1[0].Agree[0]) /V /Off /AS /Off " +
+            "/Rect [100 600 130 630] /F 4 /MK << /CA (4) >> /DA (/ZaDb 0 Tf 0 g) /AP << /N << /1 11 0 R /Off 12 0 R >> >> >>",
+            Text("form1[0].Page1[0].Vessel[0]", "100 650 400 680"),
+            Text("form1[0].Page2[0].Name[0]", "100 700 400 730"),
+            Text("form1[0].Page2[0].Vessel[0]", "100 650 400 680"),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /ZapfDingbats >>",
+            $"<< /Type /XObject /Subtype /Form /BBox [0 0 30 30] /Length {on.Length} >>\nstream\n{on}\nendstream",
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 30 30] /Length 0 >>\nstream\n\nendstream",
+        };
+        foreach (var packet in new[] { "<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\">", template, datasets, "</xdp:xdp>" })
+            objects.Add($"<< /Length {packet.Length} >>\nstream\n{packet}\nendstream");
+
+        var buffer = new MemoryStream();
+        void WriteRaw(string s) => buffer.Write(Encoding.ASCII.GetBytes(s));
+        WriteRaw("%PDF-1.7\n");
+        buffer.Write(new byte[] { (byte)'%', 0xE2, 0xE3, 0xCF, 0xD3, (byte)'\n' });
+        var offsets = new long[objects.Count + 1];
+        for (var i = 0; i < objects.Count; i++)
+        {
+            offsets[i + 1] = buffer.Position;
+            WriteRaw($"{i + 1} 0 obj\n{objects[i]}\nendobj\n");
+        }
+        var xrefPosition = buffer.Position;
+        WriteRaw($"xref\n0 {objects.Count + 1}\n");
+        WriteRaw("0000000000 65535 f \n");
+        for (var i = 1; i <= objects.Count; i++)
+            WriteRaw($"{offsets[i]:0000000000} 00000 n \n");
+        WriteRaw($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xrefPosition}\n%%EOF\n");
+        return buffer.ToArray();
+    }
+
+    public static string WriteTwoPageHybridToTemp(string fileName)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, fileName);
+        File.WriteAllBytes(path, BuildTwoPageHybrid());
+        return path;
+    }
+
+    public static string WriteRichHybridToTemp(string fileName)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, fileName);
+        File.WriteAllBytes(path, BuildRichHybrid());
+        return path;
+    }
+
     public static string WriteToTemp(string fileName, params PageSpec[] pages)
     {
         var dir = Path.Combine(Path.GetTempPath(), "NexusPdfTests", Guid.NewGuid().ToString("N"));

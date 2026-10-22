@@ -825,6 +825,21 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     [ObservableProperty]
     private bool _hasAcroForm;
 
+    /// <summary>
+    /// Тип формы документа, как его отдаёт движок: 1 — AcroForm, 2 — динамическая
+    /// XFA, 3 — гибридная (AcroForm + XFA, заполняется как AcroForm).
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsUnsupportedXfa))]
+    private int _formType;
+
+    /// <summary>
+    /// Динамическая XFA-форма: её разметку программа не рисует. Строка
+    /// состояния держит об этом значок всё время, пока документ открыт, а не
+    /// одно сообщение, которое сменится первым же действием.
+    /// </summary>
+    public bool IsUnsupportedXfa => FormType == 2;
+
     [ObservableProperty]
     private bool _isFormMode;
 
@@ -837,11 +852,21 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     {
         try
         {
-            HasAcroForm = await Document.PrimaryHandle.GetFormTypeAsync(CancellationToken.None) == 1;
-            // Поля без подсветки не видны глазом — подсказываем, что они есть
-            // и что включать для них ничего не нужно.
-            if (HasAcroForm && StatusText == Loc.Get("Ready"))
-                StatusText = Loc.Get("FormDetectedHint");
+            FormType = await Document.PrimaryHandle.GetFormTypeAsync(CancellationToken.None);
+            // Гибридная форма заполняется как обычная: значения при сохранении
+            // попадают и в её XFA-данные.
+            HasAcroForm = FormType is 1 or 3;
+            if (StatusText == Loc.Get("Ready"))
+            {
+                // Поля без подсветки не видны глазом — подсказываем, что они есть
+                // и что включать для них ничего не нужно.
+                if (HasAcroForm)
+                    StatusText = Loc.Get("FormDetectedHint");
+                // Динамическую XFA не показать: человек узнаёт об этом сразу,
+                // а не по молча пустым страницам.
+                else if (IsUnsupportedXfa)
+                    StatusText = Loc.Get("XfaDynamicNotice");
+            }
         }
         catch (Exception ex)
         {
@@ -868,6 +893,10 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         if (!await Document.PrimaryHandle.InitFormsAsync(CancellationToken.None))
         {
             HasAcroForm = false;
+            // Гибридная форма с нечитаемой XFA-частью: значения видны, но
+            // изменения не дошли бы до Adobe Reader — заполнение закрыто.
+            if (FormType == 3)
+                StatusText = Loc.Get("XfaHybridNotFillable");
             return false;
         }
         if (IsBusy) return false;

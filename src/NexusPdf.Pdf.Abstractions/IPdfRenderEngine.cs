@@ -260,10 +260,19 @@ public interface IPdfDocumentHandle : IAsyncDisposable
 
     // ----- Интерактивные формы (AcroForm) -----
 
-    /// <summary>0 — форм нет, 1 — AcroForm, 2/3 — XFA (не поддерживается для заполнения).</summary>
+    /// <summary>
+    /// Тип формы (FPDF_GetFormType). 0 — форм нет, 1 — AcroForm.
+    /// 2 — целиком динамическая XFA: не отображается, на страницах только то,
+    /// что в них нарисовано без XFA. 3 — гибридная (AcroForm + XFA):
+    /// показывается, печатается и заполняется как AcroForm, а при сохранении
+    /// изменённые значения записываются и в XFA-данные (их читает Adobe Reader).
+    /// </summary>
     Task<int> GetFormTypeAsync(CancellationToken ct);
 
-    /// <summary>Включает окружение заполнения форм. false — формы отсутствуют/не поддерживаются.</summary>
+    /// <summary>
+    /// Включает режим заполнения форм. false — форм нет, форма динамическая XFA
+    /// или XFA-часть гибридной формы не читается.
+    /// </summary>
     Task<bool> InitFormsAsync(CancellationToken ct);
 
     /// <summary>

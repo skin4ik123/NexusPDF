@@ -12,6 +12,23 @@ public interface IEngineFeature
 }
 
 /// <summary>
+/// Замена пакета XFA в уже записанном PDF — дописыванием, без перезаписи
+/// прежних байтов. Нужна для заполнения гибридных форм (AcroForm + XFA):
+/// Adobe Reader показывает значения из пакета datasets, а PDFium менять
+/// произвольные объекты документа не умеет. Без этого движка такие формы
+/// только показываются и печатаются.
+/// </summary>
+public interface IXfaPacketWriter
+{
+    /// <summary>
+    /// Пакет <paramref name="packetName"/> получает содержимое
+    /// <paramref name="content"/> (нет пакета — добавляется); null — XFA
+    /// хранится одним потоком, и заменяется весь XDP.
+    /// </summary>
+    void Replace(string path, string? password, string? packetName, byte[] content);
+}
+
+/// <summary>
 /// Доступ к структуре документа на уровне объектов PDF в формате JSON qpdf.
 /// Нужен там, где у pdfium нет публичного API: слои (/OCProperties) читаются
 /// и переключаются только так.
