@@ -31,7 +31,7 @@ public static class Program
         // сбоя пакетной обработки упирался в отсутствие любых следов.
         Serilog.Log.Logger = NexusPdf.Infrastructure.LoggingSetup.Create("nexuspdfcli-");
 
-        var engine = new PdfiumRenderEngine();
+        var engine = new PdfiumRenderEngine(new NexusPdf.Pdf.MuPdf.MuPdfXfaPacketWriter());
         try
         {
             return await RunAsync(engine, args[0].ToLowerInvariant(), args.Skip(1).ToArray());
@@ -379,7 +379,8 @@ public static class Program
                 var document = await OpenAsync(engine, positional[0], options, ct);
                 await using (document)
                 {
-                    if (await document.PrimaryHandle.GetFormTypeAsync(ct) == 1)
+                    // 3 — гибридная форма: те же AcroForm-поля, только с XFA поверх.
+                    if (await document.PrimaryHandle.GetFormTypeAsync(ct) is 1 or 3)
                         Console.Error.WriteLine(
                             "Предупреждение: у документа есть формы AcroForm — в копии со слоем OCR они станут статикой.");
                     var service = new OcrService(ocrEngine);

@@ -16,6 +16,17 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
 
     private readonly PdfiumThread _thread = PdfiumThread.Shared;
 
+    public PdfiumRenderEngine() : this(null) { }
+
+    /// <param name="xfaWriter">
+    /// Запись данных XFA гибридных форм. Без него такие формы только
+    /// показываются и печатаются: правка AcroForm без XFA-данных дала бы в
+    /// Adobe Reader прежние значения.
+    /// </param>
+    public PdfiumRenderEngine(IXfaPacketWriter? xfaWriter) => XfaWriter = xfaWriter;
+
+    internal IXfaPacketWriter? XfaWriter { get; }
+
     public string EngineName => "PDFium";
 
     public Task<IPdfDocumentHandle> OpenAsync(string filePath, string? password, CancellationToken ct) =>
@@ -67,7 +78,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
             }
 
             return new PdfiumDocumentHandle(this, _thread, filePath, doc,
-                new PdfDocumentInfo(pageCount, pages), mmf, accessor);
+                new PdfDocumentInfo(pageCount, pages), mmf, accessor, password);
         }
         catch
         {

@@ -154,6 +154,13 @@ public sealed class SaveService
         var fullTarget = Path.GetFullPath(targetPath);
         SafeFileReplace.ThrowIfReadOnly(fullTarget);
 
+        // Поле, в котором стоит курсор, фиксируется ДО отметок: фиксация меняет
+        // значения (а в гибридной XFA-форме ещё и переносит их на поля с общим
+        // значением) и выглядела бы правкой во время сохранения — документ
+        // остался бы «несохранённым».
+        foreach (var handle in document.Handles.Values)
+            await handle.FormKillFocusAsync(ct);
+
         var stamp = document.Session.ChangeStamp;
         var formStamps = new Dictionary<IPdfDocumentHandle, long>(ReferenceEqualityComparer.Instance);
         foreach (var handle in document.Handles.Values)

@@ -11,7 +11,8 @@ Domain                           — DocumentSession, PageRef, операции,
    │
 Pdf.Abstractions                 — интерфейсы движков и модели данных
    ▲
-   ├── Pdf.Pdfium                — рендер/текст/компоновка (PDFium)
+   ├── Pdf.Pdfium                — рендер/текст/компоновка/формы (PDFium)
+   ├── Pdf.MuPdf                 — сжатие, запись XFA-данных гибридных форм (MuPDF)
    └── Pdf.Qpdf                  — структура/шифрование (qpdf)
 
 Ocr                              — ITextRecognizer + Tesseract 5 (запасной)

@@ -1,4 +1,4 @@
-param([string]$Version = '0.27.1')
+param([string]$Version = '0.27.2')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root

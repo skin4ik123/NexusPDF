@@ -6,6 +6,7 @@ namespace NexusPdf.Pdf.Pdfium;
 
 internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
 {
+    private readonly PdfiumRenderEngine _engine;
     private readonly PdfiumThread _thread;
     // У документа, собранного в ПАМЯТИ (страница с применёнными правками),
     // файла за спиной нет — отображение отсутствует, и закрывать нечего.
@@ -19,6 +20,9 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
     private readonly object _admissionGate = new();
     private bool _disposed;
     private PdfiumFormSession? _forms; // читается/меняется только на PDFium-потоке
+    // Пароль нужен, чтобы дописать пакет XFA в только что сохранённую копию:
+    // её шифрование то же, что у исходного файла.
+    private readonly string? _password;
 
     private const int FpdfBitmapBgra = 4;
     private const int RenderFlagAnnot = 0x01;
@@ -39,9 +43,12 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
         FpdfDocumentT nativeDoc,
         PdfDocumentInfo info,
         MemoryMappedFile? mmf,
-        MemoryMappedViewAccessor? accessor)
+        MemoryMappedViewAccessor? accessor,
+        string? password = null)
     {
+        _engine = engine;
         _thread = thread;
+        _password = password;
         FilePath = filePath;
         NativeDoc = nativeDoc;
         Info = info;
@@ -143,6 +150,8 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
     /// рисует Widget-аннотации, их значения выводит только FFLDraw живого
     /// окружения. Без этого документ с заполненной формой выглядел пустым и
     /// на экране, и на печати — пока пользователь не включит режим форм.
+    /// Гибридной форме (AcroForm + XFA) окружение нужно так же: значения её
+    /// полей рисуются тем же путём, только ввод закрыт.
     /// Вызывается строго на pdfium-потоке; для документов без AcroForm
     /// Create возвращает null, и попытка не повторяется дороже одного вызова
     /// FPDF_GetFormType.
@@ -536,10 +545,16 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
             return _thread.InvokeAsync(() =>
             {
                 _forms ??= PdfiumFormSession.Create(NativeDoc);
+                // Гибридная форма заполняется, только если её XFA-данные есть
+                // чем записать и её XFA-часть разобралась: иначе изменения не
+                // дошли бы до Adobe Reader.
+                if (_forms == null || (_forms.IsXfaHybrid && _engine.XfaWriter == null) ||
+                    !_forms.EnableInput(out _))
+                    return false;
                 // Режим заполнения: поля получают подсветку. Значения рисуются
                 // всегда, подсветка — только пока режим включён.
-                _forms?.SetHighlight(true);
-                return _forms != null;
+                _forms.SetHighlight(true);
+                return true;
             }, ct);
         }
     }
@@ -664,9 +679,25 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
             return _thread.InvokeAsync(() =>
             {
                 _forms?.KillFocus(); // зафиксировать значение редактируемого поля
+                var xfa = _forms?.BuildXfaUpdate();
                 PdfiumRenderEngine.SaveDocument(NativeDoc, targetPath, incremental ? 1 : 0);
+                WriteXfaPacket(targetPath, xfa);
             }, ct);
         }
+    }
+
+    /// <summary>
+    /// Гибридная форма: изменённые значения дописываются в пакет XFA datasets
+    /// сохранённой копии — Adobe Reader показывает именно его. PDFium менять
+    /// произвольные объекты документа не умеет, поэтому пакет пишет отдельный
+    /// движок (<see cref="IXfaPacketWriter"/>).
+    /// </summary>
+    private void WriteXfaPacket(string targetPath, XfaPacketUpdate? update)
+    {
+        if (update == null) return;
+        var writer = _engine.XfaWriter
+                     ?? throw new PdfEngineException("Нечем записать данные XFA-формы.");
+        writer.Replace(targetPath, _password, update.PacketName, update.Content);
     }
 
     public bool HasUnsavedFormChanges => _forms?.IsModified == true;
@@ -709,7 +740,9 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
                             fpdfview.FPDF_ClosePage(page);
                         }
                     }
+                    var xfa = _forms?.BuildXfaUpdate();
                     PdfiumRenderEngine.SaveDocument(NativeDoc, targetPath);
+                    WriteXfaPacket(targetPath, xfa);
                 }
                 finally
                 {

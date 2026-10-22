@@ -52,8 +52,13 @@ public partial class DocPropertiesDialog : Window
             // owner-паролем, открытого без ввода пароля.
             rows.Add(new Row(Loc.Get("PropsEncrypted"),
                 meta.IsEncrypted ? Loc.Get("PropsYes") : Loc.Get("PropsNo")));
-            rows.Add(new Row(Loc.Get("PropsForms"),
-                document.HasAcroForm ? Loc.Get("PropsYes") : Loc.Get("PropsNo")));
+            rows.Add(new Row(Loc.Get("PropsForms"), document.FormType switch
+            {
+                2 => Loc.Get("PropsFormsXfaDynamic"),
+                3 => Loc.Get("PropsFormsXfaHybrid"),
+                _ when document.HasAcroForm => Loc.Get("PropsYes"),
+                _ => Loc.Get("PropsNo"),
+            }));
             rows.Add(new Row(Loc.Get("PropsSignatures"),
                 document.HasSignatures
                     ? document.Signatures.Count.ToString(CultureInfo.InvariantCulture)

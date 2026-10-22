@@ -599,6 +599,13 @@
               </TextBlock>
             </StackPanel>
           </Button>
+          <!-- Динамическая XFA-форма не отображается. Значок держится, пока
+               документ открыт, — сообщение в строке состояния сменится первым
+               же действием. -->
+          <TextBlock Margin="12,0,0,0" FontSize="12" VerticalAlignment="Center" Foreground="#D97706"
+                     Text="{l:Loc XfaDynamicBadge}" ToolTip="{l:Loc XfaDynamicNotice}"
+                     AutomationProperties.HelpText="{l:Loc XfaDynamicNotice}"
+                     Visibility="{Binding ActiveDocument.IsUnsupportedXfa, FallbackValue=Collapsed, Converter={StaticResource BoolToVis}}"/>
         </StackPanel>
         <!-- Сообщение о последнем действии: занимает остаток строки и
              обрезается многоточием, вместо того чтобы вытеснять кнопки. -->
