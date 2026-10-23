@@ -336,7 +336,11 @@
                   <Rectangle Canvas.Left="{Binding ObjectFrameXPt}" Canvas.Top="{Binding ObjectFrameYPt}"
                              Width="{Binding ObjectFrameWPt}" Height="{Binding ObjectFrameHPt}"
                              Stroke="{DynamicResource Accent}" StrokeThickness="1.5"
-                             StrokeDashArray="3 2" Fill="#0F2563EB"/>
+                             StrokeDashArray="3 2" Fill="#0F2563EB" RenderTransformOrigin="0.5,0.5">
+                    <Rectangle.RenderTransform>
+                      <RotateTransform Angle="{Binding ObjectFrameAngle}"/>
+                    </Rectangle.RenderTransform>
+                  </Rectangle>
                   <ItemsControl ItemsSource="{Binding ObjectHandles}">
                     <ItemsControl.ItemsPanel>
                       <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
@@ -365,7 +369,11 @@
                   <Rectangle Canvas.Left="{Binding DragRectXPt}" Canvas.Top="{Binding DragRectYPt}"
                              Width="{Binding DragRectWPt}" Height="{Binding DragRectHPt}"
                              Stroke="{DynamicResource Accent}" StrokeThickness="1.5"
-                             StrokeDashArray="4 3" Fill="#152563EB"/>
+                             StrokeDashArray="4 3" Fill="#152563EB" RenderTransformOrigin="0.5,0.5">
+                    <Rectangle.RenderTransform>
+                      <RotateTransform Angle="{Binding DragPreviewAngle}"/>
+                    </Rectangle.RenderTransform>
+                  </Rectangle>
                 </Canvas>
 
                 <!-- Живой штрих при рисовании -->

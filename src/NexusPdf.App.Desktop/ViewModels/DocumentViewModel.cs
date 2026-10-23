@@ -1392,11 +1392,16 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     // ----- Выделение наложенного объекта -----
 
     /// <summary>Выбранный объект: страница, его место в списке и рамка.</summary>
+    /// <param name="StoredId">
+    /// Выбран текстовый блок из файла (его ещё нет в списке страницы:
+    /// OverlayIndex = -1). Первая же правка превращает его в замену с этим Id.
+    /// </param>
     public sealed record ObjectSelection(
         PageViewModel Page,
         int OverlayIndex,
         NexusPdf.Pdf.Abstractions.PageOverlay Overlay,
-        NexusPdf.Pdf.Abstractions.OverlayBox Box);
+        NexusPdf.Pdf.Abstractions.OverlayBox Box,
+        Guid? StoredId = null);
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasObjectSelection))]
@@ -1421,6 +1426,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         NexusPdf.Pdf.Abstractions.NoteAnnotationDraft => NexusPdf.Ux.SelectionKind.Annotation,
         NexusPdf.Pdf.Abstractions.TextMarkupDraft => NexusPdf.Ux.SelectionKind.Annotation,
         NexusPdf.Pdf.Abstractions.MeasurementDraft => NexusPdf.Ux.SelectionKind.Annotation,
+        NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockOverlay => NexusPdf.Ux.SelectionKind.TextObject,
+        NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockReplacement => NexusPdf.Ux.SelectionKind.TextObject,
         _ => NexusPdf.Ux.SelectionKind.Nothing,
     };
 
@@ -1445,14 +1452,72 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
                 continue;
             // Допуск в точках страницы, чтобы тонкую линию можно было поймать
             // и на мелком масштабе.
-            if (!box.Inflated(NexusPdf.Ux.ObjectHandles.HandleToleranceDip / Math.Max(Zoom, 0.1))
-                    .Contains(xPt, yPt))
+            var tolerance = NexusPdf.Ux.ObjectHandles.HandleToleranceDip / Math.Max(Zoom, 0.1);
+            var hit = BlockOf(overlay) is { } block
+                ? FrameContains(block, xPt, yPt, tolerance)
+                : box.Inflated(tolerance).Contains(xPt, yPt);
+            if (!hit)
                 continue;
 
             SelectObject(new ObjectSelection(page, i, overlays[i], box));
             return true;
         }
+
+        // Блок из файла выбирается так же, как черновик; в список страницы он
+        // попадёт заменой только при первой правке.
+        if (StoredBlockAt(page, xPt, yPt, NexusPdf.Ux.ObjectHandles.HandleToleranceDip / Math.Max(Zoom, 0.1))
+                is { Block: { } stored } storedBlock &&
+            NexusPdf.Pdf.Abstractions.OverlayGeometry.BoundsOf(ToDisplayFrame(stored, page)) is { } storedBox)
+        {
+            SelectObject(new ObjectSelection(page, -1, stored, storedBox, storedBlock.Id));
+            return true;
+        }
         return false;
+    }
+
+    /// <summary>Текстовый блок в оверлее (сам блок или новая версия в замене).</summary>
+    private static NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockOverlay? BlockOf(
+        NexusPdf.Pdf.Abstractions.PageOverlay overlay) => overlay switch
+    {
+        NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockOverlay block => block,
+        NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockReplacement { NewBlock: { } block } => block,
+        _ => null,
+    };
+
+    private static double RotationOf(NexusPdf.Pdf.Abstractions.PageOverlay overlay) =>
+        BlockOf(overlay)?.RotationDegrees ?? 0;
+
+    private static (double X, double Y) Rotate(double x, double y, double cx, double cy, double degrees)
+    {
+        if (degrees == 0) return (x, y);
+        var a = degrees * Math.PI / 180;
+        var (dx, dy) = (x - cx, y - cy);
+        return (cx + dx * Math.Cos(a) - dy * Math.Sin(a), cy + dx * Math.Sin(a) + dy * Math.Cos(a));
+    }
+
+    /// <summary>
+    /// Применить правку выбранного объекта одной операцией. Блок из файла
+    /// превращается в замену с его Id. Возвращает место объекта в списке
+    /// страницы после правки (для повторного выбора).
+    /// </summary>
+    private int ApplySelectionChange(ObjectSelection selection, NexusPdf.Pdf.Abstractions.PageOverlay updated)
+    {
+        var stamped = updated with { PlacedRotation = selection.Page.PageRef.RotationOffset };
+        if (selection.StoredId is { } id)
+        {
+            if (stamped is not NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockOverlay block) return -1;
+            TextBlockSessionService.Commit(Document.Session, selection.Page.LogicalIndex, null, id, block);
+            var refreshed = Pages.FirstOrDefault(p => p.LogicalIndex == selection.Page.LogicalIndex) ?? selection.Page;
+            var list = refreshed.PageRef.OverlayList;
+            for (var i = list.Count - 1; i >= 0; i--)
+            {
+                if (list[i] is NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockReplacement r && r.BlockId == id)
+                    return i;
+            }
+            return -1;
+        }
+        Document.Session.Apply(new ReplaceOverlayOperation(selection.Page.LogicalIndex, selection.Overlay, stamped));
+        return selection.OverlayIndex;
     }
 
     private void SelectObject(ObjectSelection selection)
@@ -1512,10 +1577,12 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     {
         if (SelectedObject is not { } selection) return;
         var page = selection.Page;
+        var displayed = ToDisplayFrame(selection.Overlay, page);
+        var angle = RotationOf(displayed);
         page.ObjectFrame = new Rect(box.XPt, box.YPt, box.WidthPt, box.HeightPt);
+        page.ObjectFrameAngle = angle;
 
-        var abilities = NexusPdf.Pdf.Abstractions.OverlayGeometry.AbilitiesOf(
-            ToDisplayFrame(selection.Overlay, page));
+        var abilities = NexusPdf.Pdf.Abstractions.OverlayGeometry.AbilitiesOf(displayed);
         if (!abilities.CanResize)
         {
             page.ObjectHandles = Array.Empty<Rect>();
@@ -1523,11 +1590,18 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         }
 
         // Ручки задаются в пунктах страницы, но их размер на экране постоянный:
-        // иначе на мелком масштабе в них невозможно попасть.
-        var side = NexusPdf.Ux.ObjectHandles.HandleSizeDip / Math.Max(Zoom, 0.1);
+        // иначе на мелком масштабе в них невозможно попасть. У повёрнутого
+        // блока они повёрнуты вместе с рамкой.
+        var scale = 1.0 / Math.Max(Zoom, 0.1);
+        var side = NexusPdf.Ux.ObjectHandles.HandleSizeDip * scale;
         var frame = new NexusPdf.Ux.HandleBox(box.XPt, box.YPt, box.WidthPt, box.HeightPt);
-        page.ObjectHandles = NexusPdf.Ux.ObjectHandles.All
-            .Select(h => NexusPdf.Ux.ObjectHandles.CenterOf(frame, h))
+        var (cx, cy) = (box.XPt + box.WidthPt / 2, box.YPt + box.HeightPt / 2);
+        var handles = abilities.CanRotate
+            ? NexusPdf.Ux.ObjectHandles.All.Append(NexusPdf.Ux.ResizeHandle.Rotate)
+            : NexusPdf.Ux.ObjectHandles.All;
+        page.ObjectHandles = handles
+            .Select(h => NexusPdf.Ux.ObjectHandles.CenterOf(frame, h, scale))
+            .Select(c => Rotate(c.X, c.Y, cx, cy, angle))
             .Select(c => new Rect(c.X - side / 2, c.Y - side / 2, side, side))
             .ToList();
     }
@@ -1536,6 +1610,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     private NexusPdf.Ux.ResizeHandle _dragHandle = NexusPdf.Ux.ResizeHandle.None;
     private NexusPdf.Ux.HandleBox _dragStartBox;
+    private (double X, double Y) _dragStartPointer = (double.NaN, double.NaN);
 
     public bool IsDraggingObject => _dragHandle != NexusPdf.Ux.ResizeHandle.None;
 
@@ -1545,16 +1620,20 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         if (SelectedObject is not { } selection || !ReferenceEquals(selection.Page, page))
             return NexusPdf.Ux.ResizeHandle.None;
 
-        var abilities = NexusPdf.Pdf.Abstractions.OverlayGeometry.AbilitiesOf(
-            ToDisplayFrame(selection.Overlay, page));
+        var displayed = ToDisplayFrame(selection.Overlay, page);
+        var abilities = NexusPdf.Pdf.Abstractions.OverlayGeometry.AbilitiesOf(displayed);
         var box = new NexusPdf.Ux.HandleBox(
             selection.Box.XPt, selection.Box.YPt, selection.Box.WidthPt, selection.Box.HeightPt);
+        // Точка — в оси повёрнутой рамки: ручки повёрнуты вместе с ней.
+        var (x, y) = Rotate(xPt, yPt, box.X + box.Width / 2, box.Y + box.Height / 2, -RotationOf(displayed));
         return NexusPdf.Ux.ObjectHandles.HitTest(
-            box, xPt, yPt, abilities.CanResize, 1.0 / Math.Max(Zoom, 0.1));
+            box, x, y, abilities.CanResize, 1.0 / Math.Max(Zoom, 0.1), abilities.CanRotate);
     }
 
-    public void BeginObjectDrag(NexusPdf.Ux.ResizeHandle handle)
+    /// <param name="xPt">Где нажата кнопка (нужно повороту: угол считается по положению курсора).</param>
+    public void BeginObjectDrag(NexusPdf.Ux.ResizeHandle handle, double xPt = double.NaN, double yPt = double.NaN)
     {
+        _dragStartPointer = (xPt, yPt);
         if (SelectedObject is not { } selection || handle == NexusPdf.Ux.ResizeHandle.None) return;
         var abilities = NexusPdf.Pdf.Abstractions.OverlayGeometry.AbilitiesOf(
             ToDisplayFrame(selection.Overlay, selection.Page));
@@ -1573,14 +1652,53 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     public void UpdateObjectDrag(double dxPt, double dyPt)
     {
         if (SelectedObject is not { } selection || !IsDraggingObject) return;
-        var dragged = NexusPdf.Ux.ObjectHandles.Drag(_dragStartBox, _dragHandle, dxPt, dyPt);
+        if (DraggedOverlay(selection, _dragHandle, dxPt, dyPt) is not { } updated ||
+            NexusPdf.Pdf.Abstractions.OverlayGeometry.BoundsOf(updated) is not { } bounds)
+            return;
+        selection.Page.DragPreviewRect = new Rect(bounds.XPt, bounds.YPt, bounds.WidthPt, bounds.HeightPt);
+        selection.Page.DragPreviewAngle = RotationOf(updated);
+    }
+
+    /// <summary>
+    /// Объект после перетаскивания, в рамке текущего показа: один расчёт и для
+    /// живого показа, и для записи — иначе отпущенный объект мог бы лечь не
+    /// туда, где его показывала рамка.
+    /// </summary>
+    private NexusPdf.Pdf.Abstractions.PageOverlay? DraggedOverlay(
+        ObjectSelection selection, NexusPdf.Ux.ResizeHandle handle, double dxPt, double dyPt)
+    {
+        var displayed = ToDisplayFrame(selection.Overlay, selection.Page);
+        var angle = RotationOf(displayed);
+
+        if (handle == NexusPdf.Ux.ResizeHandle.Rotate)
+        {
+            if (double.IsNaN(_dragStartPointer.X)) return null;
+            var degrees = NexusPdf.Ux.ObjectHandles.RotationAngle(
+                _dragStartBox, _dragStartPointer.X + dxPt, _dragStartPointer.Y + dyPt);
+            // Прямые углы «притягивают»: ровно поставить блок мышью иначе трудно.
+            var right = Math.Round(degrees / 90) * 90;
+            if (Math.Abs(degrees - right) < 3) degrees = right;
+            return NexusPdf.Pdf.Abstractions.OverlayGeometry.Rotated(displayed, degrees);
+        }
+
+        if (handle != NexusPdf.Ux.ResizeHandle.Move && angle != 0)
+        {
+            // Повёрнутый блок растягивается в своих осях: сдвиг мыши переводится в них.
+            var (ldx, ldy) = Rotate(dxPt, dyPt, 0, 0, -angle);
+            var local = NexusPdf.Ux.ObjectHandles.Drag(_dragStartBox, handle, ldx, ldy);
+            return NexusPdf.Pdf.Abstractions.OverlayGeometry.Resized(displayed,
+                new NexusPdf.Pdf.Abstractions.OverlayBox(local.X, local.Y, local.Width, local.Height));
+        }
+
+        var dragged = NexusPdf.Ux.ObjectHandles.Drag(_dragStartBox, handle, dxPt, dyPt);
         dragged = NexusPdf.Ux.Snapping.Apply(
             dragged, SnapToGrid, GridStepPt, Array.Empty<double>(), Array.Empty<double>());
         dragged = ClampToPage(dragged, selection.Page);
-        selection.Page.DragPreviewRect = new Rect(
-            Math.Min(dragged.X, dragged.X + dragged.Width),
-            Math.Min(dragged.Y, dragged.Y + dragged.Height),
-            Math.Abs(dragged.Width), Math.Abs(dragged.Height));
+        return handle == NexusPdf.Ux.ResizeHandle.Move
+            ? NexusPdf.Pdf.Abstractions.OverlayGeometry.Moved(
+                displayed, dragged.X - _dragStartBox.X, dragged.Y - _dragStartBox.Y)
+            : NexusPdf.Pdf.Abstractions.OverlayGeometry.Resized(displayed,
+                new NexusPdf.Pdf.Abstractions.OverlayBox(dragged.X, dragged.Y, dragged.Width, dragged.Height));
     }
 
     /// <summary>Применить перетаскивание одной операцией — она же и отменяется одним Ctrl+Z.</summary>
@@ -1594,47 +1712,34 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
         var handle = _dragHandle;
         selection.Page.DragPreviewRect = null;
+        selection.Page.DragPreviewAngle = 0;
         _dragHandle = NexusPdf.Ux.ResizeHandle.None;
 
         if (Math.Abs(dxPt) < 0.01 && Math.Abs(dyPt) < 0.01)
             return;   // щелчок без перетаскивания — объект просто выбран
 
-        var dragged = NexusPdf.Ux.ObjectHandles.Drag(_dragStartBox, handle, dxPt, dyPt);
-        dragged = NexusPdf.Ux.Snapping.Apply(
-            dragged, SnapToGrid, GridStepPt, Array.Empty<double>(), Array.Empty<double>());
-        dragged = ClampToPage(dragged, selection.Page);
-
-        var displayed = ToDisplayFrame(selection.Overlay, selection.Page);
-        NexusPdf.Pdf.Abstractions.PageOverlay? updated;
-        if (handle == NexusPdf.Ux.ResizeHandle.Move)
-        {
-            updated = NexusPdf.Pdf.Abstractions.OverlayGeometry.Moved(
-                displayed, dragged.X - _dragStartBox.X, dragged.Y - _dragStartBox.Y);
-        }
-        else
-        {
-            updated = NexusPdf.Pdf.Abstractions.OverlayGeometry.Resized(displayed,
-                new NexusPdf.Pdf.Abstractions.OverlayBox(
-                    dragged.X, dragged.Y, dragged.Width, dragged.Height));
-        }
-        if (updated == null) return;
+        if (DraggedOverlay(selection, handle, dxPt, dyPt) is not { } updated) return;
 
         // Оверлей возвращается в модель с ТЕКУЩЕЙ ориентацией страницы:
         // пользователь двигал его на повёрнутой странице, и запомнить надо
         // именно это положение.
-        var stamped = updated with { PlacedRotation = selection.Page.PageRef.RotationOffset };
-        Document.Session.Apply(new ReplaceOverlayOperation(
-            selection.Page.LogicalIndex, selection.Overlay, stamped));
-
-        ReselectAfterChange(selection.Page, selection.OverlayIndex);
-        StatusText = Loc.Get(handle == NexusPdf.Ux.ResizeHandle.Move
-            ? "UxObjectMoved" : "UxObjectResized");
+        var index = ApplySelectionChange(selection, updated);
+        ReselectAfterChange(selection.Page, index);
+        StatusText = Loc.Get(handle switch
+        {
+            NexusPdf.Ux.ResizeHandle.Move => "UxObjectMoved",
+            NexusPdf.Ux.ResizeHandle.Rotate => "UxObjectRotated",
+            _ => "UxObjectResized",
+        });
     }
 
     public void CancelObjectDrag()
     {
         if (SelectedObject is { } selection)
+        {
             selection.Page.DragPreviewRect = null;
+            selection.Page.DragPreviewAngle = 0;
+        }
         _dragHandle = NexusPdf.Ux.ResizeHandle.None;
     }
 
@@ -1660,7 +1765,12 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         var page = selection.Page;
         var index = selection.OverlayIndex;
         ClearObjectSelection();
-        Document.Session.Apply(new RemoveOverlayAtOperation(page.LogicalIndex, index));
+        // Блок из файла удаляется заменой «без новой версии»: его объекты
+        // уйдут со страницы при записи.
+        if (selection.StoredId is { } id)
+            TextBlockSessionService.Commit(Document.Session, page.LogicalIndex, null, id, null);
+        else
+            Document.Session.Apply(new RemoveOverlayAtOperation(page.LogicalIndex, index));
         StatusText = Loc.Get("UxObjectDeleted");
         return true;
     }
@@ -1672,6 +1782,10 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         // вообще или нет.
         var displayed = ToDisplayFrame(selection.Overlay, selection.Page);
         var moved = NexusPdf.Pdf.Abstractions.OverlayGeometry.Moved(displayed, 12, 12) ?? displayed;
+        // Копия блока — новый блок со своим Id: два блока с одним Id в файле
+        // склеились бы при чтении, а копия замены удалила бы оригинал.
+        if (BlockOf(moved) is { } block)
+            moved = block with { BlockId = Guid.NewGuid() };
         Document.Session.Apply(new AddOverlayOperation(selection.Page.LogicalIndex, moved));
         StatusText = Loc.Get("UxObjectDuplicated");
         return true;
@@ -1679,7 +1793,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
 
     public bool MoveSelectedObjectInOrder(bool forward)
     {
-        if (SelectedObject is not { } selection || IsBusy) return false;
+        if (SelectedObject is not { } selection || IsBusy || selection.StoredId != null) return false;
         var count = selection.Page.PageRef.OverlayList.Count;
         var target = forward ? selection.OverlayIndex + 1 : selection.OverlayIndex - 1;
         if (target < 0 || target >= count) return false;
@@ -1703,10 +1817,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             displayed, clamped.X - selection.Box.XPt, clamped.Y - selection.Box.YPt);
         if (moved == null) return false;
 
-        var stamped = moved with { PlacedRotation = selection.Page.PageRef.RotationOffset };
-        Document.Session.Apply(new ReplaceOverlayOperation(
-            selection.Page.LogicalIndex, selection.Overlay, stamped));
-        ReselectAfterChange(selection.Page, selection.OverlayIndex);
+        ReselectAfterChange(selection.Page, ApplySelectionChange(selection, moved));
         return true;
     }
 
@@ -1726,6 +1837,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             NexusPdf.Pdf.Abstractions.InkAnnotationDraft => "UxObjectInk",
             NexusPdf.Pdf.Abstractions.RedactionDraft => "UxObjectRedaction",
             NexusPdf.Pdf.Abstractions.TextMarkupDraft => "UxObjectMarkup",
+            NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockOverlay => "UxObjectTextBlock",
+            NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockReplacement => "UxObjectTextBlock",
             _ => "UxObjectOther",
         };
 
@@ -1755,6 +1868,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         NexusPdf.Pdf.Abstractions.RedactionDraft => Loc.Get("UxObjectRedaction"),
         NexusPdf.Pdf.Abstractions.TextMarkupDraft => Loc.Get("UxObjectMarkup"),
         NexusPdf.Pdf.Abstractions.MeasurementDraft measurement => Loc.Get("UxObjectMeasure") + ": " + measurement.Label,
+        NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockOverlay or NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockReplacement =>
+            Loc.Get("UxObjectTextBlock"),
         _ => Loc.Get("UxObjectOther"),
     };
 
@@ -1830,10 +1945,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         _applyingObjectProperties = true;
         try
         {
-            var stamped = updated with { PlacedRotation = selection.Page.PageRef.RotationOffset };
-            Document.Session.Apply(new ReplaceOverlayOperation(
-                selection.Page.LogicalIndex, selection.Overlay, stamped));
-            ReselectAfterChange(selection.Page, selection.OverlayIndex);
+            ReselectAfterChange(selection.Page, ApplySelectionChange(selection, updated));
         }
         finally
         {

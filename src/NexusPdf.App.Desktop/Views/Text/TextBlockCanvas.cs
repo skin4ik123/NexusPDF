@@ -74,6 +74,24 @@ internal sealed class TextBlockCanvas : FrameworkElement
         }
     }
 
+    /// <summary>
+    /// Размер прежнего вида блока (пункты, от левого верхнего угла): он
+    /// нарисован на странице под редактором и закрывается белым, пока идёт
+    /// ввод, — иначе старый и новый текст лежали бы друг на друге.
+    /// </summary>
+    public Size CoverPt
+    {
+        get => _cover;
+        set
+        {
+            _cover = value;
+            InvalidateMeasure();
+            InvalidateVisual();
+        }
+    }
+
+    private Size _cover;
+
     /// <summary>Ввод закончен: Esc или фокус ушёл на страницу.</summary>
     public event EventHandler? CommitRequested;
 
@@ -83,11 +101,14 @@ internal sealed class TextBlockCanvas : FrameworkElement
     // ----- Отрисовка -----
 
     protected override Size MeasureOverride(Size availableSize) =>
-        new(Math.Max(1, _model.Layout.WidthPt * _zoom), Math.Max(1, _model.Layout.HeightPt * _zoom));
+        new(Math.Max(1, Math.Max(_model.Layout.WidthPt, _cover.Width) * _zoom),
+            Math.Max(1, Math.Max(_model.Layout.HeightPt, _cover.Height) * _zoom));
 
     protected override void OnRender(DrawingContext dc)
     {
         var layout = _model.Layout;
+        if (_cover.Width > 0 && _cover.Height > 0)
+            dc.DrawRectangle(Brushes.White, null, new Rect(0, 0, _cover.Width * _zoom, _cover.Height * _zoom));
         var frame = new Rect(0, 0, layout.WidthPt * _zoom, layout.HeightPt * _zoom);
         // Прозрачная заливка — чтобы мышь попадала и между строк.
         dc.DrawRectangle(Brushes.Transparent, FramePen, frame);
