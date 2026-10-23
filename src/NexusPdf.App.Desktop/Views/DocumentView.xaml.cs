@@ -33,7 +33,11 @@ public partial class DocumentView : UserControl
         };
     }
 
-    private void OnOwnerDeactivated(object? sender, EventArgs e) => CloseInlineEditor();
+    private void OnOwnerDeactivated(object? sender, EventArgs e)
+    {
+        CloseInlineEditor();
+        _vm?.CommitTextBlock();
+    }
 
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
@@ -44,6 +48,9 @@ public partial class DocumentView : UserControl
             _vm.FormComboRequested -= OnFormComboRequested;
             _vm.ExternalLinkRequested -= OnExternalLinkRequested;
             _vm.InlineEditRequested -= OnInlineEditRequested;
+            _vm.TextBlockEditStarted -= OnTextBlockEditStarted;
+            _vm.TextBlockEditEnded -= OnTextBlockEditEnded;
+            _vm.CommitTextBlock();
             _vm.CalibrationRequested -= OnCalibrationRequested;
             _vm.PagesRebuilding -= OnPagesRebuilding;
             _vm.PagesRebuilt -= OnPagesRebuilt;
@@ -57,6 +64,8 @@ public partial class DocumentView : UserControl
             _vm.FormComboRequested += OnFormComboRequested;
             _vm.ExternalLinkRequested += OnExternalLinkRequested;
             _vm.InlineEditRequested += OnInlineEditRequested;
+            _vm.TextBlockEditStarted += OnTextBlockEditStarted;
+            _vm.TextBlockEditEnded += OnTextBlockEditEnded;
             _vm.CalibrationRequested += OnCalibrationRequested;
             _vm.PagesRebuilding += OnPagesRebuilding;
             _vm.PagesRebuilt += OnPagesRebuilt;
@@ -181,7 +190,10 @@ public partial class DocumentView : UserControl
             or nameof(DocumentViewModel.IsBusy))
         {
             CloseInlineEditor();
+            _vm?.CommitTextBlock();
         }
+        if (e.PropertyName == nameof(DocumentViewModel.IsTextTool))
+            UpdatePlacementCursor();
 
         if (e.PropertyName == nameof(DocumentViewModel.PendingOverlay))
         {
@@ -226,6 +238,7 @@ public partial class DocumentView : UserControl
     private void UpdatePlacementCursor() =>
         PagesList.Cursor = _vm?.PendingOverlay != null || _vm?.IsDrawing == true
             ? Cursors.Cross
+            : _vm?.IsTextTool == true ? Cursors.IBeam
             : null;
 
     private PageViewModel? _dragPage;
@@ -345,6 +358,11 @@ public partial class DocumentView : UserControl
     {
         if (_vm == null) return;
         CloseInlineEditor();
+
+        // Текстовый блок (черновик или сохранённый) открывается своим
+        // редактором; правка строкой — для остального текста.
+        if (await _vm.EditTextBlockAsync(page, xPt, yPt))
+            return;
 
         DocumentViewModel.InlineTextTarget? target;
         try
@@ -517,6 +535,26 @@ public partial class DocumentView : UserControl
             return;
         }
 
+        // Инструмент «Текст»: щелчок — блок, растущий вправо, протянутая
+        // рамка — блок заданной ширины; щелчок по блоку — снова писать в нём.
+        if (_vm.IsTextTool && _vm.PendingOverlay == null && e.ChangedButton == MouseButton.Left &&
+            FindPageAt(e.OriginalSource) is { } textHit)
+        {
+            _vm.CommitTextBlock();
+            var (textPage, textElement) = textHit;
+            var textScale = textPage.DisplayScale;
+            if (textScale <= 0) return;
+            var textPos = e.GetPosition(textElement);
+            _dragPage = textPage;
+            _dragElement = textElement;
+            _dragStartPt = new Point(textPos.X / textScale, textPos.Y / textScale);
+            _textToolDrag = true;
+            PagesList.CaptureMouse();
+            PagesList.Focus();
+            e.Handled = true;
+            return;
+        }
+
         // Режим рисования: мышь ведёт штрих и не выделяет текст.
         if (_vm.IsDrawing && _vm.PendingOverlay == null)
         {
@@ -560,7 +598,7 @@ public partial class DocumentView : UserControl
                 _objectPage = readPage;
                 _objectElement = readElement;
                 _objectStartPt = readPt;
-                _vm.BeginObjectDrag(handle);
+                _vm.BeginObjectDrag(handle, readPt.X, readPt.Y);
                 PagesList.CaptureMouse();
                 e.Handled = true;
                 return;
@@ -571,7 +609,7 @@ public partial class DocumentView : UserControl
                 _objectPage = readPage;
                 _objectElement = readElement;
                 _objectStartPt = readPt;
-                _vm.BeginObjectDrag(NexusPdf.Ux.ResizeHandle.Move);
+                _vm.BeginObjectDrag(NexusPdf.Ux.ResizeHandle.Move, readPt.X, readPt.Y);
                 PagesList.CaptureMouse();
                 PagesList.Focus();      // Delete и стрелки должны дойти до документа
                 e.Handled = true;
@@ -888,6 +926,7 @@ public partial class DocumentView : UserControl
                 var hoverPos = e.GetPosition(hoverElement);
                 _ = _vm.EnsureTextAreasAsync(hoverPage);
                 _ = _vm.EnsureFormAreasAsync(hoverPage);
+                _ = _vm.EnsureStoredTextBlocksAsync(hoverPage);
                 var overLink = _vm.LinkAt(hoverPage, hoverPos.X, hoverPos.Y) != null;
                 var hoverScale = hoverPage.DisplayScale;
                 var field = _vm.PendingOverlay == null && hoverScale > 0
@@ -900,6 +939,7 @@ public partial class DocumentView : UserControl
                         ? field.Kind is NexusPdf.Pdf.Abstractions.PdfFormFieldKind.Text ? Cursors.IBeam : Cursors.Hand
                     : overLink ? Cursors.Hand
                     : _vm.PendingOverlay != null ? Cursors.Cross
+                    : _vm.IsTextTool ? Cursors.IBeam
                     : _vm.HasTextAt(hoverPage, hoverPos.X, hoverPos.Y) ? Cursors.IBeam
                     // Пустое место страницы, которая не влезла в окно: отсюда
                     // её можно взять рукой и подвинуть.
@@ -969,8 +1009,80 @@ public partial class DocumentView : UserControl
         _dragPage = null;
         _dragElement = null;
         PagesList.ReleaseMouseCapture();
+        if (_textToolDrag)
+        {
+            _textToolDrag = false;
+            // Меньше 8 пт — это щелчок, а не рамка: рука дрогнула.
+            if (rect.Width < MinimumTextFrameDragPt && rect.Height < MinimumTextFrameDragPt)
+                _ = TextToolClickAsync(page, _dragStartPt);
+            else if (_vm != null)
+                _ = _vm.BeginTextBlockInRectAsync(page,
+                    new NexusPdf.Pdf.Abstractions.OverlayBox(rect.X, rect.Y, rect.Width, rect.Height));
+            e.Handled = true;
+            return;
+        }
         _vm?.PlacePendingRect(page, rect);
         e.Handled = true;
+    }
+
+    // ----- Текстовые блоки -----
+
+    private const double MinimumTextFrameDragPt = 8;
+    private bool _textToolDrag;
+    private Text.TextBlockHost? _textHost;
+
+    private async Task TextToolClickAsync(PageViewModel page, Point pointPt)
+    {
+        if (_vm == null) return;
+        if (!await _vm.EditTextBlockAsync(page, pointPt.X, pointPt.Y))
+            await _vm.BeginTextBlockAtAsync(page, pointPt.X, pointPt.Y);
+    }
+
+    private void OnTextBlockEditStarted(object? sender, DocumentViewModel.TextBlockEdit edit)
+    {
+        CloseInlineEditor();
+        _textHost?.Close();
+        _textHost = null;
+        if (PageElementOf(edit.Page) is not { } element)
+        {
+            _vm?.CommitTextBlock();
+            return;
+        }
+        var host = new Text.TextBlockHost(element, edit.Page, edit);
+        host.Canvas.CommitRequested += (_, _) => _vm?.CommitTextBlock();
+        host.Canvas.InputRejected += (_, key) =>
+        {
+            if (_vm != null) _vm.StatusText = Loc.Get(key);
+        };
+        _textHost = host;
+        host.Open();
+    }
+
+    private void OnTextBlockEditEnded(object? sender, EventArgs e)
+    {
+        var host = _textHost;
+        _textHost = null;
+        host?.Close();
+        if (host != null)
+            PagesList.Focus();
+    }
+
+    /// <summary>Элемент страницы на экране (рамка с её изображением) по модели страницы.</summary>
+    private FrameworkElement? PageElementOf(PageViewModel page)
+    {
+        if (PagesList.ItemContainerGenerator.ContainerFromItem(page) is not DependencyObject container)
+            return null;
+        var queue = new Queue<DependencyObject>();
+        queue.Enqueue(container);
+        while (queue.Count > 0)
+        {
+            var node = queue.Dequeue();
+            if (node is Border { DataContext: PageViewModel found } border && ReferenceEquals(found, page))
+                return border;
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+                queue.Enqueue(VisualTreeHelper.GetChild(node, i));
+        }
+        return null;
     }
 
     /// <summary>
@@ -1023,6 +1135,9 @@ public partial class DocumentView : UserControl
         _scroller.ScrollChanged += (_, args) =>
         {
             if (_vm == null) return;
+            // Редактор блока — отдельное окно поверх страницы: за прокруткой и
+            // масштабом он следует сам по этому сигналу.
+            _textHost?.Sync();
             _vm.UpdateCurrentPage(args.VerticalOffset, args.ViewportHeight);
             // На каждое изменение размера области: открылась панель справа —
             // документ обязан вписаться в остаток окна сам, а не уехать под неё.
@@ -1074,6 +1189,7 @@ public partial class DocumentView : UserControl
     /// </summary>
     private void OnPagesRebuilding(object? sender, EventArgs e)
     {
+        _vm?.CommitTextBlock();
         _organizeOffsetBeforeRebuild = FindDescendant<ScrollViewer>(OrganizeList)?.VerticalOffset ?? -1;
         _readingOffsetBeforeRebuild = _scroller?.VerticalOffset ?? -1;
         _organizeHadFocus = OrganizeList.IsKeyboardFocusWithin;
@@ -1691,6 +1807,14 @@ public partial class DocumentView : UserControl
                     e.Handled = true;
                     return;
             }
+        }
+
+        // Esc без начатого блока убирает инструмент «Текст» из рук.
+        if (_vm.IsTextTool && e.Key == Key.Escape && !_vm.HasObjectSelection)
+        {
+            _vm.ToggleTextTool();
+            e.Handled = true;
+            return;
         }
 
         // Выбранный объект: Delete удаляет, Esc снимает выделение, стрелки

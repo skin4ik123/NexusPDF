@@ -231,10 +231,12 @@
               <TextBlock Text="{l:Loc TextEditShort}" Margin="6,0,0,0"/>
             </StackPanel>
           </Button>
-          <Button Style="{StaticResource ToolButton}" Command="{Binding AddTextOverlayCommand}"
-                  IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc AddTextMenu}">
+          <ToggleButton Style="{StaticResource ToolButton}" Command="{Binding ToggleTextToolCommand}"
+                        IsChecked="{Binding ActiveDocument.IsTextTool, Mode=OneWay, FallbackValue=False}"
+                        IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc AddTextMenu}"
+                        AutomationProperties.AutomationId="TextTool">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8D2;"/>
-          </Button>
+          </ToggleButton>
           <Button Style="{StaticResource ToolButton}" Command="{Binding InsertImageOverlayCommand}"
                   IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc InsertImageMenu}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xEB9F;"/>

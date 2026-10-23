@@ -672,6 +672,8 @@ public sealed partial class MainViewModel : ObservableObject
                 // Диалоги и запуск распознавания живут здесь, а промах по тексту
                 // ловит представление — отдаём ему объяснение как обработчик.
                 vm.ExplainNothingToEdit = page => ExplainNothingToEdit(vm, page);
+                vm.TextDefaults = TextDefaults;
+                vm.RememberTextDefaults = RememberTextDefaults;
                 Documents.Add(vm);
                 ActiveDocument = vm;
                 OnPropertyChanged(nameof(HasDocuments));
@@ -796,6 +798,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         if (doc.IsBusy) return; // идёт печать/сохранение — не трогаем документ
         if (RejectIfTargetOpenElsewhere(doc, targetPath)) return;
+        doc.CommitTextBlock(); // набранное в блоке — часть сохраняемого
         doc.CancelPlacement(); // курсор-прицел не должен жить во время сохранения
         doc.IsBusy = true;
         doc.StatusText = Loc.Get("SavingStatus");
@@ -890,16 +893,15 @@ public sealed partial class MainViewModel : ObservableObject
         doc.StatusText = Loc.Get("DecorApplied");
     }
 
+    /// <summary>
+    /// Инструмент «Текст»: щелчком или рамкой на странице — блок, который
+    /// пишется прямо там, как в редакторах вёрстки. Заменил окно «Добавить текст».
+    /// </summary>
     [RelayCommand]
-    private void AddTextOverlay()
+    private void ToggleTextTool()
     {
         if (ActiveDocument is not { } doc || doc.IsBusy) return;
-        var result = AddTextDialog.Show(OwnerWindow);
-        if (result == null) return;
-        doc.BeginPlacement((_, xPt, yPt) =>
-            new NexusPdf.Pdf.Abstractions.TextOverlay(
-                result.Text, xPt, yPt, result.FontSizePt, result.ColorArgb, 0,
-                result.FontFamily, result.Bold, result.Italic));
+        doc.ToggleTextTool();
     }
 
     [RelayCommand]
@@ -1602,6 +1604,37 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     partial void OnActiveDocumentChanged(DocumentViewModel? value) => SyncRailWithDocument(value);
+
+    // Переключились на другую вкладку — ввод в блоке прежней закончен.
+    partial void OnActiveDocumentChanging(DocumentViewModel? oldValue, DocumentViewModel? newValue) =>
+        oldValue?.CommitTextBlock();
+
+    /// <summary>Оформление нового текстового блока — последнее выбранное (из настроек).</summary>
+    private (NexusPdf.Pdf.Abstractions.TextBlocks.TextStyle Style, NexusPdf.Pdf.Abstractions.TextBlocks.TextAlign Align, double LineSpacing) TextDefaults()
+    {
+        var saved = _services.Settings.DefaultTextStyle;
+        var size = double.IsFinite(saved.SizePt) ? Math.Clamp(saved.SizePt, 4, 300) : 11;
+        var spacing = double.IsFinite(saved.LineSpacing) ? Math.Clamp(saved.LineSpacing, 0.5, 5) : 1.15;
+        var align = Enum.TryParse<NexusPdf.Pdf.Abstractions.TextBlocks.TextAlign>(saved.Align, out var parsed) && Enum.IsDefined(parsed)
+            ? parsed : NexusPdf.Pdf.Abstractions.TextBlocks.TextAlign.Left;
+        var family = string.IsNullOrWhiteSpace(saved.Family) ? NexusPdf.Pdf.Abstractions.TextBlocks.FontCatalog.DefaultFamily : saved.Family;
+        return (new NexusPdf.Pdf.Abstractions.TextBlocks.TextStyle(family, size, saved.Bold, saved.Italic, ColorArgb: saved.ColorArgb | 0xFF000000), align, spacing);
+    }
+
+    private void RememberTextDefaults(
+        NexusPdf.Pdf.Abstractions.TextBlocks.TextStyle style, NexusPdf.Pdf.Abstractions.TextBlocks.TextAlign align, double spacing)
+    {
+        var saved = _services.Settings.DefaultTextStyle;
+        saved.Family = style.FontFamily;
+        saved.SizePt = style.FontSizePt;
+        saved.Bold = style.Bold;
+        saved.Italic = style.Italic;
+        saved.ColorArgb = style.ColorArgb;
+        saved.Align = align.ToString();
+        saved.LineSpacing = spacing;
+        _services.Settings.TouchRecentFont(style.FontFamily);
+        _services.SaveSettings();
+    }
 
     // ----- Измерение -----
 

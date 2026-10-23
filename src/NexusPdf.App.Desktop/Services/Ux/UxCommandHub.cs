@@ -245,7 +245,7 @@ public sealed class UxCommandHub
                                   : Array.Empty<int>()),
 
         // Содержимое
-        [CommandIds.AddText] = _ => _main.AddTextOverlayCommand.Execute(null),
+        [CommandIds.AddText] = _ => _main.ToggleTextToolCommand.Execute(null),
         [CommandIds.InsertImage] = _ => _main.InsertImageOverlayCommand.Execute(null),
         [CommandIds.InsertSignatureImage] = _ => _main.InsertSignatureCommand.Execute(null),
         [CommandIds.EditText] = _ => _main.EditExistingTextCommand.Execute(null),

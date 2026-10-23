@@ -223,7 +223,7 @@ public static class AppCommands
 
         // ---------- Содержимое ----------
         yield return Content(CommandIds.AddText, "AddTextMenu", "\uE8D2", true,
-            new[] { "добавить текст", "надпись", "add text" });
+            new[] { "добавить текст", "надпись", "текстовый блок", "add text", "text box" });
         yield return Content(CommandIds.InsertImage, "InsertImageMenu", "\uEB9F", true,
             new[] { "вставить изображение", "картинка", "фото", "insert image" });
         yield return Content(CommandIds.InsertSignatureImage, "InsertSignatureMenu", "\uEB7E", true,

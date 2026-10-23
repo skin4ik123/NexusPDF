@@ -1,0 +1,97 @@
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
+using NexusPdf.App.Desktop.ViewModels;
+
+namespace NexusPdf.App.Desktop.Views.Text;
+
+/// <summary>
+/// Ставит редактор блока на страницу: отдельным Popup (у слоя украшений нет
+/// своей области фокуса, клавиатура до него не доходит), повёрнутым вместе с
+/// блоком так, что видимый левый верхний угол рамки — точно на своём месте
+/// страницы при любом масштабе.
+/// </summary>
+internal sealed class TextBlockHost
+{
+    private readonly Popup _popup;
+    private readonly RotateTransform _rotation = new();
+    private readonly PageViewModel _page;
+    private readonly DocumentViewModel.TextBlockEdit _edit;
+
+    public TextBlockHost(FrameworkElement pageElement, PageViewModel page, DocumentViewModel.TextBlockEdit edit)
+    {
+        _page = page;
+        _edit = edit;
+        Canvas = new TextBlockCanvas(edit.Model, page.DisplayScale);
+        if (edit.CoversOriginal)
+            Canvas.CoverPt = new Size(edit.StartBlock.WidthPt, edit.StartBlock.HeightPt);
+        _popup = new Popup
+        {
+            Child = new Border { Child = Canvas, LayoutTransform = _rotation },
+            PlacementTarget = pageElement,
+            Placement = PlacementMode.Relative,
+            AllowsTransparency = true,
+            // Закрывает редактор вызывающий код: щелчок по выпадающему списку
+            // шрифтов не должен считаться «щелчком мимо».
+            StaysOpen = true,
+            Focusable = false,
+            PopupAnimation = PopupAnimation.None,
+        };
+        edit.Model.Changed += OnModelChanged;
+    }
+
+    public TextBlockCanvas Canvas { get; }
+
+    public void Open()
+    {
+        Sync();
+        _popup.IsOpen = true;
+        // Фокус — следующим проходом разметки: до него редактор ещё не размещён.
+        Canvas.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            Canvas.Focus();
+            Keyboard.Focus(Canvas);
+        }), DispatcherPriority.Input);
+    }
+
+    public void Close()
+    {
+        _edit.Model.Changed -= OnModelChanged;
+        _popup.IsOpen = false;
+    }
+
+    private void OnModelChanged(object? sender, EventArgs e) => Sync();
+
+    /// <summary>Масштаб и место по текущему виду страницы (после прокрутки, масштабирования, набора).</summary>
+    public void Sync()
+    {
+        var zoom = _page.DisplayScale;
+        if (!(zoom > 0)) return;
+        Canvas.Zoom = zoom;
+        var block = _edit.Model.Block;
+        _rotation.Angle = block.RotationDegrees;
+
+        Canvas.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var size = Canvas.DesiredSize;
+        var angle = block.RotationDegrees * Math.PI / 180;
+        var (cos, sin) = (Math.Cos(angle), Math.Sin(angle));
+        var boxW = Math.Abs(size.Width * cos) + Math.Abs(size.Height * sin);
+        var boxH = Math.Abs(size.Width * sin) + Math.Abs(size.Height * cos);
+        // Куда в повёрнутом окне попадает левый верхний угол редактора.
+        var originX = -size.Width / 2 * cos + size.Height / 2 * sin + boxW / 2;
+        var originY = -size.Width / 2 * sin - size.Height / 2 * cos + boxH / 2;
+        // Где этот угол на странице: угол рамки после поворота вокруг её центра.
+        var (cx, cy) = (block.XPt + block.WidthPt / 2, block.YPt + block.HeightPt / 2);
+        var cornerX = (cx - block.WidthPt / 2 * cos + block.HeightPt / 2 * sin) * zoom;
+        var cornerY = (cy - block.WidthPt / 2 * sin - block.HeightPt / 2 * cos) * zoom;
+
+        _popup.HorizontalOffset = cornerX - originX;
+        _popup.VerticalOffset = cornerY - originY;
+        // Popup не следит за прокруткой цели — подталкиваем пересчёт места.
+        _popup.HorizontalOffset += 0.01;
+        _popup.HorizontalOffset -= 0.01;
+    }
+}

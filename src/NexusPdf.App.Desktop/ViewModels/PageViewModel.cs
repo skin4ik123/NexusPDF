@@ -191,6 +191,10 @@ public sealed partial class PageViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasDragRect))]
     private Rect? _dragPreviewRect;
 
+    /// <summary>Поворот живой рамки (градусы по часовой) — у повёрнутого текстового блока.</summary>
+    [ObservableProperty]
+    private double _dragPreviewAngle;
+
     public bool HasDragRect => DragPreviewRect.HasValue;
     public double DragRectXPt => DragPreviewRect?.X ?? 0;
     public double DragRectYPt => DragPreviewRect?.Y ?? 0;
@@ -217,6 +221,10 @@ public sealed partial class PageViewModel : ObservableObject
     public double ObjectFrameYPt => ObjectFrame?.Y ?? 0;
     public double ObjectFrameWPt => ObjectFrame?.Width ?? 0;
     public double ObjectFrameHPt => ObjectFrame?.Height ?? 0;
+
+    /// <summary>Поворот рамки выбранного объекта вокруг её центра (градусы по часовой).</summary>
+    [ObservableProperty]
+    private double _objectFrameAngle;
 
     /// <summary>Ручки рамки в пунктах страницы; пусто — объект не растягивается.</summary>
     [ObservableProperty]
