@@ -99,6 +99,10 @@ internal static partial class PdfiumOverlayWriter
             if (fpdf_edit.FPDFPageRemoveObject(page, obj) != 0)
                 fpdf_edit.FPDFPageObjDestroy(obj); // владение вернулось нам
         }
+        // Метки дочитать не удалось — часть старых объектов могла остаться, и
+        // новая версия легла бы поверх них. Лучше отказать, чем задвоить текст.
+        if (reader.Exhausted)
+            throw new PdfEngineException("Страница перегружена метками блоков: заменить блок на ней нельзя.");
     }
 
     private static string PieceRef(int paragraph, int start) =>

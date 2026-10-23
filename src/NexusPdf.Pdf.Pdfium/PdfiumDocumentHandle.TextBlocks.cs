@@ -57,7 +57,11 @@ internal sealed partial class PdfiumDocumentHandle
                         if (Guid.TryParseExact(id, "N", out var guid))
                             blocks.Add(ReadStoredBlock(page, textPage, reader, pageIndex, extraQuarterTurns, guid, members));
                     }
-                    return blocks;
+                    // Метки страницы дочитаны не до конца: ни один блок нельзя
+                    // считать целым — у него могли остаться непрочитанные части.
+                    return reader.Exhausted
+                        ? blocks.Select(b => b with { Block = null, Intact = false }).ToList()
+                        : blocks;
                 }
                 finally
                 {
