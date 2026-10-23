@@ -954,6 +954,7 @@
   "FontLarge": "Large file — the PDF will grow noticeably",
   "FontWrittenWith": "Will be written with {0}",
   "TextBlockUnsupportedScript": "This script isn't supported in text blocks yet (right-to-left and complex scripts)",
+  "TextBlockNoFontForChar": "None of the installed fonts has this character — it would come out as an empty box in the PDF",
   "TextToolHint": "Click for a line of text, drag a frame for a wrapping paragraph; click a block to write in it again. Esc to leave.",
   "TextBlockTyping": "Typing: Enter for a paragraph, Shift+Enter for a line, Esc or click outside when done.",
   "TextBlockChangedElsewhere": "This block was changed by another program — it is edited as plain text.",

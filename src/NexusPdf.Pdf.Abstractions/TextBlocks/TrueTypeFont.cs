@@ -107,6 +107,22 @@ public sealed class TrueTypeFont
 
     public bool HasGlyph(int codePoint) => GlyphOf(codePoint) != 0;
 
+    /// <summary>
+    /// Диапазоны кодов из таблицы кодов (с запасом: внутри диапазона глиф
+    /// может оказаться пустым). Для быстрого отсева при поиске запасного шрифта.
+    /// </summary>
+    public IReadOnlyList<CodeRange> CoveredRanges()
+    {
+        try
+        {
+            return _cmap.Ranges();
+        }
+        catch (FormatException)
+        {
+            return [];
+        }
+    }
+
     /// <summary>Ширина буквы в единицах шрифта; нет буквы — ширина .notdef.</summary>
     public int AdvanceWidth(int codePoint)
     {
@@ -347,6 +363,49 @@ public sealed class TrueTypeFont
             if (unicode4 < 0 && unicode12 < 0 && symbol4 < 0)
                 throw new FormatException("В шрифте нет таблицы Unicode-кодов.");
             return new CharacterMap(font, unicode4 >= 0 ? unicode4 : symbol4, unicode12, unicode4 < 0 && symbol4 >= 0);
+        }
+
+        public IReadOnlyList<CodeRange> Ranges()
+        {
+            var f = _font;
+            var ranges = new List<CodeRange>();
+            if (_format12 >= 0)
+            {
+                var groups = f.U32(_format12 + 12);
+                if (groups > (uint)(f._data.Length / 12)) throw new FormatException("Таблица кодов шрифта обрезана.");
+                for (var g = 0; g < groups; g++)
+                {
+                    var at = _format12 + 16 + 12 * g;
+                    var start = f.U32(at);
+                    var end = f.U32(at + 4);
+                    if (start <= end && end <= 0x10FFFF) ranges.Add(new CodeRange((int)start, (int)end));
+                }
+            }
+            if (_format4 >= 0)
+            {
+                var segments = f.U16(_format4 + 6) / 2;
+                var ends = _format4 + 14;
+                var starts = ends + segments * 2 + 2;
+                for (var i = 0; i < segments; i++)
+                {
+                    var start = f.U16(starts + 2 * i);
+                    var end = f.U16(ends + 2 * i);
+                    if (start > end || start == 0xFFFF) continue;
+                    if (_symbol && start >= 0xF000 && end <= 0xF0FF)
+                        ranges.Add(new CodeRange(start - 0xF000, end - 0xF000));
+                    ranges.Add(new CodeRange(start, end));
+                }
+            }
+            ranges.Sort((a, b) => a.Start.CompareTo(b.Start));
+            var merged = new List<CodeRange>(ranges.Count);
+            foreach (var range in ranges)
+            {
+                if (merged.Count > 0 && range.Start <= merged[^1].End + 1)
+                    merged[^1] = merged[^1] with { End = Math.Max(merged[^1].End, range.End) };
+                else
+                    merged.Add(range);
+            }
+            return merged;
         }
 
         public int Lookup(int codePoint)

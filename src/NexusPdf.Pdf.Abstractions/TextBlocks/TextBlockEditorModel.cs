@@ -22,6 +22,7 @@ public sealed record InputResult(bool Accepted, string? RejectedReasonKey)
 {
     public static readonly InputResult Ok = new(true, null);
     public static readonly InputResult UnsupportedScript = new(false, "TextBlockUnsupportedScript");
+    public static readonly InputResult NoFontForChar = new(false, "TextBlockNoFontForChar");
 }
 
 /// <summary>
@@ -84,6 +85,9 @@ public sealed class TextBlockEditorModel
         if (text.Length == 0) return InputResult.Ok;
 
         var style = StyleAtCaret;
+        // Квадратов в файле не бывает: букву, которой нет ни в одном шрифте,
+        // блок не принимает.
+        if (!Drawable(text, style)) return InputResult.NoFontForChar;
         var coalesce = typing && !HasSelection && text.Length <= 2 && text != TextBlockText.ParagraphBreak.ToString()
                        && _typingEnd == Caret && _typingStyle == style;
         if (!coalesce) PushUndo();
@@ -103,6 +107,15 @@ public sealed class TextBlockEditorModel
         _typingStyle = typing ? style : null;
         Relayout();
         return InputResult.Ok;
+    }
+
+    private bool Drawable(string text, TextStyle style)
+    {
+        foreach (var rune in text.EnumerateRunes())
+        {
+            if (!TextBlockLayout.CanDraw(_fonts, style, rune.Value)) return false;
+        }
+        return true;
     }
 
     private static bool Supported(string text)
@@ -529,6 +542,7 @@ public sealed class TextBlockEditorModel
         var paragraphs = TryReadRich(rich);
         if (paragraphs == null) return InsertCore(plain, typing: false);
         if (!paragraphs.All(p => p.Runs.All(r => Supported(r.Text)))) return InputResult.UnsupportedScript;
+        if (!paragraphs.All(p => p.Runs.All(r => Drawable(TextBlockText.Normalize(r.Text), r.Style)))) return InputResult.NoFontForChar;
 
         PushUndo();
         DeleteSelectionCore();
@@ -559,15 +573,31 @@ public sealed class TextBlockEditorModel
         try
         {
             var list = JsonSerializer.Deserialize<List<RichParagraph>>(rich);
-            return list is { Count: > 0 } && list.All(p => p.Runs != null && p.Runs.All(r => r?.Text != null && r.Style?.FontFamily != null))
-                ? list
-                : null;
+            if (list is not { Count: > 0 } ||
+                !list.All(p => p.Runs != null && p.Runs.All(r => r?.Text != null && r.Style?.FontFamily is { Length: > 0 and <= 256 })))
+                return null;
+            // Буфер обмена заполняет кто угодно: значения приводятся к тем же
+            // пределам, что проверяет чтение блока из файла.
+            return list.Select(p => new RichParagraph(
+                p.Runs.Select(r => r with { Style = Clamp(r.Style) }).ToList(),
+                Enum.IsDefined(p.Align) ? p.Align : TextAlign.Left,
+                ClampNumber(p.LineSpacing, 0.5, 5, 1.15))).ToList();
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
             return null;
         }
     }
+
+    private static TextStyle Clamp(TextStyle style) => style with
+    {
+        FontSizePt = ClampNumber(style.FontSizePt, 1, 1638, 11),
+        LetterSpacingPercent = ClampNumber(style.LetterSpacingPercent, -50, 500, 0),
+        Baseline = Enum.IsDefined(style.Baseline) ? style.Baseline : BaselineShift.None,
+    };
+
+    private static double ClampNumber(double value, double min, double max, double fallback) =>
+        double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
 
     // ----- Пересборка -----
 

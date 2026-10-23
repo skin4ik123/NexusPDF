@@ -32,4 +32,14 @@ public sealed class TextBlockTextTests
         Assert.Equal("ab", TextBlockText.Normalize("a\u0007b"));
         Assert.Equal("a\u2028b", TextBlockText.Normalize("a\u2028b"));
     }
+
+    [Fact]
+    public void Normalize_Cleans_What_Word_And_Other_Programs_Put_In_The_Clipboard()
+    {
+        Assert.Equal("ab", TextBlockText.Normalize("\uFEFFab"));                                  // метка порядка байтов
+        Assert.Equal("a" + TextBlockText.LineBreak + "b", TextBlockText.Normalize("a\vb"));        // разрыв строки Word
+        Assert.Equal("ab", TextBlockText.Normalize("a\uD800b"));                                  // одинокая половина пары
+        Assert.Equal("ab", TextBlockText.Normalize("a\uDC00b"));
+        Assert.Equal("x\uD83D\uDE00", TextBlockText.Normalize("x\uD83D\uDE00"));                // целая пара остаётся
+    }
 }

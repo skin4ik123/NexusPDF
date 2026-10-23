@@ -150,6 +150,21 @@ public sealed class TextBlockEditorModelTests : IDisposable
     }
 
     [Fact]
+    public void Character_No_Font_Can_Draw_Is_Refused()
+    {
+        // В файл не уходят «квадраты»: букву, которой нет ни в одном шрифте,
+        // программа не принимает и объясняет почему.
+        var e = Editor("x");
+        e.MoveCaret(CaretMove.BlockEnd, false);
+        var result = e.Insert("a\u4E2D");
+
+        Assert.False(result.Accepted);
+        Assert.Equal("TextBlockNoFontForChar", result.RejectedReasonKey);
+        Assert.Equal("x", Text(e));
+        Assert.True(e.Insert("ab").Accepted);
+    }
+
+    [Fact]
     public void Undo_Merges_Typing_And_Redo_Restores()
     {
         var e = Editor();
@@ -189,6 +204,26 @@ public sealed class TextBlockEditorModelTests : IDisposable
     }
 
     [Fact]
+    public void Rich_Paste_Clamps_Styles_From_The_Clipboard()
+    {
+        // Буфер обмена заполняет кто угодно: размер 10^16 повесил бы вёрстку,
+        // а нулевой — испортил бы блок при следующем открытии.
+        var source = Editor("ab");
+        source.SelectAll();
+        var rich = source.CopyRich();
+        Assert.Contains("\"FontSizePt\":10", rich);
+        rich = rich.Replace("\"FontSizePt\":10", "\"FontSizePt\":1E16").Replace("\"LetterSpacingPercent\":0", "\"LetterSpacingPercent\":9999");
+
+        var target = Editor();
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        Assert.True(target.Paste(rich, "ab").Accepted);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2));
+        var style = target.Block.Paragraphs[0].Runs[^1].Style;
+        Assert.InRange(style.FontSizePt, 1, 1638);
+        Assert.InRange(style.LetterSpacingPercent, -50, 500);
+    }
+
+    [Fact]
     public void Paste_From_Spreadsheet()
     {
         var e = Editor();
@@ -207,13 +242,13 @@ public sealed class TextBlockEditorModelTests : IDisposable
     {
         var e = Editor("a");
         e.MoveCaret(CaretMove.BlockEnd, false);
-        e.SetComposition("ka");
-        Assert.Equal("ka", e.Composition);
+        e.SetComposition("d");
+        Assert.Equal("d", e.Composition);
         Assert.Equal("a", Text(e));
 
-        e.CommitComposition("か");
+        e.CommitComposition("д");
         Assert.Equal("", e.Composition);
-        Assert.Equal("aか", Text(e));
+        Assert.Equal("aд", Text(e));
     }
 
     [Fact]

@@ -170,6 +170,14 @@ public sealed class TextBlockLayoutTests : IDisposable
     }
 
     [Fact]
+    public void Lone_Surrogate_From_A_File_Does_Not_Break_Layout()
+    {
+        // Чужой файл может выдать такую «букву» через ToUnicode.
+        var layout = Lay(Block("a\uD800b", Mono(), mode: TextBlockWidthMode.AutoWidth));
+        Assert.Equal("a\uD800b", string.Concat(layout.Lines[0].Pieces.Select(p => p.Text)));
+    }
+
+    [Fact]
     public void Shrink_To_Fit_Reduces_Size_To_Fit()
     {
         var layout = Lay(Block("aaaa bbbb cccc dddd", Mono(20), width: 2 * Pad + 60,

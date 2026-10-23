@@ -31,8 +31,9 @@ public static class TextBlockText
 
     /// <summary>
     /// Вставляемый текст: табуляция — пробел (так вставляются ячейки Excel),
-    /// переводы строки любого вида — новые абзацы, прочие управляющие символы
-    /// убираются.
+    /// переводы строки любого вида — новые абзацы, разрыв строки Word (\v) —
+    /// перевод строки внутри абзаца; управляющие символы, метка порядка байтов
+    /// и одинокие половины суррогатных пар убираются.
     /// </summary>
     public static string Normalize(string text)
     {
@@ -52,8 +53,24 @@ public static class TextBlockText
                 case '\n':
                     builder.Append(ParagraphBreak);
                     break;
+                case '\v':
+                    builder.Append(LineBreak);
+                    break;
+                case '\uFEFF':
+                    break;
                 default:
-                    if (!char.IsControl(c)) builder.Append(c);
+                    if (char.IsHighSurrogate(c))
+                    {
+                        if (i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+                        {
+                            builder.Append(c).Append(text[i + 1]);
+                            i++;
+                        }
+                    }
+                    else if (!char.IsLowSurrogate(c) && !char.IsControl(c))
+                    {
+                        builder.Append(c);
+                    }
                     break;
             }
         }

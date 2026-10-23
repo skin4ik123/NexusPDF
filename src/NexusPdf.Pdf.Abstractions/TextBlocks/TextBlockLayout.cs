@@ -85,10 +85,20 @@ public static class TextBlockLayout
         public bool IsBreakAfter => CodePoint is '-' or '‐';
     }
 
+    /// <summary>
+    /// Нарисует ли блок букву в этом оформлении — выбранным шрифтом или
+    /// запасным. Пробелы и переводы строк рисовать не нужно.
+    /// </summary>
+    public static bool CanDraw(IFontProvider fonts, TextStyle style, int codePoint)
+    {
+        if (codePoint is ' ' or TextBlockText.LineBreak or TextBlockText.ParagraphBreak || char.IsWhiteSpace((char)Math.Min(codePoint, 0xFFFF)))
+            return true;
+        var primary = new FaceCache(fonts).Primary(style);
+        return fonts.Load(primary.Ref).HasGlyph(codePoint) || fonts.FallbackFor(codePoint, style.Bold, style.Italic) != null;
+    }
+
     private sealed class FaceCache(IFontProvider fonts)
     {
-        private readonly Dictionary<(int, bool, bool), FontFaceInfo?> _fallback = new();
-
         /// <summary>
         /// Начертание фрагмента. Шрифт, который нельзя вписать в PDF (запрет
         /// встраивания, нет контуров TrueType), заменяется так же, как
@@ -102,22 +112,9 @@ public static class TextBlockLayout
         private static FontFaceInfo? Usable(FontFaceInfo? face) =>
             face is { Embeddable: true, Supported: true } ? face : null;
 
-        public FontFaceInfo? Fallback(int codePoint, bool bold, bool italic)
-        {
-            if (_fallback.TryGetValue((codePoint, bold, italic), out var cached)) return cached;
-            FontFaceInfo? found = null;
-            foreach (var family in fonts.FallbackFamilies)
-            {
-                var face = Usable(fonts.Resolve(family, bold, italic));
-                if (face != null && fonts.Load(face.Ref).HasGlyph(codePoint))
-                {
-                    found = face;
-                    break;
-                }
-            }
-            _fallback[(codePoint, bold, italic)] = found;
-            return found;
-        }
+        /// <summary>Запасное начертание для буквы — поиск запоминает каталог.</summary>
+        public FontFaceInfo? Fallback(int codePoint, bool bold, bool italic) =>
+            fonts.FallbackFor(codePoint, bold, italic);
     }
 
     private static List<Glyph> Glyphs(TextParagraph paragraph, IFontProvider fonts, FaceCache faces, double scale)
@@ -335,6 +332,7 @@ public static class TextBlockLayout
         });
         var visualEnd = x + visual + extra * interior;
 
+        var paragraphText = paragraph.Text;
         var i0 = line.First;
         while (i0 < line.End)
         {
@@ -355,7 +353,9 @@ public static class TextBlockLayout
             {
                 var g = glyphs[k];
                 var advance = g.Advance + (g.IsSpace && k < lastVisible ? extra : 0);
-                text.Append(char.ConvertFromUtf32(g.CodePoint));
+                // Буквы куска — ровно те же единицы UTF-16, что в тексте абзаца
+                // (и одинокая половина суррогатной пары из чужого файла тоже).
+                text.Append(paragraphText, g.Offset, g.Units);
                 advances.Add(advance);
                 if (g.Units == 2) advances.Add(0);
                 width += advance;
