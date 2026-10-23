@@ -85,6 +85,14 @@ internal static partial class PdfiumOverlayWriter
             contentAdded = true;
         }
 
+        // Замена текстового блока: прежние объекты блока убираются до всего
+        // остального, новая версия ляжет в общем порядке с тем же Id.
+        foreach (var blockReplacement in overlays.OfType<TextBlockReplacement>())
+        {
+            RemoveTextBlock(page, blockReplacement.BlockId);
+            contentAdded = true;
+        }
+
         foreach (var raw in overlays)
         {
             var (overlay, extraAngle) = OverlayDisplayMapper.ToFrame(
@@ -97,6 +105,10 @@ internal static partial class PdfiumOverlayWriter
                     ApplyText(document, page, fonts.For(text.FontFamily, text.Bold, text.Italic), text,
                         rotation, left, bottom, contentWidth, contentHeight);
                     contentAdded = true;
+                    break;
+                case TextBlockReplacement { NewBlock: { } newBlock } blockReplacement:
+                    ApplyTextBlock(document, page, fonts, newBlock with { BlockId = blockReplacement.BlockId },
+                        rotation, left, bottom, contentWidth, contentHeight);
                     break;
                 case TextBlockOverlay block:
                     ApplyTextBlock(document, page, fonts, block,
