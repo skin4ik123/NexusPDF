@@ -254,6 +254,28 @@ public sealed class TextBlockReadTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Shared_Huge_Description_Is_Read_Once()
+    {
+        // Один словарь свойств с описанием в 2 МБ, на который ссылаются сто
+        // объектов: копировать описание для каждого — сотни мегабайт, а при
+        // тысячах объектов и большем описании — зависание и нехватка памяти.
+        var id = Guid.NewGuid().ToString("N");
+        var properties = $"/Properties << /MC0 << /Id ({id}) /V (1) /R (0:0) /Data ({new string('x', 2_000_000)}) >> >>";
+        var raw = string.Concat(Enumerable.Range(0, 100).Select(i =>
+            $"/NexusTextBlock /MC0 BDC BT /F1 10 Tf 20 {10 + i * 2} Td (a) Tj ET EMC\n"));
+        var path = Path.Combine(_dir, "shared.pdf");
+        File.WriteAllBytes(path, PdfFixture.Build(new PdfFixture.PageSpec(400, 300, RawContent: raw, ExtraResources: properties)));
+
+        await using var doc = await _pdfium.OpenAsync(path, null, CancellationToken.None);
+        var before = GC.GetTotalAllocatedBytes(precise: true);
+        var stored = Assert.Single(await doc.GetTextBlocksAsync(0, 0, CancellationToken.None));
+        var allocated = GC.GetTotalAllocatedBytes(precise: true) - before;
+
+        Assert.False(stored.Intact);
+        Assert.True(allocated < 100_000_000, $"чтение меток выделило {allocated / 1_000_000} МБ");
+    }
+
+    [Fact]
     public async Task Document_Font_Names_Are_Listed()
     {
         var mono = new TextBlockOverlay(40, 150, 200, 10, 0, TextBlockWidthMode.Fixed, true, false,

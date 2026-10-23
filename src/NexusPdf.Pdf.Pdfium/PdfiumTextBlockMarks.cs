@@ -5,8 +5,8 @@ using PDFiumCore;
 
 namespace NexusPdf.Pdf.Pdfium;
 
-/// <summary>Параметры метки NexusTextBlock одного объекта страницы.</summary>
-internal sealed record TextBlockMark(string Id, string? Version, string? Ref, string? Data, string? Hash);
+/// <summary>Короткие параметры метки NexusTextBlock одного объекта страницы.</summary>
+internal sealed record TextBlockMark(string Id, string? Version, string? Ref);
 
 /// <summary>
 /// Метки текстовых блоков на объектах страницы. Значения меток пишет кто
@@ -36,49 +36,87 @@ internal static class PdfiumTextBlockMarks
             throw new PdfEngineException("Не удалось записать описание текстового блока.");
     }
 
-    /// <summary>Метка блока на объекте; null — объект не из блока или у метки нет Id.</summary>
-    public static TextBlockMark? Read(FpdfPageobjectT obj)
+    /// <summary>
+    /// Чтение меток одной страницы с общим бюджетом. PDFium перекодирует
+    /// значение целиком при каждом запросе, а одно значение могут разделять
+    /// тысячи объектов (словарь /Properties) — поэтому считается каждый
+    /// запрошенный байт, и после исчерпания бюджета метки больше не читаются.
+    /// </summary>
+    public sealed class Reader(long budgetBytes = 64L * 1024 * 1024)
     {
-        var count = Math.Min(NativeCountMarks(obj.__Instance), MaxMarksPerObject);
-        for (var i = 0; i < count; i++)
+        private long _budget = budgetBytes;
+
+        public bool Exhausted => _budget <= 0;
+
+        /// <summary>Метка блока на объекте; null — объект не из блока, у метки нет Id или бюджет исчерпан.</summary>
+        public TextBlockMark? Read(FpdfPageobjectT obj)
         {
-            var mark = NativeGetMark(obj.__Instance, (ulong)i);
-            if (mark == IntPtr.Zero || ReadName(mark) != Name)
-                continue;
-            var id = ReadParam(mark, "Id", MaxShortValueBytes);
-            if (string.IsNullOrEmpty(id))
+            if (Exhausted)
                 return null;
-            return new TextBlockMark(id,
-                ReadParam(mark, "V", MaxShortValueBytes),
-                ReadParam(mark, "R", MaxShortValueBytes),
-                ReadParam(mark, "Data", MaxDataBytes),
-                ReadParam(mark, "Hash", MaxShortValueBytes));
+            var mark = Find(obj);
+            if (mark == IntPtr.Zero)
+                return null;
+            var id = ReadParam(mark, "Id", MaxShortValueBytes);
+            return string.IsNullOrEmpty(id)
+                ? null
+                : new TextBlockMark(id, ReadParam(mark, "V", MaxShortValueBytes), ReadParam(mark, "R", MaxShortValueBytes));
         }
-        return null;
-    }
 
-    private static string? ReadName(IntPtr mark)
-    {
-        ulong needed = 0;
-        if (NativeGetName(mark, null, 0, ref needed) == 0 || needed < 2 || needed > MaxShortValueBytes)
-            return null;
-        var buffer = new byte[needed];
-        ulong written = 0;
-        return NativeGetName(mark, buffer, needed, ref written) == 0 ? null : Utf16(buffer, written);
-    }
+        /// <summary>Описание и отпечаток блока с этого объекта; Data == null — их здесь нет.</summary>
+        public (string? Data, string? Hash) ReadPayload(FpdfPageobjectT obj)
+        {
+            if (Exhausted)
+                return (null, null);
+            var mark = Find(obj);
+            if (mark == IntPtr.Zero)
+                return (null, null);
+            var data = ReadParam(mark, "Data", MaxDataBytes);
+            return data == null ? (null, null) : (data, ReadParam(mark, "Hash", MaxShortValueBytes));
+        }
 
-    /// <summary>Строковый параметр метки; null — нет такого, не строка или слишком длинный.</summary>
-    private static string? ReadParam(IntPtr mark, string key, int maxBytes)
-    {
-        var name = Utf8Z(key);
-        ulong needed = 0;
-        if (NativeGetParamString(mark, name, null, 0, ref needed) == 0 || needed > (ulong)maxBytes)
-            return null;
-        if (needed < 2)
-            return "";
-        var buffer = new byte[needed];
-        ulong written = 0;
-        return NativeGetParamString(mark, name, buffer, needed, ref written) == 0 ? null : Utf16(buffer, written);
+        private IntPtr Find(FpdfPageobjectT obj)
+        {
+            var count = Math.Min(NativeCountMarks(obj.__Instance), MaxMarksPerObject);
+            for (var i = 0; i < count && !Exhausted; i++)
+            {
+                var mark = NativeGetMark(obj.__Instance, (ulong)i);
+                if (mark != IntPtr.Zero && ReadName(mark) == Name)
+                    return mark;
+            }
+            return IntPtr.Zero;
+        }
+
+        private string? ReadName(IntPtr mark)
+        {
+            ulong needed = 0;
+            if (NativeGetName(mark, null, 0, ref needed) == 0 || !Spend(needed) || needed < 2 || needed > MaxShortValueBytes)
+                return null;
+            var buffer = new byte[needed];
+            ulong written = 0;
+            return NativeGetName(mark, buffer, needed, ref written) == 0 || !Spend(needed) ? null : Utf16(buffer, written);
+        }
+
+        /// <summary>Строковый параметр метки; null — нет такого, не строка, слишком длинный или бюджет исчерпан.</summary>
+        private string? ReadParam(IntPtr mark, string key, int maxBytes)
+        {
+            var name = Utf8Z(key);
+            ulong needed = 0;
+            if (NativeGetParamString(mark, name, null, 0, ref needed) == 0 || !Spend(needed) || needed > (ulong)maxBytes)
+                return null;
+            if (needed < 2)
+                return "";
+            var buffer = new byte[needed];
+            ulong written = 0;
+            return NativeGetParamString(mark, name, buffer, needed, ref written) == 0 || !Spend(needed)
+                ? null
+                : Utf16(buffer, written);
+        }
+
+        private bool Spend(ulong bytes)
+        {
+            _budget -= (long)Math.Min(bytes, (ulong)long.MaxValue / 2);
+            return _budget >= 0;
+        }
     }
 
     private static string Utf16(byte[] buffer, ulong written)

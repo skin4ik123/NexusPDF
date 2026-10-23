@@ -13,8 +13,10 @@ public static class PdfFixture
     /// Готовый поток содержимого вместо текста — для страниц с линиями и
     /// фигурами (проверка геометрии); null — обычный текст.
     /// </param>
+    /// <param name="ExtraResources">Дополнительные записи словаря /Resources страницы (например, /Properties).</param>
     public sealed record PageSpec(
-        double Width, double Height, int Rotate = 0, string Text = "Hello NexusPDF", string? RawContent = null);
+        double Width, double Height, int Rotate = 0, string Text = "Hello NexusPDF", string? RawContent = null,
+        string? ExtraResources = null);
 
     public static byte[] Build(params PageSpec[] pages)
     {
@@ -36,7 +38,7 @@ public static class PdfFixture
             var h = p.Height.ToString("0.##", CultureInfo.InvariantCulture);
             objects.Add(
                 $"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w} {h}] /Rotate {p.Rotate} " +
-                $"/Contents {contentObj} 0 R /Resources << /Font << /F1 {fontObjNumber} 0 R >> >> >>");
+                $"/Contents {contentObj} 0 R /Resources << /Font << /F1 {fontObjNumber} 0 R >> {p.ExtraResources} >> >>");
 
             var text = p.Text.Replace("\\", "\\\\").Replace("(", "\\(").Replace(")", "\\)");
             var stream = p.RawContent ?? $"BT /F1 24 Tf 72 72 Td ({text}) Tj ET";

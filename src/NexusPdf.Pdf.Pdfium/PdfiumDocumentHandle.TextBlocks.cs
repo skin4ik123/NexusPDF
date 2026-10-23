@@ -12,6 +12,9 @@ internal sealed partial class PdfiumDocumentHandle
 {
     private const int MaxDocumentFontNames = 512;
 
+    /// <summary>Больше блоков на странице не бывает; лишние группы меток — подделка, остаются текстом.</summary>
+    private const int MaxTextBlocksPerPage = 1000;
+
     public Task<IReadOnlyList<StoredTextBlock>> GetTextBlocksAsync(int pageIndex, int extraQuarterTurns, CancellationToken ct)
     {
         lock (_admissionGate)
@@ -25,17 +28,24 @@ internal sealed partial class PdfiumDocumentHandle
                 var textPage = fpdf_text.FPDFTextLoadPage(page);
                 try
                 {
+                    var reader = new PdfiumTextBlockMarks.Reader();
                     var groups = new Dictionary<string, List<(FpdfPageobjectT Obj, TextBlockMark Mark)>>(StringComparer.Ordinal);
                     var count = fpdf_edit.FPDFPageCountObjects(page);
-                    for (var i = 0; i < count; i++)
+                    for (var i = 0; i < count && !reader.Exhausted; i++)
                     {
+                        if (i % 256 == 0)
+                            ct.ThrowIfCancellationRequested();
                         var obj = fpdf_edit.FPDFPageGetObject(page, i);
                         if (obj == null || obj.__Instance == IntPtr.Zero)
                             continue;
-                        if (PdfiumTextBlockMarks.Read(obj) is not { } mark)
+                        if (reader.Read(obj) is not { } mark)
                             continue;
                         if (!groups.TryGetValue(mark.Id, out var members))
+                        {
+                            if (groups.Count >= MaxTextBlocksPerPage)
+                                continue;
                             groups[mark.Id] = members = [];
+                        }
                         members.Add((obj, mark));
                     }
 
@@ -45,7 +55,7 @@ internal sealed partial class PdfiumDocumentHandle
                         ct.ThrowIfCancellationRequested();
                         // Метка с чужим Id — не наша запись: обычный текст.
                         if (Guid.TryParseExact(id, "N", out var guid))
-                            blocks.Add(ReadStoredBlock(page, textPage, pageIndex, extraQuarterTurns, guid, members));
+                            blocks.Add(ReadStoredBlock(page, textPage, reader, pageIndex, extraQuarterTurns, guid, members));
                     }
                     return blocks;
                 }
@@ -64,7 +74,7 @@ internal sealed partial class PdfiumDocumentHandle
     /// версия, ссылки на места текста, описание и отпечаток объектов.
     /// </summary>
     private StoredTextBlock ReadStoredBlock(
-        FpdfPageT page, FpdfTextpageT? textPage, int pageIndex, int extraQuarterTurns,
+        FpdfPageT page, FpdfTextpageT? textPage, PdfiumTextBlockMarks.Reader reader, int pageIndex, int extraQuarterTurns,
         Guid id, List<(FpdfPageobjectT Obj, TextBlockMark Mark)> members)
     {
         var intact = true;
@@ -86,11 +96,9 @@ internal sealed partial class PdfiumDocumentHandle
 
             if (mark.Version != "1")
                 intact = false;
-            if (mark.Data != null && data == null)
-            {
-                data = mark.Data;
-                hash = mark.Hash;
-            }
+            // Описание читается с первого объекта, где оно есть, и только с него.
+            if (data == null)
+                (data, hash) = reader.ReadPayload(obj);
 
             var type = fpdf_edit.FPDFPageObjGetType(obj);
             if (mark.Ref is { } reference && reference.StartsWith("d:", StringComparison.Ordinal) && type == PageObjectPath)
