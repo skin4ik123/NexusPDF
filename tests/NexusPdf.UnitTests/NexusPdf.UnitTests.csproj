@@ -17,6 +17,9 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <Compile Include="../../src/NexusPdf.App.Desktop/ViewModels/BulkObservableCollection.cs" Link="BulkObservableCollection.cs" />
+    <!-- Шрифты для тестов текстовых блоков: свободные (SIL OFL 1.1), лицензия рядом. -->
+    <Compile Include="..\Shared\TinyFontBuilder.cs" Link="TestFonts\TinyFontBuilder.cs" />
+    <None Include="..\TestFonts\**" LinkBase="TestFonts" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

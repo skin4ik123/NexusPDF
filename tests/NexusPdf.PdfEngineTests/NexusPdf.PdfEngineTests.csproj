@@ -21,6 +21,9 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <!-- Шрифты для тестов текстовых блоков: свободные (SIL OFL 1.1), лицензия рядом. -->
+    <Compile Include="..\Shared\TinyFontBuilder.cs" Link="TestFonts\TinyFontBuilder.cs" />
+    <None Include="..\TestFonts\**" LinkBase="TestFonts" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- Классы тестов идут друг за другом, а не параллельно: каждый класс
