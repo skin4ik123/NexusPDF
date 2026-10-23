@@ -34,8 +34,16 @@ public sealed class DocumentSession
 
     public event EventHandler? Changed;
 
+    /// <summary>
+    /// Перед любой правкой, отменой и повтором — пока модель ещё прежняя. Нужен
+    /// тем, кто держит незавершённую правку (набор в текстовом блоке): её
+    /// надо зафиксировать до того, как документ изменится под ней.
+    /// </summary>
+    public event EventHandler? Changing;
+
     public void Apply(IDocumentOperation operation)
     {
+        Changing?.Invoke(this, EventArgs.Empty);
         History.Do(operation, Model);
         _version++;
         ChangeStamp++;
@@ -48,6 +56,8 @@ public sealed class DocumentSession
     public void Undo()
     {
         if (!History.CanUndo) return;
+        Changing?.Invoke(this, EventArgs.Empty);
+        if (!History.CanUndo) return;
         History.Undo(Model);
         _version--;
         ChangeStamp++;
@@ -56,6 +66,8 @@ public sealed class DocumentSession
 
     public void Redo()
     {
+        if (!History.CanRedo) return;
+        Changing?.Invoke(this, EventArgs.Empty);
         if (!History.CanRedo) return;
         History.Redo(Model);
         _version++;

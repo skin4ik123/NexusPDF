@@ -103,4 +103,65 @@ public sealed class TextBlockSessionTests
         session.Undo();
         Assert.Equal("one", Assert.IsType<TextBlockReplacement>(Assert.Single(Overlays(session))).NewBlock!.Paragraphs[0].Text);
     }
+
+    [Fact]
+    public void Deleting_A_Moved_Saved_Block_Keeps_It_Deleted()
+    {
+        // Сохранённый блок сдвинули (появилась замена), потом нажали Delete:
+        // удаление обязано стать заменой «без новой версии», а не снять замену
+        // — иначе блок вернулся бы на прежнее место.
+        var session = Session();
+        var id = Guid.NewGuid();
+        TextBlockSessionService.Commit(session, 1, null, id, Block("moved"));
+
+        TextBlockSessionService.Delete(session, 1, 0);
+
+        var replacement = Assert.IsType<TextBlockReplacement>(Assert.Single(Overlays(session)));
+        Assert.Equal(id, replacement.BlockId);
+        Assert.Null(replacement.NewBlock);
+    }
+
+    [Fact]
+    public void Deleting_Any_Other_Overlay_Removes_It()
+    {
+        var session = Session();
+        TextBlockSessionService.Commit(session, 1, null, null, Block("draft"));
+        TextBlockSessionService.Delete(session, 1, 0);
+        Assert.Empty(Overlays(session));
+    }
+
+    [Fact]
+    public void Commit_After_The_Draft_Vanished_Adds_The_Text_Instead_Of_Failing()
+    {
+        var session = Session();
+        TextBlockSessionService.Commit(session, 1, null, null, Block("first"));
+        var draft = (TextBlockOverlay)Overlays(session)[0];
+        session.Undo();   // черновик исчез, пока шёл ввод
+
+        TextBlockSessionService.Commit(session, 1, draft, null, Block("typed"));
+
+        Assert.Equal("typed", Assert.IsType<TextBlockOverlay>(Assert.Single(Overlays(session))).Paragraphs[0].Text);
+    }
+
+    [Fact]
+    public void Commit_On_A_Page_That_Is_Gone_Does_Not_Throw()
+    {
+        var session = Session();
+        TextBlockSessionService.Commit(session, 7, null, null, Block("lost"));
+        Assert.False(session.History.CanUndo);
+    }
+
+    [Fact]
+    public void Session_Announces_A_Change_Before_Making_It()
+    {
+        var session = Session();
+        var seen = new List<int>();
+        session.Changing += (_, _) => seen.Add(session.Model.Pages[1].OverlayList.Count);
+
+        session.Apply(new AddOverlayOperation(1, Block("a")));
+        session.Undo();
+        session.Redo();
+
+        Assert.Equal([0, 1, 0], seen);
+    }
 }

@@ -17,6 +17,9 @@ public static class TextBlockSessionService
     public static void Commit(
         DocumentSession session, int pageIndex, TextBlockOverlay? original, Guid? storedId, TextBlockOverlay? edited)
     {
+        // Страницы уже нет (её удалили, пока шёл ввод) — писать некуда.
+        if (pageIndex < 0 || pageIndex >= session.Model.Pages.Count)
+            return;
         var empty = edited == null || edited.Paragraphs.All(p => p.Text.Length == 0);
 
         if (storedId is { } id)
@@ -39,21 +42,21 @@ public static class TextBlockSessionService
 
         if (original != null)
         {
-            if (!empty)
-            {
-                session.Apply(new ReplaceOverlayOperation(pageIndex, original, edited! with { BlockId = original.BlockId }));
-                return;
-            }
             var overlays = session.Model.Pages[pageIndex].OverlayList;
+            var index = -1;
             for (var i = 0; i < overlays.Count; i++)
             {
-                if (ReferenceEquals(overlays[i], original))
-                {
-                    session.Apply(new RemoveOverlayAtOperation(pageIndex, i));
-                    return;
-                }
+                if (ReferenceEquals(overlays[i], original)) { index = i; break; }
             }
-            return;
+            if (index >= 0)
+            {
+                session.Apply(empty
+                    ? new RemoveOverlayAtOperation(pageIndex, index)
+                    : new ReplaceOverlayOperation(pageIndex, original, edited! with { BlockId = original.BlockId }));
+                return;
+            }
+            // Черновика уже нет (отменили, пока шёл ввод): набранное не
+            // теряется, а ложится новым блоком.
         }
 
         if (!empty)
@@ -61,6 +64,21 @@ public static class TextBlockSessionService
             session.Apply(new AddOverlayOperation(pageIndex,
                 edited! with { BlockId = edited.BlockId == Guid.Empty ? Guid.NewGuid() : edited.BlockId }));
         }
+    }
+
+    /// <summary>
+    /// Удалить объект страницы. Замена сохранённого блока не снимается (иначе
+    /// блок вернулся бы в прежнем виде), а становится заменой без новой версии.
+    /// </summary>
+    public static void Delete(DocumentSession session, int pageIndex, int overlayIndex)
+    {
+        if (pageIndex < 0 || pageIndex >= session.Model.Pages.Count) return;
+        var overlays = session.Model.Pages[pageIndex].OverlayList;
+        if (overlayIndex < 0 || overlayIndex >= overlays.Count) return;
+        if (overlays[overlayIndex] is TextBlockReplacement replacement)
+            Commit(session, pageIndex, null, replacement.BlockId, null);
+        else
+            session.Apply(new RemoveOverlayAtOperation(pageIndex, overlayIndex));
     }
 
     /// <summary>Одинаковы ли блоки по содержанию (рамка, режимы, абзацы, стили, текст).</summary>
