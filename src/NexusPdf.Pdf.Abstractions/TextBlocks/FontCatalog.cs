@@ -11,7 +11,30 @@ public sealed record FontFaceRef(string Path, int FaceIndex);
 /// <param name="Supported">Контуры TrueType: такой шрифт PDFium встраивает.</param>
 public sealed record FontFaceInfo(
     FontFaceRef Ref, string Family, string Subfamily, bool Bold, bool Italic,
-    int Weight, bool HasCyrillic, bool Embeddable, bool Supported, long FileSize);
+    int Weight, bool HasCyrillic, bool Embeddable, bool Supported, long FileSize,
+    IReadOnlyList<CodeRange>? Coverage = null)
+{
+    /// <summary>
+    /// Может ли в начертании быть буква — по диапазонам таблицы кодов, без
+    /// чтения файла. Нет сведений о покрытии — «может».
+    /// </summary>
+    public bool MayHave(int codePoint)
+    {
+        if (Coverage is not { Count: > 0 } ranges) return Coverage == null;
+        int lo = 0, hi = ranges.Count - 1;
+        while (lo <= hi)
+        {
+            var mid = (lo + hi) / 2;
+            if (ranges[mid].End < codePoint) lo = mid + 1;
+            else if (ranges[mid].Start > codePoint) hi = mid - 1;
+            else return true;
+        }
+        return false;
+    }
+}
+
+/// <summary>Диапазон кодов, отмеченных в таблице кодов шрифта.</summary>
+public readonly record struct CodeRange(int Start, int End);
 
 /// <summary>Семейство шрифтов с его начертаниями.</summary>
 public sealed record FontFamilyInfo(string Name, IReadOnlyList<FontFaceInfo> Faces)
@@ -35,6 +58,12 @@ public interface IFontProvider
     /// умолчанию, Arial и Segoe UI, затем все остальные.
     /// </summary>
     IReadOnlyList<string> FallbackFamilies { get; }
+
+    /// <summary>
+    /// Начертание из запасных, в котором есть буква; null — её нет ни в одном
+    /// шрифте, который можно вписать в PDF.
+    /// </summary>
+    FontFaceInfo? FallbackFor(int codePoint, bool bold, bool italic);
 }
 
 /// <summary>
@@ -51,6 +80,11 @@ public sealed class FontCatalog : IFontProvider
 
     private readonly Dictionary<string, FontFamilyInfo> _byName;
     private readonly ConcurrentDictionary<FontFaceRef, TrueTypeFont> _loaded = new();
+
+    // Поиск запасного шрифта запоминается, в том числе «ни в одном»: иначе
+    // буква, которой нет нигде, на каждом нажатии клавиши перебирала бы и
+    // загружала в память все шрифты системы.
+    private readonly ConcurrentDictionary<(int CodePoint, bool Bold, bool Italic), FontFaceInfo?> _fallbacks = new();
 
     private FontCatalog(IReadOnlyList<FontFamilyInfo> families)
     {
@@ -162,7 +196,8 @@ public sealed class FontCatalog : IFontProvider
             if (font.FamilyName.Length == 0) continue;
             yield return new FontFaceInfo(
                 new FontFaceRef(path, index), font.FamilyName, font.SubfamilyName, font.IsBold, font.IsItalic,
-                font.WeightClass, HasCyrillic(font), font.IsEmbeddable, font.HasTrueTypeOutlines, data.LongLength);
+                font.WeightClass, HasCyrillic(font), font.IsEmbeddable, font.HasTrueTypeOutlines, data.LongLength,
+                font.CoveredRanges());
         }
     }
 
@@ -186,6 +221,20 @@ public sealed class FontCatalog : IFontProvider
                ?? info.Faces.FirstOrDefault(f => !f.Bold && !f.Italic)
                ?? info.Faces[0];
     }
+
+    public FontFaceInfo? FallbackFor(int codePoint, bool bold, bool italic) =>
+        _fallbacks.GetOrAdd((codePoint, bold, italic), key =>
+        {
+            foreach (var family in FallbackFamilies)
+            {
+                var face = Resolve(family, key.Bold, key.Italic);
+                // Покрытие проверяется по диапазонам из сканирования; файл
+                // читается только у начертания, где буква может быть.
+                if (face is not { Embeddable: true, Supported: true } || !face.MayHave(key.CodePoint)) continue;
+                if (Load(face.Ref).HasGlyph(key.CodePoint)) return face;
+            }
+            return null;
+        });
 
     public TrueTypeFont Load(FontFaceRef face) =>
         _loaded.GetOrAdd(face, f => TrueTypeFont.Parse(File.ReadAllBytes(f.Path), f.FaceIndex));

@@ -33,6 +33,7 @@ internal sealed class TextBlockCanvas : FrameworkElement
     private double _zoom;
     private bool _caretVisible = true;
     private bool _composing;
+    private char? _pendingHighSurrogate;
 
     public TextBlockCanvas(TextBlockEditorModel model, double zoom)
     {
@@ -285,6 +286,20 @@ internal sealed class TextBlockCanvas : FrameworkElement
         // их обрабатывают клавиши.
         if (text.Length == 0 || text.All(char.IsControl))
             return;
+        // Буква вне основной плоскости (эмодзи с панели Windows) может прийти
+        // двумя событиями — половинками пары; первая ждёт вторую.
+        if (_pendingHighSurrogate is { } high)
+        {
+            _pendingHighSurrogate = null;
+            text = high + text;
+        }
+        if (text.Length > 0 && char.IsHighSurrogate(text[^1]))
+        {
+            _pendingHighSurrogate = text[^1];
+            text = text[..^1];
+            e.Handled = true;
+            if (text.Length == 0) return;
+        }
         Report(_model.Insert(text));
         e.Handled = true;
     }
