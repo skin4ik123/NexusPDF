@@ -42,6 +42,18 @@ public static class TextBlockCodec
                 w.WriteStartObject();
                 w.WriteString("A", paragraph.Align.ToString());
                 w.WriteNumber("LS", paragraph.LineSpacing);
+                // Переводы строки внутри абзаца в PDF не пишутся (глифа нет) —
+                // их места хранятся здесь.
+                var text = paragraph.Text;
+                if (text.Contains(TextBlockText.LineBreak))
+                {
+                    w.WriteStartArray("LB");
+                    for (var i = 0; i < text.Length; i++)
+                    {
+                        if (text[i] == TextBlockText.LineBreak) w.WriteNumberValue(i);
+                    }
+                    w.WriteEndArray();
+                }
                 w.WriteStartArray("Runs");
                 foreach (var run in paragraph.Runs)
                 {
@@ -96,7 +108,7 @@ public static class TextBlockCodec
             if (paragraphsJson.ValueKind != JsonValueKind.Array || paragraphsJson.GetArrayLength() > MaxParagraphs)
                 return null;
 
-            var layouts = new List<(TextAlign Align, double Spacing, List<(int Length, TextStyle Style)> Runs)>();
+            var layouts = new List<(TextAlign Align, double Spacing, List<(int Length, TextStyle Style)> Runs, List<int> Breaks)>();
             var runCount = 0;
             long totalLength = 0;
             foreach (var p in paragraphsJson.EnumerateArray())
@@ -114,10 +126,21 @@ public static class TextBlockCodec
                     runs.Add((length, Style(r.GetProperty("S"))));
                 }
                 if (runs.Count == 0) return null;
-                layouts.Add((Enum<TextAlign>(p, "A"), Number(p, "LS", 0.5, 5), runs));
+                var breaks = new List<int>();
+                if (p.TryGetProperty("LB", out var lb))
+                {
+                    if (lb.ValueKind != JsonValueKind.Array || lb.GetArrayLength() > MaxTextLength) return null;
+                    foreach (var b in lb.EnumerateArray())
+                    {
+                        var at = b.GetInt32();
+                        if (at < 0 || (breaks.Count > 0 && at <= breaks[^1])) return null;
+                        breaks.Add(at);
+                    }
+                }
+                layouts.Add((Enum<TextAlign>(p, "A"), Number(p, "LS", 0.5, 5), runs, breaks));
             }
 
-            var texts = Assemble(layouts.Select(l => l.Runs.Sum(r => r.Length)).ToList(), pieces);
+            var texts = Assemble(layouts.Select(l => (l.Runs.Sum(r => r.Length), l.Breaks)).ToList(), pieces);
             if (texts == null) return null;
 
             var paragraphs = new List<TextParagraph>(layouts.Count);
@@ -142,25 +165,39 @@ public static class TextBlockCodec
     }
 
     /// <summary>Тексты абзацев из кусков; null — куски не покрывают абзацы ровно.</summary>
-    private static List<string>? Assemble(IReadOnlyList<int> lengths, IReadOnlyList<TextPiece> pieces)
+    private static List<string>? Assemble(IReadOnlyList<(int Length, List<int> Breaks)> paragraphs, IReadOnlyList<TextPiece> pieces)
     {
-        var byParagraph = new List<TextPiece>[lengths.Count];
+        var byParagraph = new List<TextPiece>[paragraphs.Count];
         foreach (var piece in pieces)
         {
             if (piece.Text.Length == 0) continue;
-            if (piece.Paragraph < 0 || piece.Paragraph >= lengths.Count || piece.Start < 0) return null;
+            if (piece.Paragraph < 0 || piece.Paragraph >= paragraphs.Count || piece.Start < 0 ||
+                piece.Text.Contains(TextBlockText.LineBreak))
+                return null;
             (byParagraph[piece.Paragraph] ??= new List<TextPiece>()).Add(piece);
         }
-        var texts = new List<string>(lengths.Count);
-        for (var i = 0; i < lengths.Count; i++)
+        var texts = new List<string>(paragraphs.Count);
+        for (var i = 0; i < paragraphs.Count; i++)
         {
-            var builder = new StringBuilder(lengths[i]);
+            var (length, breaks) = paragraphs[i];
+            var builder = new StringBuilder(length);
+            var nextBreak = 0;
+            void AppendBreaks()
+            {
+                while (nextBreak < breaks.Count && breaks[nextBreak] == builder.Length)
+                {
+                    builder.Append(TextBlockText.LineBreak);
+                    nextBreak++;
+                }
+            }
             foreach (var piece in (IEnumerable<TextPiece>?)byParagraph[i]?.OrderBy(p => p.Start) ?? [])
             {
+                AppendBreaks();
                 if (piece.Start != builder.Length) return null; // дыра или перекрытие
                 builder.Append(piece.Text);
             }
-            if (builder.Length != lengths[i]) return null;
+            AppendBreaks();
+            if (builder.Length != length || nextBreak != breaks.Count) return null;
             texts.Add(builder.ToString());
         }
         return texts;

@@ -68,6 +68,23 @@ public sealed class TextBlockCodecTests
         Assert.Equal("", decoded!.Paragraphs[0].Text);
     }
 
+    [Fact]
+    public void Line_Breaks_Live_In_The_Structure_Not_In_The_Pieces()
+    {
+        // Перевод строки внутри абзаца в PDF не пишется (у шрифта нет такого
+        // глифа) — его место хранит описание блока.
+        var block = Sample() with
+        {
+            Paragraphs = [new TextParagraph([new TextRun("ab" + TextBlockText.LineBreak + "cd", Plain)])],
+        };
+        var json = TextBlockCodec.EncodeStructure(block);
+        var decoded = TextBlockCodec.Decode(json, [new TextPiece(0, 0, "ab"), new TextPiece(0, 3, "cd")], Guid.NewGuid());
+
+        Assert.NotNull(decoded);
+        Assert.Equal("ab" + TextBlockText.LineBreak + "cd", decoded!.Paragraphs[0].Text);
+        Assert.Null(TextBlockCodec.Decode(json, [new TextPiece(0, 0, "abcd")], Guid.NewGuid()));
+    }
+
     public static TheoryData<TextPiece[]> BadPieces() => new()
     {
         new[] { new TextPiece(0, 0, "SECRET"), new TextPiece(1, 0, "second") },                    // дыра: нет " 42"
