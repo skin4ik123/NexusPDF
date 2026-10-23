@@ -276,6 +276,25 @@ public sealed class TextBlockReadTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Page_That_Exhausts_The_Mark_Budget_Fails_Closed()
+    {
+        // Огромный общий Id у сотни объектов выбирает весь бюджет чтения меток.
+        // Дальше нельзя ни открыть блок для правки, ни молча оставить на
+        // странице его старые объекты при замене.
+        var properties = $"/Properties << /MC0 << /Id ({new string('7', 1_000_000)}) /V (1) /R (0:0) >> >>";
+        var raw = string.Concat(Enumerable.Range(0, 100).Select(i =>
+            $"/NexusTextBlock /MC0 BDC BT /F1 10 Tf 20 {10 + i * 2} Td (a) Tj ET EMC\n"));
+        var hostile = Path.Combine(_dir, "hostile.pdf");
+        File.WriteAllBytes(hostile, PdfFixture.Build(new PdfFixture.PageSpec(400, 300, RawContent: raw, ExtraResources: properties)));
+        var block = Block(paragraphs: ["Our block"]);
+        var saved = await ComposeAsync(hostile, block);
+
+        Assert.DoesNotContain(await BlocksAsync(saved), b => b.Intact);
+        await Assert.ThrowsAsync<PdfEngineException>(() =>
+            ComposeAsync(saved, new TextBlockReplacement(block.BlockId, Block(paragraphs: ["New"]))));
+    }
+
+    [Fact]
     public async Task Document_Font_Names_Are_Listed()
     {
         var mono = new TextBlockOverlay(40, 150, 200, 10, 0, TextBlockWidthMode.Fixed, true, false,
