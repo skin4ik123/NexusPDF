@@ -242,6 +242,36 @@ public sealed class TextBlockEditorModelTests : IDisposable
         Assert.Equal(2, e.Block.Paragraphs[1].LineSpacing);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(90)]
+    [InlineData(30)]
+    public void Growing_Rotated_Block_Keeps_Its_Top_Left_Corner(double rotation)
+    {
+        // Поворот — вокруг центра рамки; растущая при наборе рамка сдвигала бы
+        // центр, и повёрнутый текст уезжал бы из-под курсора.
+        var block = new TextBlockOverlay(100, 100, 5, 5, rotation, TextBlockWidthMode.AutoWidth, true, false,
+            [new TextParagraph([new TextRun("", Mono)])]);
+        var e = new TextBlockEditorModel(block, _fonts, Mono);
+        var before = Corner(e.Block);
+
+        e.Insert("abcdefgh");
+        e.NewParagraph();
+        e.Insert("ij");
+
+        var after = Corner(e.Block);
+        Assert.Equal(before.X, after.X, 6);
+        Assert.Equal(before.Y, after.Y, 6);
+    }
+
+    private static (double X, double Y) Corner(TextBlockOverlay b)
+    {
+        var a = b.RotationDegrees * Math.PI / 180;
+        var (dx, dy) = (-b.WidthPt / 2, -b.HeightPt / 2);
+        return (b.XPt + b.WidthPt / 2 + dx * Math.Cos(a) - dy * Math.Sin(a),
+                b.YPt + b.HeightPt / 2 + dx * Math.Sin(a) + dy * Math.Cos(a));
+    }
+
     [Fact]
     public void Auto_Width_Block_Reports_Layout_Size()
     {
