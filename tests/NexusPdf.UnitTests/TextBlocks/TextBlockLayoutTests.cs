@@ -190,6 +190,26 @@ public sealed class TextBlockLayoutTests : IDisposable
     }
 
     [Fact]
+    public void Shrink_To_Fit_Of_Huge_Text_Is_Fast()
+    {
+        // Кегль 1600 и много текста в маленькой рамке: перебор по 0,5 пт
+        // означал бы тысячи полных вёрсток на каждое нажатие клавиши.
+        var block = Block(string.Join(" ", Enumerable.Repeat("word", 1200)), Mono(1600), width: 2 * Pad + 300,
+            autoHeight: false, height: 2 * Pad + 200, shrink: true);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var layout = Lay(block);
+        watch.Stop();
+
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(1), $"вёрстка заняла {watch.Elapsed}");
+        Assert.False(layout.Overflows);
+        Assert.True(layout.Lines.SelectMany(l => l.Pieces).All(p => p.FontSizePt >= 4));
+        // Крупнее на шаг уже не помещается: найден наибольший подходящий размер.
+        var size = layout.Lines[0].Pieces[0].FontSizePt;
+        var bigger = Lay(block with { ShrinkToFit = false, Paragraphs = [new TextParagraph([new TextRun(block.Paragraphs[0].Text, Mono(size + 0.5))], TextAlign.Left, 1.0)] });
+        Assert.True(bigger.Overflows);
+    }
+
+    [Fact]
     public void Shrink_Never_Below_4pt_And_Reports_Overflow()
     {
         var layout = Lay(Block(string.Join(" ", Enumerable.Repeat("word", 400)), Mono(12), width: 2 * Pad + 30,
