@@ -252,7 +252,7 @@ public sealed class OcrService
     {
         var page = document.Session.Model.Pages[logicalIndex];
         if (page.OverlayList is { } overlays &&
-            overlays.Any(o => o is OcrTextLayerOverlay or TextOverlay))
+            overlays.Any(o => o is OcrTextLayerOverlay or TextOverlay or Pdf.Abstractions.TextBlocks.TextBlockOverlay))
             return true;
         var text = await document.Handles[page.SourceId]
             .GetPageTextAsync(page.SourcePageIndex, ct);
