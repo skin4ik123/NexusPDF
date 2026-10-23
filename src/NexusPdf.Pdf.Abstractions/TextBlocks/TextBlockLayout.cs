@@ -58,20 +58,31 @@ public static class TextBlockLayout
             return result;
 
         // Уменьшение всех размеров в одной пропорции шагом 0,5 пт крупнейшего,
-        // но не мельче 4 пт у самого мелкого.
+        // но не мельче 4 пт у самого мелкого. Наибольший помещающийся шаг
+        // ищется делением пополам: с ростом кегля текст занимает не меньше
+        // места, а перебор по шагу стоил бы тысяч вёрсток у крупного кегля.
         var sizes = block.Paragraphs.SelectMany(p => p.Runs).Select(r => r.Style.FontSizePt).ToList();
         if (sizes.Count == 0) return result;
         var largest = sizes.Max();
         var smallest = sizes.Min();
-        for (var size = largest - 0.5; ; size -= 0.5)
+        var minimumScale = Math.Min(1.0, MinimumFontSizePt / smallest);
+        var lastStep = (int)Math.Floor((largest - largest * minimumScale) / 0.5 + Epsilon);
+        LaidOutBlock? best = null;
+        for (int low = 1, high = lastStep; low <= high;)
         {
-            var scale = size / largest;
-            if (smallest * scale < MinimumFontSizePt - Epsilon)
-                return Layout(block, fonts, Math.Min(1.0, MinimumFontSizePt / smallest));
-            result = Layout(block, fonts, scale);
-            if (!result.Overflows)
-                return result;
+            var step = low + (high - low) / 2;
+            var candidate = Layout(block, fonts, (largest - 0.5 * step) / largest);
+            if (candidate.Overflows)
+            {
+                low = step + 1;
+            }
+            else
+            {
+                best = candidate;
+                high = step - 1;
+            }
         }
+        return best ?? Layout(block, fonts, minimumScale);
     }
 
     // ----- Символы -----
