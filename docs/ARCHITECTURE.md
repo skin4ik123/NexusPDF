@@ -9,7 +9,10 @@ Application                      — OpenedDocument, SaveService, SearchService
    │
 Domain                           — DocumentSession, PageRef, операции, Undo/Redo
    │
-Pdf.Abstractions                 — интерфейсы движков и модели данных
+Pdf.Abstractions                 — интерфейсы движков и модели данных;
+                                   TextBlocks: чтение TrueType, каталог шрифтов,
+                                   модель, раскладка и редактирование текстовых
+                                   блоков (общие для экрана и записи в PDF)
    ▲
    ├── Pdf.Pdfium                — рендер/текст/компоновка/формы (PDFium)
    ├── Pdf.MuPdf                 — сжатие, запись XFA-данных гибридных форм (MuPDF)
