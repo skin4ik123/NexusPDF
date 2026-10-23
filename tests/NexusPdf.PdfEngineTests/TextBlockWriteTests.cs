@@ -29,6 +29,8 @@ public sealed class TextBlockWriteTests : IAsyncLifetime
         var fontDir = Path.Combine(_dir, "fonts");
         Directory.CreateDirectory(fontDir);
         File.WriteAllBytes(Path.Combine(fontDir, "latin.ttf"), TinyFontBuilder.Build(new TinyFontSpec("Latin500")));
+        File.WriteAllBytes(Path.Combine(fontDir, "pair.ttc"), TinyFontBuilder.BuildCollection(
+            TinyFontBuilder.Build(new TinyFontSpec("Pair One")), TinyFontBuilder.Build(new TinyFontSpec("Pair Two"))));
         _fonts = FontCatalog.Scan([TestFontPaths.Directory, fontDir]);
         _pdfium = new PdfiumRenderEngine(null, _fonts);
         return Task.CompletedTask;
@@ -228,6 +230,21 @@ public sealed class TextBlockWriteTests : IAsyncLifetime
         Assert.All(signatures, s => Assert.True(s.IsCryptoValid, s.Error));
         await using var reopened = await _pdfium.OpenAsync(edited, null, CancellationToken.None);
         Assert.Contains("Added after signing", await reopened.GetPageTextAsync(0, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Line_Text_In_A_Font_From_A_Collection_Reaches_The_File()
+    {
+        // Список шрифтов теперь полный, включая коллекции .ttc: выбранная в нём
+        // гарнитура обязана доехать до файла и у обычной надписи.
+        var overlay = new TextOverlay("Pair text", 40, 40, 20, 0xFF000000, 0, "Pair Two", false, false);
+        var saved = await ComposeAsync(Source(), [overlay]);
+
+        await using var doc = await _pdfium.OpenAsync(saved, null, CancellationToken.None);
+        var found = await doc.GetTextObjectAtAsync(0, 0, 50, 50, CancellationToken.None);
+        Assert.NotNull(found);
+        Assert.Equal("Pair text", found!.Text);
+        Assert.Contains("PairTwo", found.FontName.Replace(" ", ""));
     }
 
     [Fact]

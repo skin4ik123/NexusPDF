@@ -19,6 +19,7 @@ public sealed class TextBlockLayoutTests : IDisposable
         var mono = Enumerable.Range(0x20, 0x5F).Concat(Enumerable.Range(0x400, 0x60)).ToDictionary(c => c, _ => (ushort)500);
         File.WriteAllBytes(Path.Combine(_dir, "mono500.ttf"), TinyFontBuilder.Build(new TinyFontSpec("Mono500", Advances: mono)));
         File.WriteAllBytes(Path.Combine(_dir, "latin.ttf"), TinyFontBuilder.Build(new TinyFontSpec("Latin500")));
+        File.WriteAllBytes(Path.Combine(_dir, "locked.ttf"), TinyFontBuilder.Build(new TinyFontSpec("Locked", FsType: 0x0002)));
         _fonts = FontCatalog.Scan([_dir, TestFontPaths.Directory]);
     }
 
@@ -156,6 +157,16 @@ public sealed class TextBlockLayoutTests : IDisposable
         Assert.True(piece.IsFallback);
         Assert.Contains(piece.Family, _fonts.FallbackFamilies);
         Assert.False(Lay(Block("ab", Mono(), mode: TextBlockWidthMode.AutoWidth)).Lines[0].Pieces[0].IsFallback);
+    }
+
+    [Fact]
+    public void Family_That_Forbids_Embedding_Is_Substituted()
+    {
+        // Такой шрифт установлен, но в PDF его вписывать нельзя (fsType):
+        // блок, пришедший из файла с этой гарнитурой, пишется заменой.
+        var piece = Assert.Single(Lay(Block("ab", new TextStyle("Locked", 10), mode: TextBlockWidthMode.AutoWidth)).Lines[0].Pieces);
+        Assert.True(piece.IsFallback);
+        Assert.NotEqual("Locked", piece.Family);
     }
 
     [Fact]

@@ -26,23 +26,28 @@ internal sealed class OverlayFontCache(FpdfDocumentT document, IFontProvider pro
     public IFontProvider Provider => provider;
 
     /// <summary>Шрифт по умолчанию. null — если в системе нет ни одной гарнитуры каталога.</summary>
-    public FpdfFontT? Default => Load(PdfFontCatalog.ResolveDefaultPath());
+    public FpdfFontT? Default =>
+        FromProvider(FontCatalog.DefaultFamily, false, false) ?? Load(PdfFontCatalog.ResolveDefaultPath());
 
     /// <summary>
-    /// Шрифт запрошенной гарнитуры и начертания. Неизвестная гарнитура
-    /// откатывается на шрифт по умолчанию: текст должен появиться в документе
-    /// даже тогда, когда выбранного шрифта в системе не оказалось.
+    /// Шрифт запрошенной гарнитуры и начертания — из того же каталога, что и
+    /// список выбора (в том числе начертания из коллекций .ttc). Неизвестная
+    /// гарнитура откатывается на шрифт по умолчанию: текст должен появиться в
+    /// документе даже тогда, когда выбранного шрифта в системе не оказалось.
     /// </summary>
-    public FpdfFontT? For(string family, bool bold, bool italic)
-    {
-        if (!string.IsNullOrWhiteSpace(family))
-        {
-            var font = Load(PdfFontCatalog.ResolvePath(family, bold, italic));
-            if (font != null)
-                return font;
-        }
-        return Load(PdfFontCatalog.ResolveDefaultPath(bold, italic)) ?? Default;
-    }
+    public FpdfFontT? For(string family, bool bold, bool italic) =>
+        FromProvider(family, bold, italic)
+        ?? (string.IsNullOrWhiteSpace(family) ? null : Load(PdfFontCatalog.ResolvePath(family, bold, italic)))
+        ?? FromProvider(FontCatalog.DefaultFamily, bold, italic)
+        ?? Load(PdfFontCatalog.ResolveDefaultPath(bold, italic))
+        ?? Default;
+
+    /// <summary>Начертание из каталога, если его можно вписать в PDF.</summary>
+    private FpdfFontT? FromProvider(string family, bool bold, bool italic) =>
+        !string.IsNullOrWhiteSpace(family) &&
+        provider.Resolve(family, bold, italic) is { Embeddable: true, Supported: true } face
+            ? ForFace(face.Ref)
+            : null;
 
     /// <summary>
     /// Освобождает все загруженные шрифты. Вызывается ПОСЛЕ сохранения: до

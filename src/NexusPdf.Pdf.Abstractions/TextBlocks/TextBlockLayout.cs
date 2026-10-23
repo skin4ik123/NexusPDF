@@ -80,10 +80,18 @@ public static class TextBlockLayout
     {
         private readonly Dictionary<(int, bool, bool), FontFaceInfo?> _fallback = new();
 
+        /// <summary>
+        /// Начертание фрагмента. Шрифт, который нельзя вписать в PDF (запрет
+        /// встраивания, нет контуров TrueType), заменяется так же, как
+        /// отсутствующий: в файл уйдёт только то, что туда можно записать.
+        /// </summary>
         public FontFaceInfo Primary(TextStyle style) =>
-            fonts.Resolve(style.FontFamily, style.Bold, style.Italic)
-            ?? fonts.FallbackFamilies.Select(f => fonts.Resolve(f, style.Bold, style.Italic)).FirstOrDefault(f => f != null)
+            Usable(fonts.Resolve(style.FontFamily, style.Bold, style.Italic))
+            ?? fonts.FallbackFamilies.Select(f => Usable(fonts.Resolve(f, style.Bold, style.Italic))).FirstOrDefault(f => f != null)
             ?? throw new InvalidOperationException("В системе нет ни одного шрифта для текста.");
+
+        private static FontFaceInfo? Usable(FontFaceInfo? face) =>
+            face is { Embeddable: true, Supported: true } ? face : null;
 
         public FontFaceInfo? Fallback(int codePoint, bool bold, bool italic)
         {
@@ -91,7 +99,7 @@ public static class TextBlockLayout
             FontFaceInfo? found = null;
             foreach (var family in fonts.FallbackFamilies)
             {
-                var face = fonts.Resolve(family, bold, italic);
+                var face = Usable(fonts.Resolve(family, bold, italic));
                 if (face != null && fonts.Load(face.Ref).HasGlyph(codePoint))
                 {
                     found = face;
