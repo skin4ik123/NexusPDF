@@ -1,3 +1,4 @@
+using System.Text;
 using NexusPdf.Pdf.Abstractions;
 using NexusPdf.Pdf.Abstractions.TextBlocks;
 using PDFiumCore;
@@ -41,6 +42,47 @@ internal sealed class OverlayFontCache(FpdfDocumentT document, Lazy<IFontProvide
         ?? FromProvider(FontCatalog.DefaultFamily, bold, italic)
         ?? Load(PdfFontCatalog.ResolveDefaultPath(bold, italic))
         ?? Default;
+
+    /// <summary>
+    /// Шрифт гарнитуры, если в нём есть все буквы текста; иначе — шрифт по
+    /// умолчанию или запасной, где они есть. Список шрифтов показывает и
+    /// шрифты без кириллицы: русская строка таким шрифтом вышла бы квадратами.
+    /// Если букв нет ни в одном шрифте — как <see cref="For"/>.
+    /// </summary>
+    public FpdfFontT? ForText(string family, bool bold, bool italic, string text)
+    {
+        foreach (var candidate in new[] { family, FontCatalog.DefaultFamily }.Concat(Provider.FallbackFamilies))
+        {
+            if (string.IsNullOrWhiteSpace(candidate) ||
+                Provider.Resolve(candidate, bold, italic) is not { Embeddable: true, Supported: true } face ||
+                !Covers(face, text))
+                continue;
+            if (ForFace(face.Ref) is { } font)
+                return font;
+        }
+        return For(family, bold, italic);
+    }
+
+    private bool Covers(FontFaceInfo face, string text)
+    {
+        TrueTypeFont? font = null;
+        foreach (var rune in text.EnumerateRunes())
+        {
+            if (Rune.IsWhiteSpace(rune) || Rune.IsControl(rune)) continue;
+            // Сначала по диапазонам из сканирования — без чтения файла.
+            if (!face.MayHave(rune.Value)) return false;
+            try
+            {
+                font ??= Provider.Load(face.Ref);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
+            {
+                return false;
+            }
+            if (!font.HasGlyph(rune.Value)) return false;
+        }
+        return true;
+    }
 
     /// <summary>Начертание из каталога, если его можно вписать в PDF.</summary>
     private FpdfFontT? FromProvider(string family, bool bold, bool italic) =>
