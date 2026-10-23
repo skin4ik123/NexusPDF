@@ -15,6 +15,9 @@ public enum ResizeHandle
 
     /// <summary>Внутри рамки — перетаскивание целиком.</summary>
     Move,
+
+    /// <summary>Ручка над серединой верхней стороны — поворот вокруг центра.</summary>
+    Rotate,
 }
 
 /// <summary>Прямоугольник для расчётов рамки (в отображаемых пунктах страницы).</summary>
@@ -43,6 +46,9 @@ public static class ObjectHandles
     /// </summary>
     public const double HandleToleranceDip = 6;
 
+    /// <summary>На сколько точек экрана ручка поворота выше верхней ручки.</summary>
+    public const double RotateHandleOffsetDip = 20;
+
     /// <summary>Все восемь ручек по порядку обхода рамки.</summary>
     public static readonly IReadOnlyList<ResizeHandle> All = new[]
     {
@@ -51,8 +57,11 @@ public static class ObjectHandles
         ResizeHandle.BottomLeft, ResizeHandle.Left,
     };
 
-    /// <summary>Центр ручки в координатах страницы.</summary>
-    public static (double X, double Y) CenterOf(HandleBox box, ResizeHandle handle)
+    /// <summary>
+    /// Центр ручки в координатах страницы. <paramref name="scale"/> — точек
+    /// страницы в одной точке экрана: ручка поворота отстоит на экранное расстояние.
+    /// </summary>
+    public static (double X, double Y) CenterOf(HandleBox box, ResizeHandle handle, double scale = 1.0)
     {
         var midX = box.X + box.Width / 2;
         var midY = box.Y + box.Height / 2;
@@ -66,6 +75,7 @@ public static class ObjectHandles
             ResizeHandle.Bottom => (midX, box.Bottom),
             ResizeHandle.BottomLeft => (box.X, box.Bottom),
             ResizeHandle.Left => (box.X, midY),
+            ResizeHandle.Rotate => (midX, box.Y - RotateHandleOffsetDip * (scale > 0 ? scale : 1.0)),
             _ => (midX, midY),
         };
     }
@@ -76,9 +86,16 @@ public static class ObjectHandles
     /// допуск оставался экранным при любом масштабе показа.
     /// </summary>
     public static ResizeHandle HitTest(
-        HandleBox box, double x, double y, bool canResize, double scale = 1.0)
+        HandleBox box, double x, double y, bool canResize, double scale = 1.0, bool canRotate = false)
     {
         var tolerance = HandleToleranceDip * (scale > 0 ? scale : 1.0);
+
+        if (canRotate)
+        {
+            var (rx, ry) = CenterOf(box, ResizeHandle.Rotate, scale);
+            if (Math.Abs(x - rx) <= tolerance && Math.Abs(y - ry) <= tolerance)
+                return ResizeHandle.Rotate;
+        }
 
         if (canResize)
         {
@@ -132,6 +149,18 @@ public static class ObjectHandles
         return new HandleBox(x, y, width, height);
     }
 
+    /// <summary>
+    /// Угол поворота, на который указывает курсор: градусы по часовой стрелке
+    /// от направления «вверх» из центра рамки, в [0, 360).
+    /// </summary>
+    public static double RotationAngle(HandleBox box, double x, double y)
+    {
+        var dx = x - (box.X + box.Width / 2);
+        var dy = y - (box.Y + box.Height / 2);
+        var degrees = Math.Atan2(dx, -dy) * 180 / Math.PI;
+        return degrees < 0 ? degrees + 360 : degrees;
+    }
+
     /// <summary>Курсор для ручки — подсказка о том, куда потянется рамка.</summary>
     public static string CursorFor(ResizeHandle handle) => handle switch
     {
@@ -140,6 +169,7 @@ public static class ObjectHandles
         ResizeHandle.Top or ResizeHandle.Bottom => "SizeNS",
         ResizeHandle.Left or ResizeHandle.Right => "SizeWE",
         ResizeHandle.Move => "SizeAll",
+        ResizeHandle.Rotate => "Hand",
         _ => "Arrow",
     };
 }
