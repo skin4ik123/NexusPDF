@@ -6,6 +6,7 @@ using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using NexusPdf.App.Desktop.Localization;
+using NexusPdf.App.Desktop.Views.Text;
 using NexusPdf.Pdf.Abstractions;
 
 namespace NexusPdf.App.Desktop.Views;
@@ -32,7 +33,7 @@ internal sealed class InlineTextEditor
     private readonly Popup _popup;
     private readonly Grid _root;
     private readonly TextBox _box;
-    private readonly ComboBox _family;
+    private readonly FontPicker _family;
     private readonly TextBox _size;
     private readonly ToggleButton _bold;
     private readonly ToggleButton _italic;
@@ -56,7 +57,7 @@ internal sealed class InlineTextEditor
 
     private InlineTextEditor(
         UIElement adorned, Rect rect, string text,
-        string family, double fontSizePt, uint colorArgb, double scale)
+        string family, double fontSizePt, uint colorArgb, double scale, FontPickerContext? fonts)
     {
         _rect = rect;
         _originalFamily = family;
@@ -72,20 +73,11 @@ internal sealed class InlineTextEditor
             ? Loc.Get("FontKeepCurrent")
             : Loc.F("FontKeepNamed", ShortFontName(family));
 
-        var items = new List<string> { _keepFamily };
-        items.AddRange(PdfFontCatalog.AvailableFamilies());
-
-        _family = new ComboBox
-        {
-            Width = 132,
-            ItemsSource = items,
-            ToolTip = Loc.Get("FontFamilyLabel"),
-        };
-        // Имя шрифта в PDF часто идёт с приставкой подмножества («ABCDEF+Arial»),
-        // поэтому гарнитура ищется вхождением, а не точным совпадением.
-        var match = PdfFontCatalog.AvailableFamilies()
-            .FirstOrDefault(f => family.Contains(f, StringComparison.OrdinalIgnoreCase));
-        _family.SelectedItem = match ?? _keepFamily;
+        // Список — все установленные шрифты с поиском, недавними и шрифтами
+        // документа; по умолчанию стоит «оставить», и шрифт строки не меняется,
+        // пока его не выбрали явно.
+        _family = new FontPicker();
+        _family.Configure(_keepFamily, "", fonts);
 
         _size = new TextBox
         {
@@ -138,6 +130,7 @@ internal sealed class InlineTextEditor
             Foreground = Brush("TextBrush", Colors.Black),
         };
         _box.KeyDown += OnKeyDown;
+        _family.FamilyChanged += (_, _) => _box.Focus();
         // Курсор возвращается в текст: после переключения начертания человек
         // продолжает набирать, а не ищет, куда кликнуть.
         _bold.Click += (_, _) => _box.Focus();
@@ -233,9 +226,9 @@ internal sealed class InlineTextEditor
     /// <summary>Открывает поле над строкой. Возвращает null, если слой украшений недоступен.</summary>
     public static InlineTextEditor? Open(
         UIElement adorned, Rect rectDiu, string text,
-        string family, double fontSizePt, uint colorArgb, double scale)
+        string family, double fontSizePt, uint colorArgb, double scale, FontPickerContext? fonts = null)
     {
-        var editor = new InlineTextEditor(adorned, rectDiu, text, family, fontSizePt, colorArgb, scale);
+        var editor = new InlineTextEditor(adorned, rectDiu, text, family, fontSizePt, colorArgb, scale, fonts);
 
         // Панель встаёт НАД строкой, а если сверху нет места — под ней.
         editor._root.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
@@ -261,7 +254,7 @@ internal sealed class InlineTextEditor
         // Пока открыт список гарнитур, Enter принадлежит ЕМУ: он подтверждает
         // выбор пункта. Иначе выбор шрифта с клавиатуры вместо этого применял
         // всю правку — с той гарнитурой, что была выделена в этот момент.
-        if (_family.IsDropDownOpen && e.Key is Key.Enter or Key.Escape)
+        if (_family.IsOpen && e.Key is Key.Enter or Key.Escape)
             return;
 
         switch (e.Key)
@@ -279,8 +272,7 @@ internal sealed class InlineTextEditor
 
     private void Apply()
     {
-        var picked = _family.SelectedItem as string ?? "";
-        var family = picked == _keepFamily ? "" : picked;
+        var family = _family.Family;
         var bold = _bold.IsChecked == true;
         var italic = _italic.IsChecked == true;
 

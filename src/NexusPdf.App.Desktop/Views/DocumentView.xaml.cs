@@ -386,7 +386,7 @@ public partial class DocumentView : UserControl
             target.RectPt.Width * scale, target.RectPt.Height * scale);
 
         var editor = InlineTextEditor.Open(
-            element, rect, target.Text, target.FontName, target.FontSizePt, target.ColorArgb, scale);
+            element, rect, target.Text, target.FontName, target.FontSizePt, target.ColorArgb, scale, FontContext());
         if (editor == null) return;
         _inlineEditor = editor;
 
@@ -1156,6 +1156,23 @@ public partial class DocumentView : UserControl
     /// доступность совпадают с панелями. Окно ищется вверх по дереву: вкладку
     /// можно открепить в отдельное окно, и там своя модель.
     /// </summary>
+    /// <summary>Недавние шрифты, шрифты документа и запоминание выбора для списка шрифтов.</summary>
+    private Text.FontPickerContext? FontContext()
+    {
+        var services = (Window.GetWindow(this) as MainWindow)?.ViewModel.Shared;
+        var document = _vm?.Document;
+        if (services == null || document == null)
+            return null;
+        return new Text.FontPickerContext(
+            services.Settings.RecentFonts.ToList(),
+            () => document.PrimaryHandle.GetDocumentFontNamesAsync(30, CancellationToken.None),
+            family =>
+            {
+                services.Settings.TouchRecentFont(family);
+                services.SaveSettings();
+            });
+    }
+
     private Services.Ux.UxCommandHub? Hub =>
         (Window.GetWindow(this) as MainWindow)?.ViewModel.Ux;
 

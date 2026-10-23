@@ -37,6 +37,9 @@ public sealed partial class MainViewModel : ObservableObject
     /// Единая точка исполнения команд: контекстные меню, палитра и горячие
     /// клавиши ходят сюда, а не дублируют вызовы у себя.
     /// </summary>
+    /// <summary>Службы приложения — для частей окна, которым нужны настройки.</summary>
+    public AppServices Shared => _services;
+
     public Services.Ux.UxCommandHub Ux => _ux ??= new Services.Ux.UxCommandHub(this, _services);
 
     // ----- Видимость панелей -----
