@@ -60,8 +60,16 @@ public sealed class FontCatalog : IFontProvider
             .Where(_byName.ContainsKey)
             .Select(name => _byName[name].Name)
             .Distinct(StringComparer.OrdinalIgnoreCase);
+        // Запасными берутся только шрифты, которые можно вписать в PDF:
+        // недостающая буква не должна уйти в файл шрифтом с запретом
+        // встраивания или без контуров TrueType.
+        var usable = families
+            .Where(f => f.Faces.Any(face => face.Embeddable && face.Supported))
+            .Select(f => f.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         FallbackFamilies = preferred
             .Concat(families.Select(f => f.Name))
+            .Where(usable.Contains)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
     }

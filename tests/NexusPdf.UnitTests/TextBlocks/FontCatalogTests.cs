@@ -22,6 +22,19 @@ public sealed class FontCatalogTests : IDisposable
     private void Put(string name, byte[] data) => File.WriteAllBytes(Path.Combine(_dir, name), data);
 
     [Fact]
+    public void Fallback_Families_Skip_Fonts_That_Cannot_Be_Embedded()
+    {
+        Put("locked.ttf", TinyFontBuilder.Build(new TinyFontSpec("Locked", FsType: 0x0002)));
+        Put("open.ttf", TinyFontBuilder.Build(new TinyFontSpec("Open")));
+
+        var catalog = FontCatalog.Scan([_dir]);
+
+        Assert.Contains(catalog.Families, f => f.Name == "Locked");     // в списке есть, с пометкой
+        Assert.DoesNotContain("Locked", catalog.FallbackFamilies);     // но запасным не берётся
+        Assert.Contains("Open", catalog.FallbackFamilies);
+    }
+
+    [Fact]
     public void Scans_Families_And_Faces()
     {
         var catalog = FontCatalog.Scan([TestFontPaths.Directory]);
