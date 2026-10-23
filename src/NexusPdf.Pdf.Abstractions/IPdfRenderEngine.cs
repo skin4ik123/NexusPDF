@@ -231,6 +231,12 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     /// </summary>
     Task<IReadOnlyList<TextBlocks.StoredTextBlock>> GetTextBlocksAsync(int pageIndex, int extraQuarterTurns, CancellationToken ct);
 
+    /// <summary>
+    /// Текстовые объекты, тонкие линии и границы таблиц страницы в отображаемых
+    /// пунктах — из них собираются абзацы для правки и клетки бланка.
+    /// </summary>
+    Task<TextBlocks.PageTextLayout> GetPageTextLayoutAsync(int pageIndex, int extraQuarterTurns, CancellationToken ct);
+
     /// <summary>Имена шрифтов текста первых maxPages страниц, без повторов, в порядке появления.</summary>
     Task<IReadOnlyList<string>> GetDocumentFontNamesAsync(int maxPages, CancellationToken ct);
 
