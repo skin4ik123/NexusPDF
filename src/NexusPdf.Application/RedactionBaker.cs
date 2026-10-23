@@ -1,4 +1,5 @@
 using NexusPdf.Pdf.Abstractions;
+using NexusPdf.Pdf.Abstractions.TextBlocks;
 
 namespace NexusPdf.Application;
 
@@ -65,14 +66,16 @@ public static class RedactionBaker
 
         // Промежуточный PDF: вымарываемые страницы БЕЗ добавочного поворота,
         // БЕЗ оверлеев, но с применёнными удалениями аннотаций — иначе
-        // помеченная к удалению аннотация «воскресла» бы в растре.
+        // помеченная к удалению аннотация «воскресла» бы в растре. Так же до
+        // растра уходят прежние объекты изменённых и удалённых текстовых
+        // блоков: удалённый блок иначе остался бы в файле картинкой.
         var prePath = TempFile("pre");
         var specs = new List<ImagePageSpec>(redactedIndices.Count);
         try
         {
             var prePages = redactedIndices
                 .Select(i => composition[i])
-                .Select(p => new ComposedPage(p.Source, p.SourcePageIndex, 0, null, p.RemovedAnnotations))
+                .Select(p => new ComposedPage(p.Source, p.SourcePageIndex, 0, BlockRemovals(p), p.RemovedAnnotations))
                 .ToList();
             await engine.ComposeAsync(prePages, prePath, ct).ConfigureAwait(false);
 
@@ -150,6 +153,16 @@ public static class RedactionBaker
         }
     }
 
+    /// <summary>Снятие прежних объектов текстовых блоков, которые на странице изменены или удалены.</summary>
+    private static IReadOnlyList<PageOverlay>? BlockRemovals(ComposedPage page)
+    {
+        var removals = page.Overlays?
+            .OfType<TextBlockReplacement>()
+            .Select(r => (PageOverlay)new TextBlockReplacement(r.BlockId, null))
+            .ToList();
+        return removals is { Count: > 0 } ? removals : null;
+    }
+
     /// <summary>Вымарки страницы в НЕповёрнутой рамке (растр рендерится без добавочного поворота).</summary>
     private static List<RedactionDraft> RedactionRects(ComposedPage page, PdfPageDescriptor size)
     {
@@ -196,6 +209,12 @@ public static class RedactionBaker
                 case RedactionDraft:
                 case RegionEraseDraft:
                     break; // применены растром
+                case TextBlockReplacement replacement:
+                    // Прежние объекты сняты до растра; новая версия ложится
+                    // поверх него текстом, как остальные добавленные блоки.
+                    if (replacement.NewBlock is { } newBlock)
+                        carried.Add(newBlock with { BlockId = replacement.BlockId, PlacedRotation = replacement.PlacedRotation });
+                    break;
                 case OcrTextLayerOverlay ocr:
                 {
                     // Слова и вымарки приводятся к одной (неповёрнутой) рамке.

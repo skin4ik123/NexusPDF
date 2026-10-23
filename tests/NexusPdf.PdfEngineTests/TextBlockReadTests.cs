@@ -256,6 +256,52 @@ public sealed class TextBlockReadTests : IAsyncLifetime
         Assert.Empty(await BlocksAsync(erased));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Erase_Elsewhere_On_The_Page_Keeps_A_Block_Edit(bool deleted)
+    {
+        // Стирание растеризует страницу. Растр обязан строиться уже без
+        // прежних объектов изменённого блока: иначе удалённый блок остался бы
+        // в файле картинкой, а изменённый — задвоился.
+        var block = Block(paragraphs: ["Old block words"]);
+        var saved = await ComposeAsync(Source(), block);
+        var result = Path.Combine(_dir, "erase-edit.pdf");
+        await using (var document = await OpenedDocument.OpenAsync(_pdfium, saved, null, CancellationToken.None))
+        {
+            var edited = deleted ? null : Block(paragraphs: ["Edited text"]) with { BlockId = block.BlockId };
+            document.Session.Apply(new AddOverlayOperation(0, new TextBlockReplacement(block.BlockId, edited)));
+            document.Session.Apply(new AddOverlayOperation(0, new RegionEraseDraft(300, 250, 40, 20, 0xFFFFFFFF)));
+            await new SaveService(_pdfium).SaveAsAsync(document, result, keepBackup: false, CancellationToken.None);
+        }
+
+        var text = await PageTextAsync(result);
+        Assert.DoesNotContain("Old block", text);
+        Assert.Equal(deleted ? 0 : 1, CountOf(text, "Edited text"));
+        // Растр без старого блока: там, где он был, — бумага.
+        await using var doc = await _pdfium.OpenAsync(result, null, CancellationToken.None);
+        var render = await doc.RenderPageAsync(0, 400, 300, 0, CancellationToken.None);
+        var inked = 0;
+        for (var y = 52; y < 72; y++)
+            for (var x = 42; x < 200; x++)
+            {
+                var at = (long)y * render.Stride + x * 4;
+                if (Math.Min(render.Bgra[at], Math.Min(render.Bgra[at + 1], render.Bgra[at + 2])) < 200) inked++;
+            }
+        if (deleted)
+            Assert.Equal(0, inked);
+        else
+            Assert.True(inked > 0, "новая версия блока видна на своём месте");
+    }
+
+    private static int CountOf(string text, string needle)
+    {
+        var count = 0;
+        for (var at = text.IndexOf(needle, StringComparison.Ordinal); at >= 0; at = text.IndexOf(needle, at + 1, StringComparison.Ordinal))
+            count++;
+        return count;
+    }
+
     [Fact]
     public async Task Reopened_Without_The_Font_Uses_Substitute()
     {
