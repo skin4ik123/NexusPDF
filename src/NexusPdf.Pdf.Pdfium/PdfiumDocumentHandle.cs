@@ -717,7 +717,7 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
 
                 // Шрифты закрываются ТОЛЬКО после записи файла: до этого
                 // момента текстовые объекты страниц на них ссылаются.
-                var fonts = new OverlayFontCache(NativeDoc);
+                var fonts = new OverlayFontCache(NativeDoc, _engine.Fonts);
                 try
                 {
                     foreach (var (pageIndex, overlays) in overlaysByPage)

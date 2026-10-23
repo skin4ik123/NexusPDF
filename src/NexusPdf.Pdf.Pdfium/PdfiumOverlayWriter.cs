@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using NexusPdf.Pdf.Abstractions;
+using NexusPdf.Pdf.Abstractions.TextBlocks;
 using PDFiumCore;
 
 namespace NexusPdf.Pdf.Pdfium;
@@ -12,7 +13,7 @@ namespace NexusPdf.Pdf.Pdfium;
 /// Текст пишется TTF-шрифтом из системы (Segoe UI) как CID — кириллица,
 /// латиница и смешанные строки встраиваются подмножеством шрифта.
 /// </summary>
-internal static class PdfiumOverlayWriter
+internal static partial class PdfiumOverlayWriter
 {
     private const int FpdfFontTrueType = 2;
 
@@ -94,6 +95,11 @@ internal static class PdfiumOverlayWriter
                     // Гарнитура и начертание — свойства самой надписи, поэтому
                     // шрифт берётся под неё, а не общий на всю страницу.
                     ApplyText(document, page, fonts.For(text.FontFamily, text.Bold, text.Italic), text,
+                        rotation, left, bottom, contentWidth, contentHeight);
+                    contentAdded = true;
+                    break;
+                case TextBlockOverlay block:
+                    ApplyTextBlock(document, page, fonts, block,
                         rotation, left, bottom, contentWidth, contentHeight);
                     contentAdded = true;
                     break;

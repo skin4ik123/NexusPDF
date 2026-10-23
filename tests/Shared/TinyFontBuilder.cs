@@ -36,8 +36,9 @@ public sealed record TinyFontSpec(
 
 /// <summary>
 /// Минимальный, но корректный TrueType: таблицы head, hhea, maxp, OS/2, hmtx,
-/// cmap (форматы 4 и 12), name, post, loca, glyf. Глифы пустые — для вёрстки
-/// важны ширины, а не контуры.
+/// cmap (форматы 4 и 12), name, post, loca, glyf. У каждого глифа, кроме
+/// .notdef, контур — простой квадрат: для вёрстки важны ширины, но PDFium не
+/// извлекает из файла буквы с пустыми глифами.
 /// </summary>
 public static class TinyFontBuilder
 {
@@ -54,11 +55,11 @@ public static class TinyFontBuilder
         {
             ["OS/2"] = Os2(spec, bold, codes),
             ["cmap"] = Cmap(codes),
-            ["glyf"] = new byte[4],
+            ["glyf"] = Glyf(glyphCount, spec, out var loca),
             ["head"] = Head(spec, bold),
             ["hhea"] = Hhea(spec, glyphCount),
             ["hmtx"] = Hmtx(codes.Select(c => advances[c]).Prepend(NotdefAdvance).ToArray()),
-            ["loca"] = new byte[(glyphCount + 1) * 2],
+            ["loca"] = loca,
             ["maxp"] = Maxp(glyphCount),
             ["name"] = Name(spec),
             ["post"] = Post(spec),
@@ -169,7 +170,43 @@ public static class TinyFontBuilder
         var b = new byte[32];
         BinaryPrimitives.WriteUInt32BigEndian(b, 0x00010000);
         BinaryPrimitives.WriteUInt16BigEndian(b.AsSpan(4), (ushort)glyphs);
+        BinaryPrimitives.WriteUInt16BigEndian(b.AsSpan(6), 4);    // maxPoints
+        BinaryPrimitives.WriteUInt16BigEndian(b.AsSpan(8), 1);    // maxContours
+        BinaryPrimitives.WriteUInt16BigEndian(b.AsSpan(14), 2);   // maxZones
         return b;
+    }
+
+    /// <summary>Квадрат от базовой линии до половины кегля у каждого глифа; .notdef пустой.</summary>
+    private static byte[] Glyf(int glyphs, TinyFontSpec spec, out byte[] loca)
+    {
+        var size = (short)(spec.UnitsPerEm / 2);
+        var box = new byte[36];
+        BinaryPrimitives.WriteInt16BigEndian(box, 1);                         // один контур
+        BinaryPrimitives.WriteInt16BigEndian(box.AsSpan(2), 0);
+        BinaryPrimitives.WriteInt16BigEndian(box.AsSpan(4), 0);
+        BinaryPrimitives.WriteInt16BigEndian(box.AsSpan(6), size);
+        BinaryPrimitives.WriteInt16BigEndian(box.AsSpan(8), size);
+        BinaryPrimitives.WriteUInt16BigEndian(box.AsSpan(10), 3);             // последняя точка контура
+        BinaryPrimitives.WriteUInt16BigEndian(box.AsSpan(12), 0);             // без инструкций
+        box.AsSpan(14, 4).Fill(0x01);                                         // все точки на контуре, координаты по 2 байта
+        // x: 0, +size, 0, -size; y: 0, 0, +size, 0 (относительные).
+        short[] dx = [0, size, 0, (short)-size], dy = [0, 0, size, 0];
+        for (var i = 0; i < 4; i++)
+        {
+            BinaryPrimitives.WriteInt16BigEndian(box.AsSpan(18 + 2 * i), dx[i]);
+            BinaryPrimitives.WriteInt16BigEndian(box.AsSpan(26 + 2 * i), dy[i]);
+        }
+
+        loca = new byte[(glyphs + 1) * 2];
+        var glyf = new byte[(glyphs - 1) * box.Length];
+        for (var g = 1; g < glyphs; g++)
+            box.CopyTo(glyf, (g - 1) * box.Length);
+        for (var g = 0; g <= glyphs; g++)
+        {
+            var offset = g == 0 ? 0 : (g - 1) * box.Length;   // .notdef: длина 0
+            BinaryPrimitives.WriteUInt16BigEndian(loca.AsSpan(2 * g), (ushort)(offset / 2));
+        }
+        return glyf;
     }
 
     private static byte[] Os2(TinyFontSpec spec, bool bold, int[] codes)

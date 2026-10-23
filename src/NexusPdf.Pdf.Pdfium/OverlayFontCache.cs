@@ -1,4 +1,5 @@
 using NexusPdf.Pdf.Abstractions;
+using NexusPdf.Pdf.Abstractions.TextBlocks;
 using PDFiumCore;
 
 namespace NexusPdf.Pdf.Pdfium;
@@ -12,12 +13,17 @@ namespace NexusPdf.Pdf.Pdfium;
 /// месте. Ключ — путь к файлу, поэтому «Arial обычный» с двух разных страниц
 /// встраивается один раз.
 /// </summary>
-internal sealed class OverlayFontCache(FpdfDocumentT document)
+internal sealed class OverlayFontCache(FpdfDocumentT document, IFontProvider provider)
 {
     private const int FpdfFontTrueType = 2;
 
     private readonly Dictionary<string, FpdfFontT?> _byPath =
         new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly Dictionary<FontFaceRef, FpdfFontT?> _byFace = new();
+
+    /// <summary>Каталог, по которому верстаются текстовые блоки.</summary>
+    public IFontProvider Provider => provider;
 
     /// <summary>Шрифт по умолчанию. null — если в системе нет ни одной гарнитуры каталога.</summary>
     public FpdfFontT? Default => Load(PdfFontCatalog.ResolveDefaultPath());
@@ -44,12 +50,45 @@ internal sealed class OverlayFontCache(FpdfDocumentT document)
     /// </summary>
     public void CloseAll()
     {
-        foreach (var font in _byPath.Values)
+        foreach (var font in _byPath.Values.Concat(_byFace.Values))
         {
             if (font != null)
                 fpdf_edit.FPDFFontClose(font);
         }
         _byPath.Clear();
+        _byFace.Clear();
+    }
+
+    /// <summary>
+    /// Шрифт одного начертания из каталога блоков. Встраивается только это
+    /// начертание (из коллекции .ttc вырезается своё), один раз на документ.
+    /// null — файл стал недоступен или PDFium его не принял.
+    /// </summary>
+    public unsafe FpdfFontT? ForFace(FontFaceRef face)
+    {
+        if (_byFace.TryGetValue(face, out var cached))
+            return cached;
+
+        FpdfFontT? font = null;
+        try
+        {
+            var bytes = provider.Load(face).ExtractFace();
+            fixed (byte* data = bytes)
+            {
+                var loaded = fpdf_edit.FPDFTextLoadFont(
+                    document, data, (uint)bytes.Length, FpdfFontTrueType, 1);
+                if (loaded != null && loaded.__Instance != IntPtr.Zero)
+                    font = loaded;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
+        {
+            // Шрифт пропал или испорчен после сканирования — вызывающий
+            // сообщит об этом, а не уронит сохранение молча.
+        }
+
+        _byFace[face] = font;
+        return font;
     }
 
     private unsafe FpdfFontT? Load(string? path)

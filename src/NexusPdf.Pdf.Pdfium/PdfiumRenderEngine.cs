@@ -1,6 +1,7 @@
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 using NexusPdf.Pdf.Abstractions;
+using NexusPdf.Pdf.Abstractions.TextBlocks;
 using PDFiumCore;
 
 namespace NexusPdf.Pdf.Pdfium;
@@ -23,9 +24,24 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
     /// показываются и печатаются: правка AcroForm без XFA-данных дала бы в
     /// Adobe Reader прежние значения.
     /// </param>
-    public PdfiumRenderEngine(IXfaPacketWriter? xfaWriter) => XfaWriter = xfaWriter;
+    public PdfiumRenderEngine(IXfaPacketWriter? xfaWriter) : this(xfaWriter, null) { }
+
+    /// <param name="fonts">
+    /// Шрифты текстовых блоков. null — шрифты системы; тесты подставляют свой
+    /// каталог, чтобы раскладка не зависела от машины.
+    /// </param>
+    public PdfiumRenderEngine(IXfaPacketWriter? xfaWriter, IFontProvider? fonts)
+    {
+        XfaWriter = xfaWriter;
+        _fonts = fonts;
+    }
+
+    private readonly IFontProvider? _fonts;
 
     internal IXfaPacketWriter? XfaWriter { get; }
+
+    /// <summary>Каталог шрифтов блоков; системный сканируется только при первом обращении.</summary>
+    internal IFontProvider Fonts => _fonts ?? FontCatalog.System;
 
     public string EngineName => "PDFium";
 
@@ -116,7 +132,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
     /// Путь запекания тот же, что при сохранении, и пометка на экране
     /// совпадает с будущим файлом.
     /// </summary>
-    private static RenderedPageImage RenderOverlayLayerCore(
+    private RenderedPageImage RenderOverlayLayerCore(
         PdfiumDocumentHandle source, int sourcePageIndex, int extraQuarterTurns,
         IReadOnlyList<PageOverlay> overlays, int pixelWidth, int pixelHeight)
     {
@@ -235,7 +251,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
         }, ct);
 
     /// <summary>Переносит одну страницу в новый документ и запекает в неё правки.</summary>
-    private static FpdfDocumentT BuildBakedPage(
+    private FpdfDocumentT BuildBakedPage(
         PdfiumDocumentHandle source, int sourcePageIndex, int extraQuarterTurns,
         IReadOnlyList<PageOverlay> overlays)
     {
@@ -281,7 +297,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
     /// на повёрнутой странице ложилась бы в чужую рамку. После запекания
     /// поворот возвращается — показ и выборка текста доворачивают страницу сами.
     /// </summary>
-    private static void ApplyOverlaysInDisplayedFrame(
+    private void ApplyOverlaysInDisplayedFrame(
         FpdfDocumentT document, FpdfPageT page, IReadOnlyList<PageOverlay> overlays, int extraQuarterTurns)
     {
         var extra = ((extraQuarterTurns % 4) + 4) % 4;
@@ -290,7 +306,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
             fpdf_edit.FPDFPageSetRotation(page, ((own + extra) % 4 + 4) % 4);
         try
         {
-            PdfiumOverlayWriter.ApplyOverlays(document, page, new OverlayFontCache(document), overlays, extra);
+            PdfiumOverlayWriter.ApplyOverlays(document, page, new OverlayFontCache(document, Fonts), overlays, extra);
         }
         finally
         {
@@ -304,7 +320,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
     /// запекаются правки, и рисуется уже он. На диск ничего не пишется, а
     /// картинка совпадает с будущим файлом, потому что путь запекания тот же.
     /// </summary>
-    private static RenderedPageImage RenderWithOverlaysCore(
+    private RenderedPageImage RenderWithOverlaysCore(
         PdfiumDocumentHandle source, int sourcePageIndex, int extraQuarterTurns,
         IReadOnlyList<PageOverlay> overlays, int pixelWidth, int pixelHeight)
     {
@@ -378,7 +394,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
         }
     }
 
-    private static void ComposeCore(IReadOnlyList<ComposedPage> pages, string targetPath)
+    private void ComposeCore(IReadOnlyList<ComposedPage> pages, string targetPath)
     {
         if (pages.Count == 0)
             throw new PdfEngineException("Нечего сохранять: список страниц пуст.");
@@ -451,7 +467,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
     /// Общая часть пересборки и сохранения на месте: оба пути обязаны давать
     /// одинаковую страницу.
     /// </summary>
-    private static void SaveWithPageEdits(
+    private void SaveWithPageEdits(
         FpdfDocumentT doc, IReadOnlyList<ComposedPage> pages, string targetPath, int saveFlags)
     {
         for (var k = 0; k < pages.Count; k++)
@@ -526,7 +542,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
         // отображаемой ориентации.
         // Один кэш на документ: гарнитура, использованная на пяти
         // страницах, обязана встроиться в файл один раз, а не пять.
-        var overlayFonts = new OverlayFontCache(doc);
+        var overlayFonts = new OverlayFontCache(doc, Fonts);
         try
         {
             for (var k = 0; k < pages.Count; k++)
@@ -582,7 +598,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
     /// трогается вовсе — копия одноразовая, и неудача записи не может
     /// испортить то, что пользователь видит и правит.
     /// </summary>
-    private static void SaveInPlaceCore(
+    private void SaveInPlaceCore(
         PdfiumDocumentHandle working, PdfiumDocumentHandle baseSource,
         IReadOnlyList<ComposedPage> pages, string targetPath, InPlaceSaveOptions options, CancellationToken ct)
     {
@@ -680,7 +696,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
         _thread.InvokeAsync(
             () => PdfiumScanEnhancer.MeasureSkewCore(sourcePath, password, pages, ct), ct);
 
-    private static void CreateImageDocumentCore(IReadOnlyList<ImagePageSpec> pages, string targetPath)
+    private void CreateImageDocumentCore(IReadOnlyList<ImagePageSpec> pages, string targetPath)
     {
         if (pages.Count == 0)
             throw new PdfEngineException("Нет изображений для сборки PDF.");
@@ -710,7 +726,7 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
                     // Здесь оверлей только растровый, шрифт не понадобится, но
                     // кэш всё равно передаётся: пустой он ничего не грузит.
                     PdfiumOverlayWriter.ApplyOverlays(
-                        newDoc, page, new OverlayFontCache(newDoc), new PageOverlay[] { overlay }, 0);
+                        newDoc, page, new OverlayFontCache(newDoc, Fonts), new PageOverlay[] { overlay }, 0);
                 }
                 finally
                 {
