@@ -12,7 +12,8 @@ namespace NexusPdf.App.Desktop.Views.Text;
 /// Ставит редактор блока на страницу: отдельным Popup (у слоя украшений нет
 /// своей области фокуса, клавиатура до него не доходит), повёрнутым вместе с
 /// блоком так, что видимый левый верхний угол рамки — точно на своём месте
-/// страницы при любом масштабе.
+/// страницы при любом масштабе. Пока идёт набор, рамку можно переносить,
+/// растягивать и поворачивать — место редактора пересчитывается на ходу.
 /// </summary>
 internal sealed class TextBlockHost
 {
@@ -55,6 +56,12 @@ internal sealed class TextBlockHost
             StaysOpen = true,
             Focusable = false,
             PopupAnimation = PopupAnimation.None,
+        };
+        Canvas.PagePointerPt = () =>
+        {
+            var p = Mouse.GetPosition(pageElement);
+            var zoom = _page.DisplayScale > 0 ? _page.DisplayScale : 1;
+            return new Point(p.X / zoom, p.Y / zoom);
         };
         edit.Model.Changed += OnModelChanged;
     }
@@ -103,26 +110,28 @@ internal sealed class TextBlockHost
         var (cos, sin) = (Math.Cos(angle), Math.Sin(angle));
         var boxW = Math.Abs(size.Width * cos) + Math.Abs(size.Height * sin);
         var boxH = Math.Abs(size.Width * sin) + Math.Abs(size.Height * cos);
-        // Куда в повёрнутом окне попадает левый верхний угол редактора.
-        var originX = -size.Width / 2 * cos + size.Height / 2 * sin + boxW / 2;
-        var originY = -size.Width / 2 * sin - size.Height / 2 * cos + boxH / 2;
-        // Где этот угол на странице: угол рамки после поворота вокруг её центра.
+        // Где на странице левый верхний угол рамки: угол после поворота вокруг её центра.
         var (cx, cy) = (block.XPt + block.WidthPt / 2, block.YPt + block.HeightPt / 2);
         var cornerX = (cx - block.WidthPt / 2 * cos + block.HeightPt / 2 * sin) * zoom;
         var cornerY = (cy - block.WidthPt / 2 * sin - block.HeightPt / 2 * cos) * zoom;
+        // Центр редактора от угла рамки — в осях блока (поля для ручек вокруг
+        // рамки неравные), затем повёрнутый. Окно — повёрнутый редактор вокруг
+        // этого центра.
+        var inset = TextBlockCanvas.Inset;
+        var (ux, uy) = (size.Width / 2 - inset.Left, size.Height / 2 - inset.Top);
+        var centreX = cornerX + ux * cos - uy * sin;
+        var centreY = cornerY + ux * sin + uy * cos;
 
-        _popup.HorizontalOffset = cornerX - originX;
-        _popup.VerticalOffset = cornerY - originY;
+        _popup.HorizontalOffset = centreX - boxW / 2;
+        _popup.VerticalOffset = centreY - boxH / 2;
         // Popup не следит за прокруткой цели — подталкиваем пересчёт места.
         _popup.HorizontalOffset += 0.01;
         _popup.HorizontalOffset -= 0.01;
 
-        // Панель — над видимой рамкой блока (над верхним из её углов).
+        // Панель — над редактором вместе с его ручкой поворота.
         _toolbar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var top = cy * zoom - boxH / 2;
-        var left = cx * zoom - boxW / 2;
-        _toolbarPopup.HorizontalOffset = left;
-        _toolbarPopup.VerticalOffset = top - _toolbar.DesiredSize.Height - 8;
+        _toolbarPopup.HorizontalOffset = centreX - boxW / 2 + inset.Left;
+        _toolbarPopup.VerticalOffset = centreY - boxH / 2 - _toolbar.DesiredSize.Height - 4;
         _toolbarPopup.HorizontalOffset += 0.01;
         _toolbarPopup.HorizontalOffset -= 0.01;
     }

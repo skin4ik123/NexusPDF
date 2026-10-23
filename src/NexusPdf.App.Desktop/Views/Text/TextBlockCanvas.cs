@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using NexusPdf.Pdf.Abstractions;
 using NexusPdf.Pdf.Abstractions.TextBlocks;
 
 namespace NexusPdf.App.Desktop.Views.Text;
@@ -17,8 +18,9 @@ namespace NexusPdf.App.Desktop.Views.Text;
 /// отмена, буфер) — в <see cref="TextBlockEditorModel"/>; здесь только экран,
 /// клавиши, мышь и IME.
 ///
-/// Координаты элемента — рамка блока без поворота (пункты × масштаб);
-/// поворот блока задаёт тот, кто ставит редактор на страницу.
+/// Координаты элемента — рамка блока без поворота (пункты × масштаб),
+/// сдвинутая на <see cref="Inset"/>: вокруг рамки место для ручек размера и
+/// поворота. Поворот блока задаёт тот, кто ставит редактор на страницу.
 /// </summary>
 internal sealed class TextBlockCanvas : FrameworkElement
 {
@@ -28,12 +30,39 @@ internal sealed class TextBlockCanvas : FrameworkElement
     private static readonly Pen FramePen = MakeFramePen();
     private static readonly Pen FallbackPen = MakeFallbackPen();
 
+    /// <summary>Полоса края рамки, за которую блок переносится, — в точках экрана.</summary>
+    public const double BorderDip = 6;
+
+    /// <summary>
+    /// Поля вокруг рамки: в них ручки и ручка поворота над верхним краем.
+    /// Мышь ловится только там, где что-то нарисовано, поэтому пустые поля
+    /// щелчков у страницы не отнимают.
+    /// </summary>
+    public static readonly Thickness Inset = new(
+        NexusPdf.Ux.ObjectHandles.HandleToleranceDip + 1,
+        NexusPdf.Ux.ObjectHandles.RotateHandleOffsetDip + NexusPdf.Ux.ObjectHandles.HandleToleranceDip + 1,
+        NexusPdf.Ux.ObjectHandles.HandleToleranceDip + 1,
+        NexusPdf.Ux.ObjectHandles.HandleToleranceDip + 1);
+
+    // Почти прозрачная заливка: у окна с прозрачностью щелчок по совсем
+    // прозрачной точке уходит в окно под ним, а между строк и на краю рамки
+    // мышь должна доставаться редактору.
+    private static readonly Brush HitBrush = Frozen(new SolidColorBrush(Color.FromArgb(0x01, 0xFF, 0xFF, 0xFF)));
+    private static readonly Pen HitPen = FrozenPen(new Pen(HitBrush, BorderDip));
+    private static readonly Brush HandleBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x25, 0x63, 0xEB)));
+    private static readonly Pen HandlePen = FrozenPen(new Pen(Brushes.White, 1));
+    private static readonly Pen RotateStemPen = FrozenPen(new Pen(HandleBrush, 1));
+
     private readonly TextBlockEditorModel _model;
     private readonly DispatcherTimer? _blink;
     private double _zoom;
     private bool _caretVisible = true;
     private bool _composing;
     private char? _pendingHighSurrogate;
+    private FrameDrag? _drag;
+
+    /// <summary>Перетаскивание рамки: что тянут, блок и курсор (пункты страницы) в начале.</summary>
+    private sealed record FrameDrag(FrameZone Zone, FrameHandle Handle, TextBlockOverlay Start, Point StartPointer);
 
     public TextBlockCanvas(TextBlockEditorModel model, double zoom)
     {
@@ -61,6 +90,13 @@ internal sealed class TextBlockCanvas : FrameworkElement
     }
 
     public TextBlockEditorModel Model => _model;
+
+    /// <summary>
+    /// Курсор в отображаемых пунктах страницы. Задаёт тот, кто ставит
+    /// редактор: во время перетаскивания сам редактор едет вместе с рамкой,
+    /// и считать сдвиг от него нельзя. Без него рамка не перетаскивается.
+    /// </summary>
+    public Func<Point>? PagePointerPt { get; set; }
 
     /// <summary>DIP на пункт страницы.</summary>
     public double Zoom
@@ -102,17 +138,25 @@ internal sealed class TextBlockCanvas : FrameworkElement
     // ----- Отрисовка -----
 
     protected override Size MeasureOverride(Size availableSize) =>
-        new(Math.Max(1, Math.Max(_model.Layout.WidthPt, _cover.Width) * _zoom),
-            Math.Max(1, Math.Max(_model.Layout.ContentHeightPt, _cover.Height) * _zoom));
+        new(Math.Max(1, Math.Max(_model.Layout.WidthPt, _cover.Width) * _zoom) + Inset.Left + Inset.Right,
+            Math.Max(1, Math.Max(_model.Layout.ContentHeightPt, _cover.Height) * _zoom) + Inset.Top + Inset.Bottom);
 
     protected override void OnRender(DrawingContext dc)
+    {
+        dc.PushTransform(new TranslateTransform(Inset.Left, Inset.Top));
+        RenderBlock(dc);
+        dc.Pop();
+    }
+
+    private void RenderBlock(DrawingContext dc)
     {
         var layout = _model.Layout;
         if (_cover.Width > 0 && _cover.Height > 0)
             dc.DrawRectangle(Brushes.White, null, new Rect(0, 0, _cover.Width * _zoom, _cover.Height * _zoom));
         var frame = new Rect(0, 0, layout.WidthPt * _zoom, layout.HeightPt * _zoom);
-        // Прозрачная заливка — чтобы мышь попадала и между строк.
-        dc.DrawRectangle(Brushes.Transparent, FramePen, frame);
+        dc.DrawRectangle(HitBrush, HitPen, frame);
+        dc.DrawRectangle(null, FramePen, frame);
+        DrawHandles(dc, frame);
 
         var selection = SelectionBrush();
         foreach (var box in _model.SelectionRects())
@@ -149,6 +193,23 @@ internal sealed class TextBlockCanvas : FrameworkElement
         else if (IsKeyboardFocused && _caretVisible)
             dc.DrawRectangle(GlyphCache.Brush(_model.StyleAtCaret.ColorArgb | 0xFF000000), null,
                 new Rect(caretX * _zoom, caretTop * _zoom, Math.Max(1, 1 / pixelsPerDip), caretHeight * _zoom));
+    }
+
+    /// <summary>Ручки размера и ручка поворота — те же, что у выделенного объекта.</summary>
+    private static void DrawHandles(DrawingContext dc, Rect frame)
+    {
+        var box = new OverlayBox(frame.X, frame.Y, frame.Width, frame.Height);
+        var side = NexusPdf.Ux.ObjectHandles.HandleSizeDip;
+        var top = BlockFrameDrag.CenterOf(box, FrameHandle.Top);
+        var rotate = new Point(top.X, top.Y - NexusPdf.Ux.ObjectHandles.RotateHandleOffsetDip);
+        dc.DrawLine(RotateStemPen, new Point(top.X, top.Y), rotate);
+        dc.DrawEllipse(HandleBrush, HandlePen, rotate, side / 2, side / 2);
+        foreach (var handle in Enum.GetValues<FrameHandle>())
+        {
+            if (handle == FrameHandle.None) continue;
+            var (x, y) = BlockFrameDrag.CenterOf(box, handle);
+            dc.DrawRectangle(HandleBrush, HandlePen, new Rect(x - side / 2, y - side / 2, side, side));
+        }
     }
 
     /// <summary>
@@ -350,7 +411,9 @@ internal sealed class TextBlockCanvas : FrameworkElement
             case Key.Tab when !ctrl: Report(_model.Insert("\t")); break;
             case Key.Insert when shift: Paste(); break;
             case Key.Insert when ctrl: Copy(); break;
-            case Key.Escape: CommitRequested?.Invoke(this, EventArgs.Empty); break;
+            case Key.Escape:
+                if (!CancelFrameDrag()) CommitRequested?.Invoke(this, EventArgs.Empty);
+                break;
             case Key.A when ctrl: _model.SelectAll(); break;
             case Key.C when ctrl: Copy(); break;
             case Key.X when ctrl: Cut(); break;
@@ -425,6 +488,16 @@ internal sealed class TextBlockCanvas : FrameworkElement
         Focus();
         Keyboard.Focus(this);
         var (x, y) = PointOf(e);
+        var (zone, handle) = ZoneAt(x, y);
+        if (zone is FrameZone.Border or FrameZone.Handle or FrameZone.Rotate && PagePointerPt is { } pointer)
+        {
+            // Рамку тянут, не прерывая набор: блок остаётся в редакторе, и
+            // вся правка — по-прежнему один шаг отмены.
+            _drag = new FrameDrag(zone, handle, _model.Block, pointer());
+            CaptureMouse();
+            e.Handled = true;
+            return;
+        }
         switch (e.ClickCount)
         {
             case 2: _model.SelectWordAt(x, y); break;
@@ -440,8 +513,19 @@ internal sealed class TextBlockCanvas : FrameworkElement
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        if (!IsMouseCaptured || e.LeftButton != MouseButtonState.Pressed) return;
         var (x, y) = PointOf(e);
+        if (!IsMouseCaptured || e.LeftButton != MouseButtonState.Pressed)
+        {
+            if (!IsMouseCaptured) Cursor = CursorFor(ZoneAt(x, y));
+            return;
+        }
+        if (_drag is { } drag && PagePointerPt is { } pointer)
+        {
+            var now = pointer();
+            ApplyFrame(BlockFrameDrag.Apply(drag.Start, drag.Zone, drag.Handle,
+                now.X - drag.StartPointer.X, now.Y - drag.StartPointer.Y, now.X, now.Y));
+            return;
+        }
         _model.PlaceCaret(x, y, extend: true);
     }
 
@@ -451,10 +535,46 @@ internal sealed class TextBlockCanvas : FrameworkElement
         if (IsMouseCaptured) ReleaseMouseCapture();
     }
 
+    protected override void OnLostMouseCapture(MouseEventArgs e)
+    {
+        base.OnLostMouseCapture(e);
+        _drag = null;
+    }
+
+    /// <summary>Esc во время перетаскивания возвращает рамку, а не заканчивает ввод.</summary>
+    private bool CancelFrameDrag()
+    {
+        if (_drag is not { } drag) return false;
+        _drag = null;
+        ApplyFrame(drag.Start);
+        if (IsMouseCaptured) ReleaseMouseCapture();
+        return true;
+    }
+
+    private void ApplyFrame(TextBlockOverlay block) =>
+        _model.SetFrame(block.XPt, block.YPt, block.WidthPt, block.HeightPt, block.WidthMode,
+            block.AutoHeight, block.ShrinkToFit, block.RotationDegrees);
+
+    private (FrameZone Zone, FrameHandle Handle) ZoneAt(double xPt, double yPt) =>
+        BlockFrameDrag.HitTest(new OverlayBox(0, 0, _model.Layout.WidthPt, _model.Layout.HeightPt), xPt, yPt,
+            BorderDip / _zoom, NexusPdf.Ux.ObjectHandles.HandleToleranceDip / _zoom, NexusPdf.Ux.ObjectHandles.RotateHandleOffsetDip / _zoom);
+
+    private static Cursor CursorFor((FrameZone Zone, FrameHandle Handle) hit) => hit switch
+    {
+        (FrameZone.Border, _) => Cursors.SizeAll,
+        (FrameZone.Rotate, _) => Cursors.Hand,
+        (FrameZone.Handle, FrameHandle.TopLeft or FrameHandle.BottomRight) => Cursors.SizeNWSE,
+        (FrameZone.Handle, FrameHandle.TopRight or FrameHandle.BottomLeft) => Cursors.SizeNESW,
+        (FrameZone.Handle, FrameHandle.Top or FrameHandle.Bottom) => Cursors.SizeNS,
+        (FrameZone.Handle, _) => Cursors.SizeWE,
+        _ => Cursors.IBeam,
+    };
+
+    /// <summary>Точка мыши в пунктах блока (от левого верхнего угла рамки, без поворота).</summary>
     private (double X, double Y) PointOf(MouseEventArgs e)
     {
         var p = e.GetPosition(this);
-        return (p.X / _zoom, p.Y / _zoom);
+        return ((p.X - Inset.Left) / _zoom, (p.Y - Inset.Top) / _zoom);
     }
 
     // ----- IME -----
@@ -465,7 +585,8 @@ internal sealed class TextBlockCanvas : FrameworkElement
         if (!OperatingSystem.IsWindows() || !IsKeyboardFocused) return;
         if (PresentationSource.FromVisual(this) is not HwndSource source) return;
         var (x, top, height) = _model.CaretRect();
-        var point = TransformToAncestor(source.RootVisual).Transform(new Point(x * _zoom, (top + height) * _zoom));
+        var point = TransformToAncestor(source.RootVisual).Transform(
+            new Point(x * _zoom + Inset.Left, (top + height) * _zoom + Inset.Top));
         var device = source.CompositionTarget.TransformToDevice.Transform(point);
         var context = ImmGetContext(source.Handle);
         if (context == IntPtr.Zero) return;
