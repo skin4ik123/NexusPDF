@@ -18,6 +18,7 @@ internal static class PdfObjectTree
 {
     // Коды из fpdf_edit.h: 0 unknown, 1 text, 2 path, 3 image, 4 shading, 5 form.
     private const int PageObjectText = 1;
+    private const int PageObjectPath = 2;
     private const int PageObjectForm = 5;
 
     /// <summary>Матрица преобразования из системы координат объекта в систему страницы.</summary>
@@ -46,13 +47,19 @@ internal static class PdfObjectTree
     /// Порядок важен: при попадании нескольких объектов в одну точку выбирать
     /// надо нарисованный последним — он сверху.
     /// </summary>
-    public static List<Node> TextObjects(FpdfPageT page)
+    public static List<Node> TextObjects(FpdfPageT page) => Collect(page, type => type == PageObjectText);
+
+    /// <summary>Текстовые объекты и пути (линии, прямоугольники) в порядке рисования, вложенные включительно.</summary>
+    public static List<Node> TextAndPathObjects(FpdfPageT page) =>
+        Collect(page, type => type is PageObjectText or PageObjectPath);
+
+    private static List<Node> Collect(FpdfPageT page, Func<int, bool> include)
     {
         var found = new List<Node>();
         Descend(
             index => fpdf_edit.FPDFPageGetObject(page, index),
             fpdf_edit.FPDFPageCountObjects(page),
-            Array.Empty<int>(), Transform.Identity, found, depth: 0);
+            Array.Empty<int>(), Transform.Identity, found, include, depth: 0);
         return found;
     }
 
@@ -115,7 +122,7 @@ internal static class PdfObjectTree
 
     private static void Descend(
         Func<int, FpdfPageobjectT?> getter, int count,
-        int[] prefix, Transform toPage, List<Node> found, int depth)
+        int[] prefix, Transform toPage, List<Node> found, Func<int, bool> include, int depth)
     {
         // Ограничение глубины — защита от документа, где форма ссылается сама
         // на себя: такой файл увёл бы обход в бесконечность.
@@ -133,7 +140,7 @@ internal static class PdfObjectTree
             path[prefix.Length] = i;
 
             var type = fpdf_edit.FPDFPageObjGetType(obj);
-            if (type == PageObjectText)
+            if (include(type))
             {
                 found.Add(new Node(obj, path, toPage));
                 continue;
@@ -151,7 +158,7 @@ internal static class PdfObjectTree
 
             var child = obj;
             Descend(index => fpdf_edit.FPDFFormObjGetObject(child, (ulong)index),
-                fpdf_edit.FPDFFormObjCountObjects(child), path, inner, found, depth + 1);
+                fpdf_edit.FPDFFormObjCountObjects(child), path, inner, found, include, depth + 1);
         }
     }
 }
