@@ -27,6 +27,13 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         Document = document;
         Cache = cache;
         _dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+        // Любая правка документа (отмена с панели, удаление страницы...) сначала
+        // фиксирует набранное в блоке: под незавершённым вводом документ
+        // меняться не должен.
+        Document.Session.Changing += (_, _) =>
+        {
+            if (_dispatcher.CheckAccess()) CommitTextBlock();
+        };
         // Session.Changed может прийти с фонового потока (например, после
         // переоткрытия при сохранении) — перестройка привязанных коллекций
         // обязана выполняться на потоке диспетчера.
@@ -1770,7 +1777,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         if (selection.StoredId is { } id)
             TextBlockSessionService.Commit(Document.Session, page.LogicalIndex, null, id, null);
         else
-            Document.Session.Apply(new RemoveOverlayAtOperation(page.LogicalIndex, index));
+            TextBlockSessionService.Delete(Document.Session, page.LogicalIndex, index);
         StatusText = Loc.Get("UxObjectDeleted");
         return true;
     }
