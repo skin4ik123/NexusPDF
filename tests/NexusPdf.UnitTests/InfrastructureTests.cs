@@ -29,6 +29,36 @@ public sealed class InfrastructureTests : IDisposable
     }
 
     [Fact]
+    public void Text_Settings_Have_Defaults_Roundtrip_And_Survive_Nulls()
+    {
+        var defaults = new AppSettings().DefaultTextStyle;
+        Assert.Equal(("Segoe UI", 11.0, false, false, 0xFF000000u, "Left", 1.15),
+            (defaults.Family, defaults.SizePt, defaults.Bold, defaults.Italic, defaults.ColorArgb, defaults.Align, defaults.LineSpacing));
+
+        var path = Path.Combine(_dir, "settings.json");
+        var store = new JsonSettingsStore(path);
+        var settings = new AppSettings();
+        settings.DefaultTextStyle.Family = "Arial";
+        settings.DefaultTextStyle.SizePt = 14;
+        for (var i = 0; i < 10; i++)
+            settings.TouchRecentFont($"Font {i}");
+        settings.TouchRecentFont("font 3");
+        store.Save(settings);
+
+        var loaded = store.Load();
+        Assert.Equal(("Arial", 14.0), (loaded.DefaultTextStyle.Family, loaded.DefaultTextStyle.SizePt));
+        Assert.Equal(AppSettings.MaxRecentFonts, loaded.RecentFonts.Count);
+        Assert.Equal("font 3", loaded.RecentFonts[0]);
+        Assert.Single(loaded.RecentFonts, f => f.Equals("Font 3", StringComparison.OrdinalIgnoreCase));
+
+        // Файл старой версии или испорченный вручную: пустые значения — умолчания.
+        File.WriteAllText(path, "{ \"RecentFonts\": null, \"DefaultTextStyle\": null }");
+        var repaired = store.Load();
+        Assert.Empty(repaired.RecentFonts);
+        Assert.Equal("Segoe UI", repaired.DefaultTextStyle.Family);
+    }
+
+    [Fact]
     public void Settings_Corrupted_File_Falls_Back_To_Defaults()
     {
         var path = Path.Combine(_dir, "settings.json");

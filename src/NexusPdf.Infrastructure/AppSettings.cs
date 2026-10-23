@@ -103,7 +103,36 @@ public sealed class AppSettings
     /// <summary>Ширина карточки страницы в организаторе (90–420).</summary>
     public double OrganizeThumbWidth { get; set; } = 150;
 
+    /// <summary>
+    /// Недавно выбранные гарнитуры — первыми в списке шрифтов. null из файла
+    /// старой версии превращается в пустой список.
+    /// </summary>
+    public List<string> RecentFonts
+    {
+        get => _recentFonts;
+        set => _recentFonts = value ?? new();
+    }
+    private List<string> _recentFonts = new();
+
+    /// <summary>Оформление нового текстового блока: последнее выбранное.</summary>
+    public TextStyleSettings DefaultTextStyle
+    {
+        get => _defaultTextStyle;
+        set => _defaultTextStyle = value ?? new();
+    }
+    private TextStyleSettings _defaultTextStyle = new();
+
     public const int MaxRecentFiles = 15;
+    public const int MaxRecentFonts = 8;
+
+    public void TouchRecentFont(string family)
+    {
+        if (string.IsNullOrWhiteSpace(family)) return;
+        RecentFonts.RemoveAll(f => string.Equals(f, family, StringComparison.OrdinalIgnoreCase));
+        RecentFonts.Insert(0, family);
+        if (RecentFonts.Count > MaxRecentFonts)
+            RecentFonts.RemoveRange(MaxRecentFonts, RecentFonts.Count - MaxRecentFonts);
+    }
 
     public void TouchRecent(string path)
     {
@@ -112,6 +141,18 @@ public sealed class AppSettings
         if (RecentFiles.Count > MaxRecentFiles)
             RecentFiles.RemoveRange(MaxRecentFiles, RecentFiles.Count - MaxRecentFiles);
     }
+}
+
+/// <summary>Оформление текста по умолчанию (новый блок начинается с него).</summary>
+public sealed class TextStyleSettings
+{
+    public string Family { get; set; } = "Segoe UI";
+    public double SizePt { get; set; } = 11;
+    public bool Bold { get; set; }
+    public bool Italic { get; set; }
+    public uint ColorArgb { get; set; } = 0xFF000000;
+    public string Align { get; set; } = "Left";
+    public double LineSpacing { get; set; } = 1.15;
 }
 
 public sealed class JsonSettingsStore
