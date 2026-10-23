@@ -102,7 +102,7 @@ internal sealed class TextBlockCanvas : FrameworkElement
 
     protected override Size MeasureOverride(Size availableSize) =>
         new(Math.Max(1, Math.Max(_model.Layout.WidthPt, _cover.Width) * _zoom),
-            Math.Max(1, Math.Max(_model.Layout.HeightPt, _cover.Height) * _zoom));
+            Math.Max(1, Math.Max(_model.Layout.ContentHeightPt, _cover.Height) * _zoom));
 
     protected override void OnRender(DrawingContext dc)
     {
@@ -139,12 +139,43 @@ internal sealed class TextBlockCanvas : FrameworkElement
                 new Rect(line.XPt * _zoom, line.YPt * _zoom, line.WidthPt * _zoom, line.HeightPt * _zoom));
         }
 
+        if (layout.Overflows)
+            DrawOverflowMark(dc, frame);
+
         var (caretX, caretTop, caretHeight) = _model.CaretRect();
         if (_model.Composition.Length > 0)
             DrawComposition(dc, caretX, caretTop, caretHeight, pixelsPerDip);
         else if (IsKeyboardFocused && _caretVisible)
             dc.DrawRectangle(GlyphCache.Brush(_model.StyleAtCaret.ColorArgb | 0xFF000000), null,
                 new Rect(caretX * _zoom, caretTop * _zoom, Math.Max(1, 1 / pixelsPerDip), caretHeight * _zoom));
+    }
+
+    /// <summary>
+    /// Знак переполнения у правого нижнего угла рамки: текст не помещается в
+    /// заданную высоту (строки ниже рамки видны, но в файле выйдут за неё).
+    /// </summary>
+    private static void DrawOverflowMark(DrawingContext dc, Rect frame)
+    {
+        const double side = 11;
+        var box = new Rect(frame.Right - side, frame.Bottom - side / 2, side, side);
+        dc.DrawRectangle(OverflowBrush, null, box);
+        dc.DrawLine(OverflowPen, new Point(box.Left + 2.5, box.Top + side / 2), new Point(box.Right - 2.5, box.Top + side / 2));
+        dc.DrawLine(OverflowPen, new Point(box.Left + side / 2, box.Top + 2.5), new Point(box.Left + side / 2, box.Bottom - 2.5));
+    }
+
+    private static readonly Brush OverflowBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xDC, 0x26, 0x26)));
+    private static readonly Pen OverflowPen = FrozenPen(new Pen(Brushes.White, 1.5));
+
+    private static Brush Frozen(Brush brush)
+    {
+        brush.Freeze();
+        return brush;
+    }
+
+    private static Pen FrozenPen(Pen pen)
+    {
+        pen.Freeze();
+        return pen;
     }
 
     /// <summary>Набираемое через IME — ещё не текст блока, поэтому рисуется поверх с подчёркиванием.</summary>
@@ -282,7 +313,8 @@ internal sealed class TextBlockCanvas : FrameworkElement
         base.OnKeyDown(e);
         if (e.Handled) return;
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
-        var ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+        var ctrl = NexusPdf.Ux.TextBlockStyleCommands.IsShortcut(
+            (Keyboard.Modifiers & ModifierKeys.Control) != 0, (Keyboard.Modifiers & ModifierKeys.Alt) != 0);
         var shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
         e.Handled = true;
         switch (key)
