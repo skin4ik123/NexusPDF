@@ -170,7 +170,6 @@ public static class TextBlockCodec
         var byParagraph = new List<TextPiece>[paragraphs.Count];
         foreach (var piece in pieces)
         {
-            if (piece.Text.Length == 0) continue;
             if (piece.Paragraph < 0 || piece.Paragraph >= paragraphs.Count || piece.Start < 0 ||
                 piece.Text.Contains(TextBlockText.LineBreak))
                 return null;
@@ -190,11 +189,23 @@ public static class TextBlockCodec
                     nextBreak++;
                 }
             }
-            foreach (var piece in (IEnumerable<TextPiece>?)byParagraph[i]?.OrderBy(p => p.Start) ?? [])
+            var ordered = byParagraph[i]?.OrderBy(p => p.Start).ToList() ?? [];
+            for (var k = 0; k < ordered.Count; k++)
             {
                 AppendBreaks();
+                var piece = ordered[k];
                 if (piece.Start != builder.Length) return null; // дыра или перекрытие
-                builder.Append(piece.Text);
+                if (piece.Text.Length > 0)
+                {
+                    builder.Append(piece.Text);
+                    continue;
+                }
+                // Пустой кусок — объект из одних пробелов (их PDFium в текст не
+                // выдаёт): пробелы до следующего куска, перевода строки или конца.
+                var end = k + 1 < ordered.Count ? ordered[k + 1].Start : length;
+                if (nextBreak < breaks.Count) end = Math.Min(end, breaks[nextBreak]);
+                if (end <= builder.Length || end > length) return null;
+                builder.Append(' ', end - builder.Length);
             }
             AppendBreaks();
             if (builder.Length != length || nextBreak != breaks.Count) return null;

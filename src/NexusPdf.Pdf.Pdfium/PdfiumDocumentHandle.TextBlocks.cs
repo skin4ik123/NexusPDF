@@ -50,12 +50,13 @@ internal sealed partial class PdfiumDocumentHandle
                     }
 
                     var blocks = new List<StoredTextBlock>();
+                    var texts = groups.Count > 0 ? TextByObject(textPage, ct) : [];
                     foreach (var (id, members) in groups)
                     {
                         ct.ThrowIfCancellationRequested();
                         // Метка с чужим Id — не наша запись: обычный текст.
                         if (Guid.TryParseExact(id, "N", out var guid))
-                            blocks.Add(ReadStoredBlock(page, textPage, reader, pageIndex, extraQuarterTurns, guid, members));
+                            blocks.Add(ReadStoredBlock(page, texts, reader, pageIndex, extraQuarterTurns, guid, members));
                     }
                     // Метки страницы дочитаны не до конца: ни один блок нельзя
                     // считать целым — у него могли остаться непрочитанные части.
@@ -78,13 +79,13 @@ internal sealed partial class PdfiumDocumentHandle
     /// версия, ссылки на места текста, описание и отпечаток объектов.
     /// </summary>
     private StoredTextBlock ReadStoredBlock(
-        FpdfPageT page, FpdfTextpageT? textPage, PdfiumTextBlockMarks.Reader reader, int pageIndex, int extraQuarterTurns,
+        FpdfPageT page, IReadOnlyDictionary<IntPtr, string> texts, PdfiumTextBlockMarks.Reader reader, int pageIndex, int extraQuarterTurns,
         Guid id, List<(FpdfPageobjectT Obj, TextBlockMark Mark)> members)
     {
         var intact = true;
         string? data = null, hash = null;
         var pieces = new List<TextPiece>();
-        var fingerprints = new List<(string, double, uint, double, double)>();
+        var fingerprints = new List<TextBlockHash.Piece>();
         float left = float.MaxValue, bottom = float.MaxValue, right = float.MinValue, top = float.MinValue;
 
         foreach (var (obj, mark) in members)
@@ -107,13 +108,15 @@ internal sealed partial class PdfiumDocumentHandle
             var type = fpdf_edit.FPDFPageObjGetType(obj);
             if (mark.Ref is { } reference && reference.StartsWith("d:", StringComparison.Ordinal) && type == PageObjectPath)
             {
-                fingerprints.Add(PdfiumOverlayWriter.Fingerprint(obj, ""));
+                fingerprints.Add(PdfiumOverlayWriter.Fingerprint(obj, reference, isText: false));
             }
             else if (type == PageObjectText && TryParsePieceRef(mark.Ref, out var paragraph, out var start))
             {
-                var text = ReadTextObjectText(obj, textPage);
+                // Объект из одних пробелов PDFium в текст страницы не выдаёт:
+                // пустой кусок — место пробелов, их длину знает описание блока.
+                var text = texts.GetValueOrDefault(obj.__Instance, "");
                 pieces.Add(new TextPiece(paragraph, start, text));
-                fingerprints.Add(PdfiumOverlayWriter.Fingerprint(obj, text));
+                fingerprints.Add(PdfiumOverlayWriter.Fingerprint(obj, mark.Ref!, isText: true));
             }
             else
             {
@@ -133,6 +136,38 @@ internal sealed partial class PdfiumDocumentHandle
             bounds = new OverlayBox(x, y, w, h);
         }
         return new StoredTextBlock(id, block, bounds, block != null);
+    }
+
+    /// <summary>
+    /// Текст каждого объекта страницы — ровно записанные в нём буквы. Готовый
+    /// текст объекта у PDFium содержит и «сгенерированные» пробелы — там, где
+    /// до следующего объекта есть зазор («one» читался бы как «one »), — и по
+    /// нему кусок блока не совпал бы с описанием.
+    /// </summary>
+    private static Dictionary<IntPtr, string> TextByObject(FpdfTextpageT? textPage, CancellationToken ct)
+    {
+        var builders = new Dictionary<IntPtr, System.Text.StringBuilder>();
+        if (textPage == null || textPage.__Instance == IntPtr.Zero)
+            return [];
+        var count = fpdf_text.FPDFTextCountChars(textPage);
+        for (var i = 0; i < count; i++)
+        {
+            if (i % 4096 == 0)
+                ct.ThrowIfCancellationRequested();
+            if (fpdf_text.FPDFTextIsGenerated(textPage, i) != 0)
+                continue;
+            var obj = fpdf_text.FPDFTextGetTextObject(textPage, i);
+            if (obj == null || obj.__Instance == IntPtr.Zero)
+                continue;
+            if (!builders.TryGetValue(obj.__Instance, out var builder))
+                builders[obj.__Instance] = builder = new System.Text.StringBuilder();
+            var code = fpdf_text.FPDFTextGetUnicode(textPage, i);
+            if (code > 0xFFFF && code <= 0x10FFFF)
+                builder.Append(char.ConvertFromUtf32((int)code));
+            else if (code is > 0 and <= 0xFFFF)
+                builder.Append((char)code);
+        }
+        return builders.ToDictionary(pair => pair.Key, pair => pair.Value.ToString());
     }
 
     /// <summary>"абзац:начало" — неотрицательные числа без знаков и пробелов.</summary>

@@ -12,11 +12,13 @@ namespace NexusPdf.Pdf.Pdfium;
 internal static partial class PdfiumOverlayWriter
 {
     /// <summary>
-    /// Точки привязки округляются до сотой пункта: такое число PDFium
-    /// записывает в файл без потерь, и отпечаток блока после повторного
-    /// открытия считается по тем же значениям, что при записи.
+    /// Точки привязки округляются до сотой пункта, наклон — до тысячной: такие
+    /// числа PDFium записывает в файл без потерь, и отпечаток блока после
+    /// повторного открытия считается по тем же значениям, что при записи.
+    /// Сдвиг от округления — не больше 0,005 пт, поворот — сотые доли градуса.
     /// </summary>
     private const int OriginDecimals = 2;
+    private const int OrientationDecimals = 3;
 
     private static void ApplyTextBlock(
         FpdfDocumentT document, FpdfPageT page, OverlayFontCache fonts, TextBlockOverlay block,
@@ -69,7 +71,7 @@ internal static partial class PdfiumOverlayWriter
 
         var id = (block.BlockId == Guid.Empty ? Guid.NewGuid() : block.BlockId).ToString("N");
         var version = TextBlockCodec.FormatVersion.ToString(CultureInfo.InvariantCulture);
-        var hash = TextBlockHash.Compute(written.Select(w => Fingerprint(w.Obj, w.Text)));
+        var hash = TextBlockHash.Compute(written.Select(w => Fingerprint(w.Obj, w.Ref, isText: w.Text.Length > 0)));
         var first = written.FindIndex(w => w.Text.Length > 0);
         for (var i = 0; i < written.Count; i++)
         {
@@ -155,17 +157,23 @@ internal static partial class PdfiumOverlayWriter
     }
 
     /// <summary>Отпечаток объекта блока по значениям, которые реально лежат в объекте.</summary>
-    internal static (string Text, double FontSizePt, uint ColorArgb, double XPt, double YPt) Fingerprint(
-        FpdfPageobjectT obj, string text)
+    internal static TextBlockHash.Piece Fingerprint(FpdfPageobjectT obj, string reference, bool isText)
     {
         var matrix = new FS_MATRIX_();
         fpdf_edit.FPDFPageObjGetMatrix(obj, matrix);
         float size = 0;
-        if (text.Length > 0)
+        var fontName = "";
+        if (isText)
+        {
             fpdf_edit.FPDFTextObjGetFontSize(obj, ref size);
+            var font = fpdf_edit.FPDFTextObjGetFont(obj);
+            if (font != null && font.__Instance != IntPtr.Zero)
+                fontName = PdfiumDocumentHandle.ReadFontName(font);
+        }
         uint r = 0, g = 0, b = 0, a = 0;
         fpdf_edit.FPDFPageObjGetFillColor(obj, ref r, ref g, ref b, ref a);
-        return (text, size, (a << 24) | (r << 16) | (g << 8) | b, matrix.E, matrix.F);
+        return new TextBlockHash.Piece(reference, fontName, size, (a << 24) | (r << 16) | (g << 8) | b,
+            matrix.A, matrix.B, matrix.C, matrix.D, matrix.E, matrix.F);
     }
 
     /// <summary>
@@ -200,8 +208,8 @@ internal static partial class PdfiumOverlayWriter
             var origin = ToContent(x, y);
             var unitX = ToContent(x + 1, y);
             var unitY = ToContent(x, flipY ? y - 1 : y + 1);
-            return (unitX.X - origin.X, unitX.Y - origin.Y,
-                    unitY.X - origin.X, unitY.Y - origin.Y,
+            return (Math.Round(unitX.X - origin.X, OrientationDecimals), Math.Round(unitX.Y - origin.Y, OrientationDecimals),
+                    Math.Round(unitY.X - origin.X, OrientationDecimals), Math.Round(unitY.Y - origin.Y, OrientationDecimals),
                     Math.Round(origin.X, OriginDecimals), Math.Round(origin.Y, OriginDecimals));
         }
     }

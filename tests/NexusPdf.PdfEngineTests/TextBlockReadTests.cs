@@ -96,6 +96,54 @@ public sealed class TextBlockReadTests : IAsyncLifetime
         Assert.InRange(stored.BoundsPt.YPt, block.YPt - 1, block.YPt + 8);
     }
 
+    public static TheoryData<string> RoundTrips => new()
+    {
+        "wrapped", "justify", "letter-spacing", "line-break", "decorations", "super-sub", "rotated-page", "mixed-runs",
+    };
+
+    /// <summary>
+    /// Главное обещание блока — правка после сохранения. Каждый вид объектов,
+    /// которые пишет блок (пробелы в конце строк, одни пробелы при выравнивании
+    /// по ширине, буква-объект при интервале, линии, индексы), обязан читаться
+    /// обратно целым.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(RoundTrips))]
+    public async Task Saved_Block_Of_Every_Kind_Reopens_Intact(string kind)
+    {
+        TextStyle Sans(double size = 12) => new("Liberation Sans", size);
+        TextParagraph Para(string text, TextStyle? style = null, TextAlign align = TextAlign.Left) =>
+            new([new TextRun(text, style ?? Sans())], align);
+        TextBlockOverlay Make(double width, double rotation, params TextParagraph[] paragraphs) =>
+            new(50, 60, width, 10, rotation, TextBlockWidthMode.Fixed, true, false, paragraphs, Guid.NewGuid());
+
+        var rotate = 0;
+        var block = kind switch
+        {
+            "wrapped" => Make(90, 0, Para("alpha beta gamma delta epsilon zeta eta theta")),
+            "justify" => Make(110, 0, Para("one two three four five six seven eight nine ten", align: TextAlign.Justify)),
+            "letter-spacing" => Make(200, 0, Para("Spaced out", Sans() with { LetterSpacingPercent = 25 })),
+            "line-break" => Make(200, 0, Para("first" + TextBlockText.LineBreak + "second" + TextBlockText.LineBreak + "third")),
+            "decorations" => Make(200, 0, Para("under and struck", Sans() with { Underline = true, Strike = true, ColorArgb = 0xFFD3282F })),
+            "super-sub" => Make(200, 0, new TextParagraph([
+                new TextRun("E=mc", Sans()), new TextRun("2", Sans() with { Baseline = BaselineShift.Superscript }),
+                new TextRun(" H", Sans()), new TextRun("2", Sans() with { Baseline = BaselineShift.Subscript }), new TextRun("O", Sans())])),
+            "rotated-page" => Make(160, 30, Para("turned twice over")),
+            _ => Make(220, 0, new TextParagraph([
+                new TextRun("Bold ", Sans() with { Bold = true }), new TextRun("italic ", Sans(14) with { Italic = true }),
+                new TextRun("mono", new TextStyle("Liberation Mono", 10))], TextAlign.Center), Para("Последняя строка")),
+        };
+        if (kind == "rotated-page") rotate = 90;
+
+        var path = Path.Combine(_dir, "kind-" + kind + ".pdf");
+        File.WriteAllBytes(path, PdfFixture.Build(new PdfFixture.PageSpec(400, 300, rotate, Text: "")));
+        var saved = await ComposeAsync(path, block);
+
+        var stored = Assert.Single(await BlocksAsync(saved));
+        Assert.True(stored.Intact, kind + ": the block must reopen as a block");
+        AssertSameBlock(block, stored.Block);
+    }
+
     [Fact]
     public async Task Marks_Survive_Repeated_Full_And_Incremental_Saves()
     {
