@@ -1275,7 +1275,7 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
             fpdf_edit.FPDFTextObjGetText(obj, textPage, ref buffer[0], size));
     }
 
-    private static unsafe string ReadFontName(FpdfFontT font)
+    internal static unsafe string ReadFontName(FpdfFontT font)
     {
         var name = ReadAnsiName((buffer, size) =>
             fpdf_edit.FPDFFontGetBaseFontName(font, (sbyte*)buffer, size));
