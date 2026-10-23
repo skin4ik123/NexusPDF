@@ -155,3 +155,19 @@ public sealed class AllTrueToVisibilityConverter : IMultiValueConverter
     public object[] ConvertBack(object value, Type[] targetTypes, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();
 }
+
+/// <summary>Цвет ARGB (uint) — кисть для образца цвета.</summary>
+public sealed class ArgbToBrushConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        var argb = value is uint u ? u : 0xFF000000;
+        var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(
+            (byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb));
+        brush.Freeze();
+        return brush;
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        Binding.DoNothing;
+}

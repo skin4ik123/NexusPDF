@@ -5,6 +5,7 @@
              xmlns:dd="urn:gong-wpf-dragdrop"
              xmlns:app="clr-namespace:NexusPdf.App.Desktop"
              xmlns:views="clr-namespace:NexusPdf.App.Desktop.Views"
+             xmlns:text="clr-namespace:NexusPdf.App.Desktop.Views.Text"
              DataContextChanged="OnDataContextChanged">
   <UserControl.Resources>
     <BooleanToVisibilityConverter x:Key="BoolToVis"/>
@@ -12,6 +13,8 @@
     <app:MinusOneConverter x:Key="MinusOne"/>
     <app:InverseBoolConverter x:Key="InvBool"/>
     <app:NonZeroToVisibilityConverter x:Key="RotBadgeVis"/>
+    <app:EnumToBoolConverter x:Key="IsTextAlign"/>
+    <app:ArgbToBrushConverter x:Key="TextArgbBrush"/>
     <app:AllTrueToVisibilityConverter x:Key="AllTrue"/>
     <app:StringToVisibilityConverter x:Key="TextToVis"/>
   </UserControl.Resources>
@@ -614,6 +617,14 @@
             </StackPanel>
           </Grid>
 
+          <StackPanel Margin="0,10,0,0"
+                      Visibility="{Binding CanRotateSelectedObject, Converter={StaticResource BoolToVis}}">
+            <TextBlock Text="{l:Loc TextRotation}" FontSize="10" Foreground="{DynamicResource TextSecondary}"/>
+            <TextBox AutomationProperties.Name="{l:Loc TextRotation}" Style="{StaticResource ThemedTextBox}"
+                     KeyDown="OnObjectFieldKeyDown"
+                     Text="{Binding SelectedObjectRotation, StringFormat={}{0:0.#}}"/>
+          </StackPanel>
+
           <TextBlock Text="{l:Loc UxObjectFixedSize}" FontSize="10" TextWrapping="Wrap"
                      Margin="0,4,0,0" Foreground="{DynamicResource TextSecondary}"
                      Visibility="{Binding CanResizeSelectedObject,
@@ -675,6 +686,144 @@
                   CommandParameter="view.findSelection"
                   Content="{l:Loc UxFindSelection}"/>
         </StackPanel>
+
+        <!-- Набор в текстовом блоке: те же настройки, что на панели над
+             блоком, плюс точные — интервалы, индексы, рамка в мм, поворот. -->
+        <ScrollViewer x:Name="TextBlockProperties" VerticalScrollBarVisibility="Auto"
+                      Visibility="{Binding ShowsTextBlockProperties, Converter={StaticResource BoolToVis}}">
+          <StackPanel Margin="12,10">
+            <TextBlock Text="{l:Loc TextSectionTitle}" FontWeight="SemiBold" FontSize="13"
+                       Foreground="{DynamicResource TextBrush}"/>
+
+            <TextBlock Text="{l:Loc TextSectionFont}" FontSize="11" Margin="0,10,0,4" Foreground="{DynamicResource TextSecondary}"/>
+            <text:FontPicker x:Name="TextPanelFamily" HorizontalAlignment="Stretch"/>
+            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+              <TextBox Width="48" Style="{StaticResource ThemedTextBox}" KeyDown="OnObjectFieldKeyDown"
+                       Text="{Binding TextSizeText, UpdateSourceTrigger=LostFocus}"
+                       ToolTip="{l:Loc FontSizeLabel}" AutomationProperties.Name="{l:Loc FontSizeLabel}"/>
+              <TextBlock Text="pt" Margin="4,0,8,0" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}"/>
+              <ToggleButton Style="{StaticResource ToolButton}" Focusable="False" IsChecked="{Binding TextBold}"
+                            ToolTip="{l:Loc FontBold}" AutomationProperties.Name="{l:Loc FontBold}">
+                <TextBlock Text="B" FontWeight="Bold"/>
+              </ToggleButton>
+              <ToggleButton Style="{StaticResource ToolButton}" Focusable="False" IsChecked="{Binding TextItalic}"
+                            ToolTip="{l:Loc FontItalic}" AutomationProperties.Name="{l:Loc FontItalic}">
+                <TextBlock Text="I" FontStyle="Italic" FontFamily="Georgia"/>
+              </ToggleButton>
+              <ToggleButton Style="{StaticResource ToolButton}" Focusable="False" IsChecked="{Binding TextUnderline}"
+                            ToolTip="{l:Loc FontUnderline}" AutomationProperties.Name="{l:Loc FontUnderline}">
+                <TextBlock Text="U" TextDecorations="Underline"/>
+              </ToggleButton>
+              <ToggleButton Style="{StaticResource ToolButton}" Focusable="False" IsChecked="{Binding TextStrike}"
+                            ToolTip="{l:Loc FontStrike}" AutomationProperties.Name="{l:Loc FontStrike}">
+                <TextBlock Text="S" TextDecorations="Strikethrough"/>
+              </ToggleButton>
+            </StackPanel>
+            <DockPanel Margin="0,6,0,0">
+              <Border DockPanel.Dock="Left" Width="20" Height="20" CornerRadius="3" Margin="0,0,6,0"
+                      BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1"
+                      Background="{Binding TextColorArgb, Converter={StaticResource TextArgbBrush}}"/>
+              <TextBox Style="{StaticResource ThemedTextBox}" KeyDown="OnObjectFieldKeyDown"
+                       Text="{Binding TextColorHex, UpdateSourceTrigger=LostFocus}"
+                       ToolTip="{l:Loc AtColor}" AutomationProperties.Name="{l:Loc AtColor}"/>
+            </DockPanel>
+
+            <TextBlock Text="{l:Loc TextSectionParagraph}" FontSize="11" Margin="0,12,0,4" Foreground="{DynamicResource TextSecondary}"/>
+            <StackPanel Orientation="Horizontal">
+              <ToggleButton Style="{StaticResource ToolButton}" Focusable="False"
+                            IsChecked="{Binding TextAlignValue, Mode=OneWay, Converter={StaticResource IsTextAlign}, ConverterParameter=Left}"
+                            Command="{Binding SetTextAlignCommand}" CommandParameter="Left"
+                            ToolTip="{l:Loc TextAlignLeft}" AutomationProperties.Name="{l:Loc TextAlignLeft}">
+                <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8E4;"/>
+              </ToggleButton>
+              <ToggleButton Style="{StaticResource ToolButton}" Focusable="False"
+                            IsChecked="{Binding TextAlignValue, Mode=OneWay, Converter={StaticResource IsTextAlign}, ConverterParameter=Center}"
+                            Command="{Binding SetTextAlignCommand}" CommandParameter="Center"
+                            ToolTip="{l:Loc TextAlignCenter}" AutomationProperties.Name="{l:Loc TextAlignCenter}">
+                <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8E3;"/>
+              </ToggleButton>
+              <ToggleButton Style="{StaticResource ToolButton}" Focusable="False"
+                            IsChecked="{Binding TextAlignValue, Mode=OneWay, Converter={StaticResource IsTextAlign}, ConverterParameter=Right}"
+                            Command="{Binding SetTextAlignCommand}" CommandParameter="Right"
+                            ToolTip="{l:Loc TextAlignRight}" AutomationProperties.Name="{l:Loc TextAlignRight}">
+                <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8E2;"/>
+              </ToggleButton>
+              <ToggleButton Style="{StaticResource ToolButton}" Focusable="False"
+                            IsChecked="{Binding TextAlignValue, Mode=OneWay, Converter={StaticResource IsTextAlign}, ConverterParameter=Justify}"
+                            Command="{Binding SetTextAlignCommand}" CommandParameter="Justify"
+                            ToolTip="{l:Loc TextAlignJustify}" AutomationProperties.Name="{l:Loc TextAlignJustify}">
+                <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE700;"/>
+              </ToggleButton>
+            </StackPanel>
+            <TextBlock Text="{l:Loc TextLineSpacing}" FontSize="10" Margin="0,6,0,0" Foreground="{DynamicResource TextSecondary}"/>
+            <TextBox Style="{StaticResource ThemedTextBox}" KeyDown="OnObjectFieldKeyDown"
+                     Text="{Binding TextLineSpacingText, UpdateSourceTrigger=LostFocus}"
+                     AutomationProperties.Name="{l:Loc TextLineSpacing}"/>
+
+            <TextBlock Text="{l:Loc TextSectionCharacter}" FontSize="11" Margin="0,12,0,4" Foreground="{DynamicResource TextSecondary}"/>
+            <TextBlock Text="{l:Loc TextLetterSpacing}" FontSize="10" Foreground="{DynamicResource TextSecondary}"/>
+            <TextBox Style="{StaticResource ThemedTextBox}" KeyDown="OnObjectFieldKeyDown"
+                     Text="{Binding TextLetterSpacingText, UpdateSourceTrigger=LostFocus}"
+                     AutomationProperties.Name="{l:Loc TextLetterSpacing}"/>
+            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+              <ToggleButton Style="{StaticResource ToolButton}" Focusable="False" IsChecked="{Binding TextSuperscript}"
+                            ToolTip="{l:Loc TextSuperscript}" AutomationProperties.Name="{l:Loc TextSuperscript}" Content="x²"/>
+              <ToggleButton Style="{StaticResource ToolButton}" Focusable="False" IsChecked="{Binding TextSubscript}"
+                            ToolTip="{l:Loc TextSubscript}" AutomationProperties.Name="{l:Loc TextSubscript}" Content="x₂"/>
+            </StackPanel>
+
+            <TextBlock Text="{l:Loc TextSectionBox}" FontSize="11" Margin="0,12,0,4" Foreground="{DynamicResource TextSecondary}"/>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+              </Grid.ColumnDefinitions>
+              <Grid.RowDefinitions>
+                <RowDefinition/>
+                <RowDefinition/>
+              </Grid.RowDefinitions>
+              <StackPanel Margin="0,0,6,4">
+                <TextBlock Text="{l:Loc ObjectXMm}" FontSize="10" Foreground="{DynamicResource TextSecondary}"/>
+                <TextBox Style="{StaticResource ThemedTextBox}" KeyDown="OnObjectFieldKeyDown"
+                         AutomationProperties.Name="{l:Loc ObjectXMm}"
+                         Text="{Binding TextBoxXMm, StringFormat={}{0:F1}, UpdateSourceTrigger=LostFocus}"/>
+              </StackPanel>
+              <StackPanel Grid.Column="1" Margin="0,0,0,4">
+                <TextBlock Text="{l:Loc ObjectYMm}" FontSize="10" Foreground="{DynamicResource TextSecondary}"/>
+                <TextBox Style="{StaticResource ThemedTextBox}" KeyDown="OnObjectFieldKeyDown"
+                         AutomationProperties.Name="{l:Loc ObjectYMm}"
+                         Text="{Binding TextBoxYMm, StringFormat={}{0:F1}, UpdateSourceTrigger=LostFocus}"/>
+              </StackPanel>
+              <StackPanel Grid.Row="1" Margin="0,0,6,0">
+                <TextBlock Text="{l:Loc UxObjectWidth}" FontSize="10" Foreground="{DynamicResource TextSecondary}"/>
+                <TextBox Style="{StaticResource ThemedTextBox}" KeyDown="OnObjectFieldKeyDown"
+                         AutomationProperties.Name="{l:Loc UxObjectWidth}"
+                         Text="{Binding TextBoxWMm, StringFormat={}{0:F1}, UpdateSourceTrigger=LostFocus}"/>
+              </StackPanel>
+              <StackPanel Grid.Row="1" Grid.Column="1">
+                <TextBlock Text="{l:Loc UxObjectHeight}" FontSize="10" Foreground="{DynamicResource TextSecondary}"/>
+                <TextBox Style="{StaticResource ThemedTextBox}" KeyDown="OnObjectFieldKeyDown"
+                         AutomationProperties.Name="{l:Loc UxObjectHeight}"
+                         Text="{Binding TextBoxHMm, StringFormat={}{0:F1}, UpdateSourceTrigger=LostFocus}"/>
+              </StackPanel>
+            </Grid>
+            <TextBlock Text="{l:Loc TextRotation}" FontSize="10" Margin="0,6,0,0" Foreground="{DynamicResource TextSecondary}"/>
+            <TextBox Style="{StaticResource ThemedTextBox}" KeyDown="OnObjectFieldKeyDown"
+                     Text="{Binding TextRotationText, UpdateSourceTrigger=LostFocus}"
+                     AutomationProperties.Name="{l:Loc TextRotation}"/>
+            <CheckBox Content="{l:Loc TextAutoHeight}" IsChecked="{Binding TextAutoHeight}" Margin="0,8,0,4"
+                      Foreground="{DynamicResource TextBrush}"/>
+            <CheckBox Content="{l:Loc TextShrinkToFit}" IsChecked="{Binding TextShrinkToFit}"
+                      Foreground="{DynamicResource TextBrush}"/>
+            <TextBlock Text="{l:Loc TextOverflowHint}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"
+                       Foreground="#B45309"
+                       Visibility="{Binding TextOverflows, Converter={StaticResource BoolToVis}}"/>
+
+            <Separator Margin="0,12" Background="{DynamicResource PanelBorder}"/>
+            <Button Style="{StaticResource ToolButton}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                    Command="{Binding UseTextStyleAsDefaultCommand}" Content="{l:Loc TextUseAsDefault}"/>
+          </StackPanel>
+        </ScrollViewer>
 
         <!-- Ничего не выбрано — панель рассказывает про текущую страницу,
              вместо того чтобы стоять пустой. -->

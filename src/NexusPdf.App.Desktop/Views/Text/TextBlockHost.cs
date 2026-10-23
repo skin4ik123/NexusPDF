@@ -17,11 +17,15 @@ namespace NexusPdf.App.Desktop.Views.Text;
 internal sealed class TextBlockHost
 {
     private readonly Popup _popup;
+    private readonly Popup _toolbarPopup;
+    private readonly TextBlockToolbar _toolbar;
     private readonly RotateTransform _rotation = new();
     private readonly PageViewModel _page;
     private readonly DocumentViewModel.TextBlockEdit _edit;
 
-    public TextBlockHost(FrameworkElement pageElement, PageViewModel page, DocumentViewModel.TextBlockEdit edit)
+    public TextBlockHost(
+        FrameworkElement pageElement, PageViewModel page, DocumentViewModel.TextBlockEdit edit,
+        DocumentViewModel document, FontPickerContext? fonts)
     {
         _page = page;
         _edit = edit;
@@ -40,6 +44,18 @@ internal sealed class TextBlockHost
             Focusable = false,
             PopupAnimation = PopupAnimation.None,
         };
+        _toolbar = new TextBlockToolbar { DataContext = document };
+        _toolbar.SetFontContext(fonts);
+        _toolbarPopup = new Popup
+        {
+            Child = _toolbar,
+            PlacementTarget = pageElement,
+            Placement = PlacementMode.Relative,
+            AllowsTransparency = true,
+            StaysOpen = true,
+            Focusable = false,
+            PopupAnimation = PopupAnimation.None,
+        };
         edit.Model.Changed += OnModelChanged;
     }
 
@@ -49,18 +65,25 @@ internal sealed class TextBlockHost
     {
         Sync();
         _popup.IsOpen = true;
-        // Фокус — следующим проходом разметки: до него редактор ещё не размещён.
+        _toolbarPopup.IsOpen = true;
+        FocusEditor();
+    }
+
+    /// <summary>Вернуть клавиатуру редактору (после щелчка по панели оформления).</summary>
+    public void FocusEditor() =>
+        // Следующим проходом разметки: до него редактор может быть ещё не размещён.
         Canvas.Dispatcher.BeginInvoke(new Action(() =>
         {
             Canvas.Focus();
             Keyboard.Focus(Canvas);
         }), DispatcherPriority.Input);
-    }
 
     public void Close()
     {
         _edit.Model.Changed -= OnModelChanged;
         _popup.IsOpen = false;
+        _toolbarPopup.IsOpen = false;
+        _toolbar.DataContext = null;
     }
 
     private void OnModelChanged(object? sender, EventArgs e) => Sync();
@@ -93,5 +116,14 @@ internal sealed class TextBlockHost
         // Popup не следит за прокруткой цели — подталкиваем пересчёт места.
         _popup.HorizontalOffset += 0.01;
         _popup.HorizontalOffset -= 0.01;
+
+        // Панель — над видимой рамкой блока (над верхним из её углов).
+        _toolbar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var top = cy * zoom - boxH / 2;
+        var left = cx * zoom - boxW / 2;
+        _toolbarPopup.HorizontalOffset = left;
+        _toolbarPopup.VerticalOffset = top - _toolbar.DesiredSize.Height - 8;
+        _toolbarPopup.HorizontalOffset += 0.01;
+        _toolbarPopup.HorizontalOffset -= 0.01;
     }
 }

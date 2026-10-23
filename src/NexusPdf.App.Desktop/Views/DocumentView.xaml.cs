@@ -18,6 +18,7 @@ public partial class DocumentView : UserControl
     public DocumentView()
     {
         InitializeComponent();
+        TextPanelFamily.FamilyChanged += OnTextPanelFamilyChanged;
         Loaded += (_, _) =>
         {
             HookScroller();
@@ -50,6 +51,7 @@ public partial class DocumentView : UserControl
             _vm.InlineEditRequested -= OnInlineEditRequested;
             _vm.TextBlockEditStarted -= OnTextBlockEditStarted;
             _vm.TextBlockEditEnded -= OnTextBlockEditEnded;
+            _vm.TextEditorFocusRequested -= OnTextEditorFocusRequested;
             _vm.CommitTextBlock();
             _vm.CalibrationRequested -= OnCalibrationRequested;
             _vm.PagesRebuilding -= OnPagesRebuilding;
@@ -66,6 +68,7 @@ public partial class DocumentView : UserControl
             _vm.InlineEditRequested += OnInlineEditRequested;
             _vm.TextBlockEditStarted += OnTextBlockEditStarted;
             _vm.TextBlockEditEnded += OnTextBlockEditEnded;
+            _vm.TextEditorFocusRequested += OnTextEditorFocusRequested;
             _vm.CalibrationRequested += OnCalibrationRequested;
             _vm.PagesRebuilding += OnPagesRebuilding;
             _vm.PagesRebuilt += OnPagesRebuilt;
@@ -194,6 +197,8 @@ public partial class DocumentView : UserControl
         }
         if (e.PropertyName == nameof(DocumentViewModel.IsTextTool))
             UpdatePlacementCursor();
+        if (e.PropertyName == nameof(DocumentViewModel.TextFamily) && _vm != null && !TextPanelFamily.IsOpen)
+            TextPanelFamily.ShowFamily(_vm.TextFamily);
 
         if (e.PropertyName == nameof(DocumentViewModel.PendingOverlay))
         {
@@ -471,6 +476,10 @@ public partial class DocumentView : UserControl
         // Полосы прокрутки — не документ. Ни один наш обработчик их не касается,
         // иначе мышь достанется руке, а не ползунку.
         if (IsOnScrollBar(e.OriginalSource)) return;
+
+        // Щелчок по странице мимо редактора блока заканчивает ввод (сам
+        // редактор — отдельное окно, его щелчки сюда не приходят).
+        _vm.CommitTextBlock();
 
         // Двойной клик обрабатывается ДО выделения текста: иначе второй щелчок
         // уходил бы в выделение слова и правка не начиналась бы никогда.
@@ -1048,7 +1057,8 @@ public partial class DocumentView : UserControl
             _vm?.CommitTextBlock();
             return;
         }
-        var host = new Text.TextBlockHost(element, edit.Page, edit);
+        if (_vm == null) return;
+        var host = new Text.TextBlockHost(element, edit.Page, edit, _vm, FontContext());
         host.Canvas.CommitRequested += (_, _) => _vm?.CommitTextBlock();
         host.Canvas.InputRejected += (_, key) =>
         {
@@ -1056,7 +1066,12 @@ public partial class DocumentView : UserControl
         };
         _textHost = host;
         host.Open();
+        TextPanelFamily.Configure(null, _vm.TextFamily, FontContext());
     }
+
+    private void OnTextEditorFocusRequested(object? sender, EventArgs e) => _textHost?.FocusEditor();
+
+    private void OnTextPanelFamilyChanged(object? sender, EventArgs e) => _vm?.SetTextFamily(TextPanelFamily.Family);
 
     private void OnTextBlockEditEnded(object? sender, EventArgs e)
     {
