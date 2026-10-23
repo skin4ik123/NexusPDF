@@ -13,7 +13,7 @@ processor. No account, no upload, no subscription.
 
 [![Version](https://img.shields.io/github/v/tag/skin4ik123/NexusPDF?label=version&sort=semver&color=6366f1&style=flat-square)](https://nexus.internetdeco.com) [![Windows](https://img.shields.io/badge/Windows%2010%20%C2%B7%2011-64--bit-0ea5e9?style=flat-square&logo=windows&logoColor=white)](https://nexus.internetdeco.com) [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?style=flat-square&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/download) [![Licence](https://img.shields.io/badge/licence-AGPL--3.0-7c3aed?style=flat-square)](LICENSE) [![Telemetry](https://img.shields.io/badge/telemetry-none-10b981?style=flat-square)](#privacy)
 
-**[Download NexusPDF 0.27.2](https://github.com/skin4ik123/NexusPDF/releases/download/v0.27.2/NexusPDF-Setup-0.27.2.exe)** · [Website](https://nexus.internetdeco.com) · [Changelog](https://nexus.internetdeco.com/changelog) · [Support the work](#support-the-work)
+**[Download NexusPDF 0.28.0](https://github.com/skin4ik123/NexusPDF/releases/download/v0.28.0/NexusPDF-Setup-0.28.0.exe)** · [Website](https://nexus.internetdeco.com) · [Changelog](https://nexus.internetdeco.com/changelog) · [Support the work](#support-the-work)
 
 <img src="docs/images/main.png" alt="NexusPDF main window">
 
@@ -51,6 +51,7 @@ just as much as money.
 | --- | --- |
 | **Pages in any order** | Reorder, rotate, duplicate, extract. Drag pages from one open document straight into another and drop them where you want. |
 | **Scans that come out clean** | Straighten the sheet, remove scanner speckles, turn uneven grey paper into even white — with a before-and-after preview. |
+| **Text written on the page** | The Text tool writes straight onto the page, as in Acrobat: a line that grows as you type, or a wrapping paragraph in a frame. Any installed font with search, styles for any part of the text, rotation — and the block opens for editing again after saving. |
 | **Text and images edited in place** | Change existing text keeping its font, size and position. Replace a picture, or send a page to an image editor and bring it back. |
 | **Text recognition, offline** | Scanned pages get a searchable text layer. Sixteen language packs ship with the program. |
 | **Export to Word and Excel** | Paragraphs, tables, links and comments. Tables are taken from drawn borders, and where there are none, from column gaps. |

@@ -5,6 +5,7 @@ using System.Collections.Specialized;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -18,6 +19,7 @@ using NexusPdf.Domain;
 using NexusPdf.Export;
 using NexusPdf.Infrastructure;
 using NexusPdf.Pdf.Abstractions;
+using NexusPdf.Pdf.Abstractions.TextBlocks;
 using NexusPdf.Pdf.Pdfium;
 using NexusPdf.Printing;
 using NexusPdf.Ux;
@@ -393,6 +395,119 @@ internal static class Program
         Require(summary.RecognizedPages == 1 && word.MainDocumentPart!.Document!.InnerText.Contains("NEXUS", StringComparison.OrdinalIgnoreCase),
             "Word export recognizes scans after switching the OCR engine");
         await InspectReaderToolsAsync();
+        await VerifyTextBlocksAsync();
+    }
+
+    /// <summary>
+    /// Инструмент «Текст» от начала до конца: блок в пустой клетке, набор,
+    /// жирный, другой шрифт, ширина, сохранение, повторное открытие, правка
+    /// сохранённого блока по двойному щелчку, кириллица без IME, блок с
+    /// переносом по протянутой рамке.
+    /// </summary>
+    private static async Task VerifyTextBlocksAsync()
+    {
+        _document.CurrentPageNumber = 1;
+        await WaitForVisiblePageAsync("Text block fixture page is shown");
+        var page = _document.Pages[0];
+
+        _document.ToggleTextTool();
+        Require(_document.IsTextTool, "The Text tool turns on");
+        // Щелчок инструментом: сначала поиск блока под точкой, потом новый блок.
+        if (!await _document.EditTextBlockAsync(page, 110, 160))
+            await _document.BeginTextBlockAtAsync(page, 110, 160);
+        var editor = await FindTextEditorAsync("A click with the Text tool opens the on-page editor");
+        Require(Keyboard.FocusedElement == editor, "The block editor takes the keyboard");
+        Type(editor, "24 Oct 2026");
+        Capture(_main, "text-block-typing");
+
+        var model = _document.ActiveTextBlock ?? throw new InvalidOperationException("No active block");
+        model.SelectAll();
+        _document.TextBold = true;
+        var family = FontCatalog.System.Families.FirstOrDefault(f => f.Embeddable && f.Supported && f.HasCyrillic && f.Name != _document.TextFamily)?.Name;
+        if (family != null)
+            _document.SetTextFamily(family);
+        _document.TextBoxWMm = 80;
+        Require(model.Block.WidthMode == TextBlockWidthMode.Fixed && Math.Abs(model.Block.WidthPt - 80 * 72 / 25.4) < 0.01,
+            "Resizing the block fixes its width");
+        _document.CommitTextBlock();
+        var block = _document.Document.Session.Model.Pages[0].OverlayList.OfType<TextBlockOverlay>().LastOrDefault();
+        Require(block != null && block.Paragraphs[0].Text == "24 Oct 2026" && block.Paragraphs[0].Runs.All(r => r.Style.Bold),
+            "Finished typing becomes one bold text block");
+        Require(family == null || block!.Paragraphs[0].Runs.All(r => r.Style.FontFamily == family), "The picked font reaches the block");
+
+        var saved = Path.Combine(_output, "text-block.pdf");
+        await _services.SaveService.SaveAsAsync(_document.Document, saved, keepBackup: false, CancellationToken.None);
+        await _main.ViewModel.OpenFilesAsync(new[] { saved });
+        var reopened = _main.ViewModel.ActiveDocument ?? throw new InvalidOperationException("Saved file did not open");
+        var reopenedPage = reopened.Pages[0];
+        await reopened.EnsureStoredTextBlocksAsync(reopenedPage);
+        Require(await reopened.EditTextBlockAsync(reopenedPage, block!.XPt + 4, block.YPt + 4),
+            "A double click opens the saved block again");
+        editor = await FindTextEditorAsync("The saved block opens in the editor");
+        Require(reopened.ActiveTextBlock?.Block.Paragraphs[0].Text == "24 Oct 2026", "The saved block keeps its text");
+        reopened.ActiveTextBlock!.MoveCaret(CaretMove.BlockEnd, extend: false);
+        Type(editor, " — готово");
+        reopened.CommitTextBlock();
+        Require(reopened.Document.Session.Model.Pages[0].OverlayList.OfType<TextBlockReplacement>()
+                .SingleOrDefault()?.BlockId == block.BlockId, "Editing a saved block replaces it under the same Id");
+
+        var resaved = Path.Combine(_output, "text-block-edited.pdf");
+        await _services.SaveService.SaveAsAsync(reopened.Document, resaved, keepBackup: false, CancellationToken.None);
+        await using (var check = await _services.Engine.OpenAsync(resaved, null, CancellationToken.None))
+        {
+            var text = await check.GetPageTextAsync(0, CancellationToken.None);
+            Require(text.Contains("24 Oct 2026 — готово", StringComparison.Ordinal), "The edited block text is in the file");
+            var stored = await check.GetTextBlocksAsync(0, 0, CancellationToken.None);
+            Require(stored.Count(b => b.Intact) == 1 && stored.Single(b => b.Intact).Id == block.BlockId,
+                "The file holds exactly one intact block with the original Id");
+        }
+
+        reopened.ToggleTextTool();
+        await reopened.BeginTextBlockInRectAsync(reopenedPage, new OverlayBox(60, 300, 120, 20));
+        editor = await FindTextEditorAsync("A dragged frame opens a wrapping block");
+        Type(editor, "Длинная строка текста переносится по словам внутри рамки заданной ширины");
+        var wrapped = reopened.ActiveTextBlock!;
+        Require(wrapped.Layout.Lines.Count > 1 && wrapped.Block.WidthMode == TextBlockWidthMode.Fixed,
+            "Text in a dragged frame wraps by words");
+        Capture(_main, "text-block-wrapped");
+        reopened.CommitTextBlock();
+        reopened.ToggleTextTool();
+        Require(!reopened.IsTextTool, "The Text tool turns off");
+    }
+
+    /// <summary>Редактор блока — отдельное окно поверх страницы: ищется среди всех окон по AutomationId.</summary>
+    private static async Task<FrameworkElement> FindTextEditorAsync(string description)
+    {
+        FrameworkElement? found = null;
+        for (var i = 0; i < 100 && found == null; i++)
+        {
+            await _main.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Input);
+            found = PresentationSource.CurrentSources.OfType<System.Windows.Interop.HwndSource>()
+                .Where(source => source.RootVisual != null)
+                .SelectMany(source => Descendants(source.RootVisual))
+                .OfType<FrameworkElement>()
+                .FirstOrDefault(e => e.IsVisible && System.Windows.Automation.AutomationProperties.GetAutomationId(e) == "TextBlockEditor");
+            if (found == null) await Task.Delay(50);
+        }
+        Require(found != null, description);
+        return found!;
+    }
+
+    /// <summary>
+    /// Набор тем же путём, что и с клавиатуры без IME (событие TextInput у
+    /// курсора); результат читается через UI Automation, как его прочтёт диктор.
+    /// </summary>
+    private static void Type(FrameworkElement editor, string text)
+    {
+        editor.RaiseEvent(new TextCompositionEventArgs(Keyboard.PrimaryDevice,
+            new TextComposition(InputManager.Current, editor, text))
+        {
+            RoutedEvent = TextCompositionManager.TextInputEvent,
+        });
+        var peer = System.Windows.Automation.Peers.UIElementAutomationPeer.CreatePeerForElement(editor);
+        var value = (System.Windows.Automation.Provider.IValueProvider)peer.GetPattern(
+            System.Windows.Automation.Peers.PatternInterface.Value);
+        Require(value.Value.EndsWith(text, StringComparison.Ordinal), "Typed text reaches the block: " + text);
     }
 
     private static async Task InspectReaderToolsAsync()
