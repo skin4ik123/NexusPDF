@@ -248,6 +248,26 @@ public sealed class TextBlockWriteTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Line_Text_In_A_Font_Without_Its_Letters_Is_Written_With_One_That_Has_Them()
+    {
+        // Список шрифтов показывает и шрифты без кириллицы. Русская строка
+        // таким шрифтом вышла бы квадратами — пишется тем, где буквы есть.
+        var overlay = new TextOverlay("Привет", 40, 40, 20, 0xFF000000, 0, "Latin500", false, false);
+        var saved = await ComposeAsync(Source(), [overlay]);
+
+        await using var doc = await _pdfium.OpenAsync(saved, null, CancellationToken.None);
+        var found = await doc.GetTextObjectAtAsync(0, 0, 50, 50, CancellationToken.None);
+        Assert.NotNull(found);
+        Assert.Equal("Привет", found!.Text);
+        Assert.DoesNotContain("Latin500", found.FontName, StringComparison.OrdinalIgnoreCase);
+
+        // Латиница тем же шрифтом им и пишется.
+        var latin = await ComposeAsync(Source(), [new TextOverlay("Hello", 40, 40, 20, 0xFF000000, 0, "Latin500", false, false)]);
+        await using var latinDoc = await _pdfium.OpenAsync(latin, null, CancellationToken.None);
+        Assert.Contains("Latin500", (await latinDoc.GetTextObjectAtAsync(0, 0, 50, 50, CancellationToken.None))!.FontName);
+    }
+
+    [Fact]
     public async Task Fonts_Are_Scanned_Only_When_Text_Is_Written()
     {
         // Каталог шрифтов — это чтение всех файлов шрифтов системы. Сохранение

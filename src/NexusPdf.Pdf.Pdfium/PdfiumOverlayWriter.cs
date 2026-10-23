@@ -102,7 +102,7 @@ internal static partial class PdfiumOverlayWriter
                 case TextOverlay text:
                     // Гарнитура и начертание — свойства самой надписи, поэтому
                     // шрифт берётся под неё, а не общий на всю страницу.
-                    ApplyText(document, page, fonts.For(text.FontFamily, text.Bold, text.Italic), text,
+                    ApplyText(document, page, fonts.ForText(text.FontFamily, text.Bold, text.Italic, text.Text), text,
                         rotation, left, bottom, contentWidth, contentHeight);
                     contentAdded = true;
                     break;
@@ -991,7 +991,7 @@ internal static partial class PdfiumOverlayWriter
 
             // Гарнитура подобрана под начертание оригинала при распознавании;
             // неизвестная в системе откатится на шрифт по умолчанию.
-            var font = fonts.For(line.FontFamily, line.Bold, false);
+            var font = fonts.ForText(line.FontFamily, line.Bold, false, line.Text);
             if (font == null)
                 throw new PdfEngineException(
                     "Для редактируемого текста нужен системный шрифт TTF (Segoe UI/Arial), но он не найден.");
@@ -1145,7 +1145,7 @@ internal static partial class PdfiumOverlayWriter
             ? replacement.ColorArgb
             : (a0 << 24) | (r0 << 16) | (g0 << 8) | b0;
 
-        var font = fonts.For(replacement.FontFamily, replacement.Bold, replacement.Italic);
+        var font = fonts.ForText(replacement.FontFamily, replacement.Bold, replacement.Italic, replacement.Text);
         if (font == null)
             throw new PdfEngineException(
                 "Для смены шрифта нужен системный TTF (Segoe UI/Arial), но он не найден.");
