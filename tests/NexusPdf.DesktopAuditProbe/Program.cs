@@ -439,6 +439,12 @@ internal static class Program
         await _services.SaveService.SaveAsAsync(_document.Document, saved, keepBackup: false, CancellationToken.None);
         await _main.ViewModel.OpenFilesAsync(new[] { saved });
         var reopened = _main.ViewModel.ActiveDocument ?? throw new InvalidOperationException("Saved file did not open");
+        // После «Сохранить как» вкладка переходит на записанный файл: источник
+        // получает новый Id, и страницы пересобираются следующим проходом
+        // диспетчера. Брать страницу надо уже из нового состава.
+        await WaitUntilAsync(() => reopened.Pages.Count > 0 &&
+            reopened.Document.Handles.ContainsKey(reopened.Pages[0].PageRef.SourceId),
+            "The tab shows the saved file after Save As");
         var reopenedPage = reopened.Pages[0];
         await reopened.EnsureStoredTextBlocksAsync(reopenedPage);
         Require(await reopened.EditTextBlockAsync(reopenedPage, block!.XPt + 4, block.YPt + 4),
