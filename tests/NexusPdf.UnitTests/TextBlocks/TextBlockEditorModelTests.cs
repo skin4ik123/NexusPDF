@@ -315,4 +315,56 @@ public sealed class TextBlockEditorModelTests : IDisposable
         Assert.Equal(2 * Pad + 20, e.Block.WidthPt, 6);
         Assert.False(e.IsEmpty);
     }
+
+    [Fact]
+    public void SetIndents_Applies_To_Selected_Paragraphs()
+    {
+        var e = Editor("aa\nbb\ncc");
+        e.PlaceCaretAt(new TextPosition(0, 1));
+        e.PlaceCaretAt(new TextPosition(1, 1), extend: true);
+
+        e.SetIndents(15, 5);
+
+        Assert.Equal((15.0, 5.0), (e.Block.Paragraphs[0].FirstLineIndentPt, e.Block.Paragraphs[0].LeftIndentPt));
+        Assert.Equal((15.0, 5.0), (e.Block.Paragraphs[1].FirstLineIndentPt, e.Block.Paragraphs[1].LeftIndentPt));
+        Assert.Equal((0.0, 0.0), (e.Block.Paragraphs[2].FirstLineIndentPt, e.Block.Paragraphs[2].LeftIndentPt));
+        Assert.True(e.Undo());
+        Assert.Equal(0.0, e.Block.Paragraphs[0].FirstLineIndentPt);
+    }
+
+    [Fact]
+    public void New_Paragraph_Keeps_The_Indents()
+    {
+        var e = Editor("ab");
+        e.SetIndents(10, 4);
+        e.MoveCaret(CaretMove.BlockEnd, false);
+        e.NewParagraph();
+        Assert.Equal((10.0, 4.0), (e.Block.Paragraphs[1].FirstLineIndentPt, e.Block.Paragraphs[1].LeftIndentPt));
+    }
+
+    [Fact]
+    public void Caret_On_The_First_Line_Includes_The_Indent()
+    {
+        var e = Editor("ab");
+        e.SetIndents(10, 0);
+        e.MoveCaret(CaretMove.BlockStart, false);
+        Assert.Equal(Pad + 10, e.CaretRect().X, 6);
+
+        var empty = Editor("");
+        empty.SetIndents(10, 0);
+        Assert.Equal(Pad + 10, empty.CaretRect().X, 6);
+    }
+
+    [Fact]
+    public void SetVerticalAlign_Moves_The_Lines_Of_A_Fixed_Frame()
+    {
+        var e = Editor("a");
+        e.SetFrame(0, 0, 100, 2 * Pad + 40, TextBlockWidthMode.Fixed, autoHeight: false, shrinkToFit: false, 0);
+        var top = e.CaretRect().Top;
+
+        e.SetVerticalAlign(TextVerticalAlign.Bottom);
+
+        Assert.Equal(TextVerticalAlign.Bottom, e.Block.VerticalAlign);
+        Assert.True(e.CaretRect().Top > top + 20);
+    }
 }

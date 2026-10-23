@@ -265,4 +265,96 @@ public sealed class TextBlockLayoutTests : IDisposable
         Assert.Contains(layout.Decorations, d => d.YPt > baseline);   // подчёркивание ниже базовой линии
         Assert.Contains(layout.Decorations, d => d.YPt < baseline);   // зачёркивание выше
     }
+
+    private static TextBlockOverlay Indented(string text, double width, double firstLine, double left) =>
+        Block(text, Mono(), width: width) is var b
+            ? b with { Paragraphs = b.Paragraphs.Select(p => p with { FirstLineIndentPt = firstLine, LeftIndentPt = left }).ToList() }
+            : b;
+
+    [Fact]
+    public void Center_And_Bottom_Shift_Lines_In_A_Fixed_Frame()
+    {
+        var frame = Block("a", Mono(), autoHeight: false, height: 2 * Pad + 40);
+        var top = Lay(frame).Lines[0];
+        var free = 40 - top.HeightPt;
+
+        var center = Lay(frame with { VerticalAlign = TextVerticalAlign.Center });
+        var bottom = Lay(frame with { VerticalAlign = TextVerticalAlign.Bottom });
+
+        Assert.Equal(Pad, top.TopPt, 6);
+        Assert.Equal(Pad + free / 2, center.Lines[0].TopPt, 6);
+        Assert.Equal(Pad + free, bottom.Lines[0].TopPt, 6);
+        Assert.Equal(top.BaselinePt + free, bottom.Lines[0].BaselinePt, 6);
+        Assert.Equal(top.BaselinePt + free, bottom.Lines[0].Pieces[0].BaselinePt, 6);
+        Assert.Equal(2 * Pad + 40, bottom.HeightPt, 6);
+    }
+
+    [Fact]
+    public void Vertical_Align_Moves_Decorations_With_The_Text()
+    {
+        var frame = Block("ab", Mono() with { Underline = true }, autoHeight: false, height: 2 * Pad + 40);
+        var top = Lay(frame);
+        var bottom = Lay(frame with { VerticalAlign = TextVerticalAlign.Bottom });
+        var free = 40 - top.Lines[0].HeightPt;
+        Assert.Equal(top.Decorations[0].YPt + free, bottom.Decorations[0].YPt, 6);
+    }
+
+    [Fact]
+    public void Overflowing_Text_Stays_At_The_Top()
+    {
+        var frame = Block("aaa bbb ccc", Mono(), width: 2 * Pad + 15, autoHeight: false, height: 2 * Pad + 5)
+            with { VerticalAlign = TextVerticalAlign.Bottom };
+        var layout = Lay(frame);
+        Assert.True(layout.Overflows);
+        Assert.Equal(Pad, layout.Lines[0].TopPt, 6);
+    }
+
+    [Fact]
+    public void Auto_Height_Ignores_Vertical_Align()
+    {
+        var frame = Block("a", Mono(), height: 2 * Pad + 40) with { VerticalAlign = TextVerticalAlign.Bottom };
+        var layout = Lay(frame);
+        Assert.Equal(Pad, layout.Lines[0].TopPt, 6);
+        Assert.Equal(2 * Pad + layout.Lines[0].HeightPt, layout.HeightPt, 6);
+    }
+
+    [Fact]
+    public void First_Line_Indent_Narrows_The_First_Line()
+    {
+        var width = 2 * Pad + 40;
+        Assert.Equal(["aaa bbb ", "ccc"], Lines(Lay(Indented("aaa bbb ccc", width, 0, 0))));
+
+        var layout = Lay(Indented("aaa bbb ccc", width, 10, 0));
+
+        Assert.Equal(["aaa ", "bbb ccc"], Lines(layout));
+        Assert.Equal(Pad + 10, layout.Lines[0].Pieces[0].XPt, 6);
+        Assert.Equal(Pad, layout.Lines[1].Pieces[0].XPt, 6);
+    }
+
+    [Fact]
+    public void Hanging_Indent_Starts_The_First_Line_Left_Of_The_Rest()
+    {
+        var layout = Lay(Indented("aaa bbb ccc", 2 * Pad + 40, -10, 10));
+
+        Assert.Equal(["aaa bbb ", "ccc"], Lines(layout));
+        Assert.Equal(Pad, layout.Lines[0].Pieces[0].XPt, 6);
+        Assert.Equal(Pad + 10, layout.Lines[1].Pieces[0].XPt, 6);
+    }
+
+    [Fact]
+    public void Right_Align_Ends_At_The_Frame_Edge_Despite_Indent()
+    {
+        var block = Indented("ab", 2 * Pad + 40, 0, 10);
+        block = block with { Paragraphs = [block.Paragraphs[0] with { Align = TextAlign.Right }] };
+        var piece = Lay(block).Lines[0].Pieces[0];
+        Assert.Equal(Pad + 40, piece.XPt + piece.WidthPt, 6);
+    }
+
+    [Fact]
+    public void Auto_Width_Grows_By_The_Indent()
+    {
+        var block = Block("ab", Mono(), mode: TextBlockWidthMode.AutoWidth);
+        block = block with { Paragraphs = [block.Paragraphs[0] with { LeftIndentPt = 10 }] };
+        Assert.Equal(2 * Pad + 10 + 10, Lay(block).WidthPt, 6);
+    }
 }

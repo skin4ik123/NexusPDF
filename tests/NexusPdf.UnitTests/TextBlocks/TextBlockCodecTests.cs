@@ -124,4 +124,62 @@ public sealed class TextBlockCodecTests
         var json = "{\"V\":1,\"X\":0,\"Y\":0,\"W\":10,\"H\":10,\"R\":0,\"WM\":\"Fixed\",\"AH\":true,\"SF\":false,\"P\":[" + paragraphs + "]}";
         Assert.Null(TextBlockCodec.Decode(json, [], Guid.NewGuid()));
     }
+
+    [Fact]
+    public void Round_Trip_Keeps_Vertical_Align_And_Indents()
+    {
+        var original = Sample() with { VerticalAlign = TextVerticalAlign.Bottom };
+        original = original with
+        {
+            Paragraphs = [original.Paragraphs[0] with { FirstLineIndentPt = -12.5, LeftIndentPt = 20 }, original.Paragraphs[1]],
+        };
+        var pieces = new[] { new TextPiece(0, 0, "SECRET 42"), new TextPiece(1, 0, "second") };
+
+        var decoded = TextBlockCodec.Decode(TextBlockCodec.EncodeStructure(original), pieces, Guid.NewGuid());
+
+        Assert.NotNull(decoded);
+        Assert.Equal(TextVerticalAlign.Bottom, decoded!.VerticalAlign);
+        Assert.Equal((-12.5, 20.0), (decoded.Paragraphs[0].FirstLineIndentPt, decoded.Paragraphs[0].LeftIndentPt));
+        Assert.Equal((0.0, 0.0), (decoded.Paragraphs[1].FirstLineIndentPt, decoded.Paragraphs[1].LeftIndentPt));
+    }
+
+    [Fact]
+    public void Defaults_Are_Not_Written()
+    {
+        var json = TextBlockCodec.EncodeStructure(Sample());
+        Assert.DoesNotContain("\"VA\"", json);
+        Assert.DoesNotContain("\"FI\"", json);
+        Assert.DoesNotContain("\"LI\"", json);
+    }
+
+    [Fact]
+    public void Old_Mark_Without_New_Keys_Decodes_As_Before()
+    {
+        const string json = "{\"V\":1,\"X\":0,\"Y\":0,\"W\":10,\"H\":10,\"R\":0,\"WM\":\"Fixed\",\"AH\":true,\"SF\":false," +
+                            "\"P\":[{\"A\":\"Left\",\"LS\":1,\"Runs\":[{\"L\":1,\"S\":{\"F\":\"A\",\"Sz\":10}}]}]}";
+
+        var decoded = TextBlockCodec.Decode(json, [new TextPiece(0, 0, "x")], Guid.NewGuid());
+
+        Assert.NotNull(decoded);
+        Assert.Equal(TextVerticalAlign.Top, decoded!.VerticalAlign);
+        Assert.Equal((0.0, 0.0), (decoded.Paragraphs[0].FirstLineIndentPt, decoded.Paragraphs[0].LeftIndentPt));
+    }
+
+    [Theory]
+    [InlineData("\"VA\":\"Middle\",")]
+    [InlineData("\"VA\":\"1\",")]
+    public void Decode_Rejects_Unknown_Vertical_Align(string extra)
+    {
+        var json = "{\"V\":1,\"X\":0,\"Y\":0,\"W\":10,\"H\":10,\"R\":0,\"WM\":\"Fixed\",\"AH\":true,\"SF\":false," + extra +
+                   "\"P\":[{\"A\":\"Left\",\"LS\":1,\"Runs\":[{\"L\":1,\"S\":{\"F\":\"A\",\"Sz\":10}}]}]}";
+        Assert.Null(TextBlockCodec.Decode(json, [new TextPiece(0, 0, "x")], Guid.NewGuid()));
+    }
+
+    [Fact]
+    public void Decode_Rejects_Indent_Out_Of_Range()
+    {
+        const string json = "{\"V\":1,\"X\":0,\"Y\":0,\"W\":10,\"H\":10,\"R\":0,\"WM\":\"Fixed\",\"AH\":true,\"SF\":false," +
+                            "\"P\":[{\"A\":\"Left\",\"LS\":1,\"LI\":1001,\"Runs\":[{\"L\":1,\"S\":{\"F\":\"A\",\"Sz\":10}}]}]}";
+        Assert.Null(TextBlockCodec.Decode(json, [new TextPiece(0, 0, "x")], Guid.NewGuid()));
+    }
 }

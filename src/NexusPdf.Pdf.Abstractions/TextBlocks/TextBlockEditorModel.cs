@@ -331,11 +331,13 @@ public sealed class TextBlockEditorModel
     {
         if (line.Pieces.Count == 0)
         {
-            return _paras[line.Paragraph].Align switch
+            var indent = TextBlockLayout.IndentPt(Block.Paragraphs[line.Paragraph], line.Start == 0);
+            var inner = Layout.WidthPt - 2 * TextBlockLayout.PaddingPt;
+            return TextBlockLayout.PaddingPt + _paras[line.Paragraph].Align switch
             {
-                TextAlign.Center => Layout.WidthPt / 2,
-                TextAlign.Right => Layout.WidthPt - TextBlockLayout.PaddingPt,
-                _ => TextBlockLayout.PaddingPt,
+                TextAlign.Center => indent + (inner - indent) / 2,
+                TextAlign.Right => inner,
+                _ => indent,
             };
         }
         foreach (var piece in line.Pieces)
@@ -439,6 +441,20 @@ public sealed class TextBlockEditorModel
     public void SetAlign(TextAlign align) => ForParagraphs(p => p.Align = align);
 
     public void SetLineSpacing(double spacing) => ForParagraphs(p => p.Spacing = Math.Clamp(spacing, 0.5, 5));
+
+    /// <summary>Отступы абзацев выделения: первой строки (отрицательный — выступ) и слева.</summary>
+    public void SetIndents(double firstLinePt, double leftPt) => ForParagraphs(p =>
+    {
+        p.FirstIndent = ClampNumber(firstLinePt, -1000, 1000, 0);
+        p.LeftIndent = ClampNumber(leftPt, -1000, 1000, 0);
+    });
+
+    /// <summary>Положение строк в рамке заданной высоты — свойство рамки, как AutoHeight.</summary>
+    public void SetVerticalAlign(TextVerticalAlign align)
+    {
+        _frame = _frame with { VerticalAlign = Enum.IsDefined(align) ? align : TextVerticalAlign.Top };
+        Relayout();
+    }
 
     private void ForParagraphs(Action<Para> change)
     {
@@ -644,6 +660,8 @@ public sealed class TextBlockEditorModel
 
         public TextAlign Align { get; set; }
         public double Spacing { get; set; }
+        public double FirstIndent { get; set; }
+        public double LeftIndent { get; set; }
         public string Text => _text.ToString();
 
         public static Para Empty(TextStyle style, TextAlign align, double spacing) =>
@@ -651,7 +669,11 @@ public sealed class TextBlockEditorModel
 
         public static Para From(TextParagraph paragraph, TextStyle fallback)
         {
-            var para = new Para { Align = paragraph.Align, Spacing = paragraph.LineSpacing };
+            var para = new Para
+            {
+                Align = paragraph.Align, Spacing = paragraph.LineSpacing,
+                FirstIndent = paragraph.FirstLineIndentPt, LeftIndent = paragraph.LeftIndentPt,
+            };
             foreach (var run in paragraph.Runs)
             {
                 para._text.Append(run.Text);
@@ -664,7 +686,8 @@ public sealed class TextBlockEditorModel
 
         public Para Clone() => new()
         {
-            Align = Align, Spacing = Spacing, _text = new StringBuilder(Text), _spans = new List<(int, TextStyle)>(_spans),
+            Align = Align, Spacing = Spacing, FirstIndent = FirstIndent, LeftIndent = LeftIndent,
+            _text = new StringBuilder(Text), _spans = new List<(int, TextStyle)>(_spans),
         };
 
         public TextParagraph ToParagraph()
@@ -677,7 +700,7 @@ public sealed class TextBlockEditorModel
                 runs.Add(new TextRun(text.Substring(offset, length), style));
                 offset += length;
             }
-            return new TextParagraph(runs, Align, Spacing);
+            return new TextParagraph(runs, Align, Spacing, FirstIndent, LeftIndent);
         }
 
         public TextStyle StyleAt(int offset)
@@ -707,7 +730,7 @@ public sealed class TextBlockEditorModel
         {
             SplitAt(offset);
             var index = SpanIndexAt(offset);
-            var tail = new Para { Align = Align, Spacing = Spacing };
+            var tail = new Para { Align = Align, Spacing = Spacing, FirstIndent = FirstIndent, LeftIndent = LeftIndent };
             tail._text.Append(Text, offset, _text.Length - offset);
             tail._spans = _spans.Skip(index).ToList();
             var edgeStyle = StyleAt(offset);
