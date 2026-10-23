@@ -159,9 +159,9 @@ public sealed partial class DocumentViewModel
         var edited = edit.Model.Block with { PlacedRotation = edit.Page.PageRef.RotationOffset };
         if (!TextBlockSessionService.SameContent(edit.StartBlock, edited))
         {
+            // Оформление по умолчанию меняет только «Сделать оформлением по
+            // умолчанию»: иначе правка чужого блока делала бы его стиль своим.
             TextBlockSessionService.Commit(Document.Session, edit.Page.LogicalIndex, edit.Original, edit.StoredId, edited);
-            if (edited.Paragraphs.LastOrDefault(p => p.Text.Length > 0) is { } last)
-                RememberTextDefaults?.Invoke(last.Runs[^1].Style, last.Align, last.LineSpacing);
         }
         if (StatusText == Loc.Get("TextBlockTyping"))
             StatusText = IsTextTool ? Loc.Get("TextToolHint") : Loc.Get("Ready");
