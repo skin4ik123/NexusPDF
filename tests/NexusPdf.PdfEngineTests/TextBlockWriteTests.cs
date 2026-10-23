@@ -248,6 +248,25 @@ public sealed class TextBlockWriteTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Fonts_Are_Scanned_Only_When_Text_Is_Written()
+    {
+        // Каталог шрифтов — это чтение всех файлов шрифтов системы. Сохранение
+        // и показ правок без текста не должны за него платить.
+        var calls = 0;
+        await using var engine = new PdfiumRenderEngine(null, () => { calls++; return _fonts; });
+        var target = Path.Combine(_dir, "no-text.pdf");
+        await using (var doc = await engine.OpenAsync(Source(), null, CancellationToken.None))
+        {
+            await engine.ComposeAsync([new ComposedPage(doc, 0, 0,
+                [new ShapeAnnotationDraft(10, 10, 50, 50, 0xFF000000, 0, 1, false, "", "")])], target, CancellationToken.None);
+            Assert.Equal(0, calls);
+
+            await engine.ComposeAsync([new ComposedPage(doc, 0, 0, [Block(20, 20, 0, "Now text")])], target, CancellationToken.None);
+        }
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
     public async Task Block_Counts_As_Page_Text_And_Replacement_Needs_A_Full_Redraw()
     {
         var block = Block(40, 40, 0, "Text");

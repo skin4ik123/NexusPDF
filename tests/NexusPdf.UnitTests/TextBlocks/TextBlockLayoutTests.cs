@@ -200,6 +200,10 @@ public sealed class TextBlockLayoutTests : IDisposable
         Assert.True(layout.Overflows);
         Assert.Equal(text, string.Concat(layout.Lines.SelectMany(l => l.Pieces).Select(p => p.Text)));
         Assert.Equal(2 * Pad + 10, layout.HeightPt);
+        // Редактор показывает и то, что ниже рамки: печатать вслепую нельзя.
+        var last = layout.Lines[^1];
+        Assert.Equal(last.TopPt + last.HeightPt + Pad, layout.ContentHeightPt, 6);
+        Assert.True(layout.ContentHeightPt > layout.HeightPt);
     }
 
     [Fact]
@@ -207,6 +211,7 @@ public sealed class TextBlockLayoutTests : IDisposable
     {
         var layout = Lay(Block("aaa bbb ccc", Mono(), width: 2 * Pad + 30, height: 5));
         Assert.Equal(2 * Pad + layout.Lines.Sum(l => l.HeightPt), layout.HeightPt, 6);
+        Assert.Equal(layout.HeightPt, layout.ContentHeightPt, 6);
         Assert.False(layout.Overflows);
     }
 

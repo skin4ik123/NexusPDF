@@ -24,24 +24,30 @@ public sealed class PdfiumRenderEngine : IPdfRenderEngine
     /// показываются и печатаются: правка AcroForm без XFA-данных дала бы в
     /// Adobe Reader прежние значения.
     /// </param>
-    public PdfiumRenderEngine(IXfaPacketWriter? xfaWriter) : this(xfaWriter, null) { }
+    public PdfiumRenderEngine(IXfaPacketWriter? xfaWriter) : this(xfaWriter, (IFontProvider?)null) { }
 
     /// <param name="fonts">
     /// Шрифты текстовых блоков. null — шрифты системы; тесты подставляют свой
     /// каталог, чтобы раскладка не зависела от машины.
     /// </param>
     public PdfiumRenderEngine(IXfaPacketWriter? xfaWriter, IFontProvider? fonts)
+        : this(xfaWriter, () => fonts ?? FontCatalog.System) { }
+
+    /// <param name="fonts">
+    /// Каталог шрифтов, который строится только при первой записи текста:
+    /// сканирование всех шрифтов системы — это чтение сотен файлов, и платить
+    /// за него сохранению без текста незачем.
+    /// </param>
+    public PdfiumRenderEngine(IXfaPacketWriter? xfaWriter, Func<IFontProvider> fonts)
     {
         XfaWriter = xfaWriter;
-        _fonts = fonts;
+        Fonts = new Lazy<IFontProvider>(fonts, LazyThreadSafetyMode.ExecutionAndPublication);
     }
-
-    private readonly IFontProvider? _fonts;
 
     internal IXfaPacketWriter? XfaWriter { get; }
 
-    /// <summary>Каталог шрифтов блоков; системный сканируется только при первом обращении.</summary>
-    internal IFontProvider Fonts => _fonts ?? FontCatalog.System;
+    /// <summary>Каталог шрифтов надписей и блоков — по первому требованию.</summary>
+    internal Lazy<IFontProvider> Fonts { get; }
 
     public string EngineName => "PDFium";
 

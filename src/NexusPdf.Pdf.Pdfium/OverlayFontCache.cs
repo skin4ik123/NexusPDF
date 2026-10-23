@@ -13,7 +13,7 @@ namespace NexusPdf.Pdf.Pdfium;
 /// месте. Ключ — путь к файлу, поэтому «Arial обычный» с двух разных страниц
 /// встраивается один раз.
 /// </summary>
-internal sealed class OverlayFontCache(FpdfDocumentT document, IFontProvider provider)
+internal sealed class OverlayFontCache(FpdfDocumentT document, Lazy<IFontProvider> fonts)
 {
     private const int FpdfFontTrueType = 2;
 
@@ -22,8 +22,8 @@ internal sealed class OverlayFontCache(FpdfDocumentT document, IFontProvider pro
 
     private readonly Dictionary<FontFaceRef, FpdfFontT?> _byFace = new();
 
-    /// <summary>Каталог, по которому верстаются текстовые блоки.</summary>
-    public IFontProvider Provider => provider;
+    /// <summary>Каталог, по которому верстаются текстовые блоки (строится при первом обращении).</summary>
+    public IFontProvider Provider => fonts.Value;
 
     /// <summary>Шрифт по умолчанию. null — если в системе нет ни одной гарнитуры каталога.</summary>
     public FpdfFontT? Default =>
@@ -45,7 +45,7 @@ internal sealed class OverlayFontCache(FpdfDocumentT document, IFontProvider pro
     /// <summary>Начертание из каталога, если его можно вписать в PDF.</summary>
     private FpdfFontT? FromProvider(string family, bool bold, bool italic) =>
         !string.IsNullOrWhiteSpace(family) &&
-        provider.Resolve(family, bold, italic) is { Embeddable: true, Supported: true } face
+        Provider.Resolve(family, bold, italic) is { Embeddable: true, Supported: true } face
             ? ForFace(face.Ref)
             : null;
 
@@ -77,7 +77,7 @@ internal sealed class OverlayFontCache(FpdfDocumentT document, IFontProvider pro
         FpdfFontT? font = null;
         try
         {
-            var bytes = provider.Load(face).ExtractFace();
+            var bytes = Provider.Load(face).ExtractFace();
             fixed (byte* data = bytes)
             {
                 var loaded = fpdf_edit.FPDFTextLoadFont(

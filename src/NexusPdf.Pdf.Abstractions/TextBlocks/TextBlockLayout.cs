@@ -26,7 +26,16 @@ public sealed record LaidOutLine(
 /// </summary>
 public sealed record LaidOutBlock(
     double WidthPt, double HeightPt, IReadOnlyList<LaidOutLine> Lines,
-    IReadOnlyList<LaidOutDecoration> Decorations, bool Overflows, double Scale);
+    IReadOnlyList<LaidOutDecoration> Decorations, bool Overflows, double Scale)
+{
+    /// <summary>
+    /// Высота с учётом строк, не вместившихся в рамку заданной высоты: столько
+    /// показывает редактор, чтобы не печатать вслепую. Не меньше рамки.
+    /// </summary>
+    public double ContentHeightPt => Lines.Count == 0
+        ? HeightPt
+        : Math.Max(HeightPt, Lines[^1].TopPt + Lines[^1].HeightPt + TextBlockLayout.PaddingPt);
+}
 
 /// <summary>
 /// Вёрстка текстового блока. Одна и та же для экрана, рамки и записи в PDF —

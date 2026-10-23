@@ -67,6 +67,13 @@ public static class TextBlockStyleCommands
         static uint Expand(uint nibble) => nibble << 4 | nibble;
     }
 
+    /// <summary>
+    /// Сочетание ли это (Ctrl+буква), а не ввод буквы. AltGr приходит как
+    /// Ctrl+Alt и набирает буквы (польское ą, @ на чешской раскладке) — такие
+    /// нажатия сочетаниями не считаются, как и в WPF-жестах.
+    /// </summary>
+    public static bool IsShortcut(bool control, bool alt) => control && !alt;
+
     /// <summary>Цвет как «#RRGGBB» (прозрачность показывается, только если она не полная).</summary>
     public static string FormatColor(uint argb) =>
         (argb >> 24) == 0xFF ? $"#{argb & 0xFFFFFF:X6}" : $"#{argb:X8}";

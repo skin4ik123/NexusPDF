@@ -46,6 +46,12 @@ public sealed partial class DocumentViewModel
     /// <summary>Шрифты блоков — те же, которыми их пишет движок.</summary>
     private static IFontProvider BlockFonts => FontCatalog.System;
 
+    /// <summary>
+    /// Каталог строится в фоне: первое сканирование шрифтов системы заметно по
+    /// времени и не должно замораживать окно на щелчке.
+    /// </summary>
+    private static Task EnsureBlockFontsAsync() => Task.Run(() => _ = FontCatalog.System.Families);
+
     public void ToggleTextTool()
     {
         if (IsTextTool)
@@ -71,8 +77,9 @@ public sealed partial class DocumentViewModel
     }
 
     /// <summary>Щелчок инструментом: блок без переноса, растёт вправо при наборе.</summary>
-    public Task BeginTextBlockAtAsync(PageViewModel page, double xPt, double yPt)
+    public async Task BeginTextBlockAtAsync(PageViewModel page, double xPt, double yPt)
     {
+        await EnsureBlockFontsAsync();
         var (style, align, spacing) = Defaults();
         var lineHeight = style.FontSizePt * 1.2;
         var block = NewBlock(
@@ -80,18 +87,17 @@ public sealed partial class DocumentViewModel
             2 * TextBlockLayout.PaddingPt + 1, 2 * TextBlockLayout.PaddingPt + lineHeight,
             TextBlockWidthMode.AutoWidth, style, align, spacing, page);
         StartTextEdit(page, block, null, null, coversOriginal: false);
-        return Task.CompletedTask;
     }
 
     /// <summary>Протянутая рамка: ширина задана, текст переносится по словам, высота растёт сама.</summary>
-    public Task BeginTextBlockInRectAsync(PageViewModel page, OverlayBox rect)
+    public async Task BeginTextBlockInRectAsync(PageViewModel page, OverlayBox rect)
     {
+        await EnsureBlockFontsAsync();
         var (style, align, spacing) = Defaults();
         var box = OverlayGeometry.Normalize(rect);
         var block = NewBlock(box.XPt, box.YPt, box.WidthPt, box.HeightPt,
             TextBlockWidthMode.Fixed, style, align, spacing, page);
         StartTextEdit(page, block, null, null, coversOriginal: false);
-        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -102,6 +108,7 @@ public sealed partial class DocumentViewModel
     public async Task<bool> EditTextBlockAsync(PageViewModel page, double xPt, double yPt)
     {
         if (IsBusy) return false;
+        await EnsureBlockFontsAsync();
         var tolerance = 2 / Math.Max(Zoom, 0.1);
 
         var overlays = page.PageRef.OverlayList;

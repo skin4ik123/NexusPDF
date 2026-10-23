@@ -65,4 +65,12 @@ public sealed class TextBlockStyleCommandsTests
     {
         Assert.False(TextBlockStyleCommands.TryParseColor(text, out _));
     }
+
+    [Theory]
+    [InlineData(true, false, true)]    // Ctrl+B — жирный
+    [InlineData(true, true, false)]    // AltGr = Ctrl+Alt: польское ą, @ на чешской раскладке — это буквы
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    public void Only_Plain_Ctrl_Is_A_Shortcut(bool control, bool alt, bool expected) =>
+        Assert.Equal(expected, TextBlockStyleCommands.IsShortcut(control, alt));
 }
