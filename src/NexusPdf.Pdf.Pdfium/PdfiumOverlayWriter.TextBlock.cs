@@ -90,10 +90,11 @@ internal static partial class PdfiumOverlayWriter
     private static void RemoveTextBlock(FpdfPageT page, Guid blockId)
     {
         var id = blockId.ToString("N");
+        var reader = new PdfiumTextBlockMarks.Reader();
         for (var i = fpdf_edit.FPDFPageCountObjects(page) - 1; i >= 0; i--)
         {
             var obj = fpdf_edit.FPDFPageGetObject(page, i);
-            if (obj == null || obj.__Instance == IntPtr.Zero || PdfiumTextBlockMarks.Read(obj)?.Id != id)
+            if (obj == null || obj.__Instance == IntPtr.Zero || reader.Read(obj)?.Id != id)
                 continue;
             if (fpdf_edit.FPDFPageRemoveObject(page, obj) != 0)
                 fpdf_edit.FPDFPageObjDestroy(obj); // владение вернулось нам
