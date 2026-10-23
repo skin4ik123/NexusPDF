@@ -955,6 +955,7 @@
   "FontNotSupported": "Unsupported format (TrueType needed)",
   "FontLarge": "Large file — the PDF will grow noticeably",
   "FontWrittenWith": "Will be written with {0}",
+  "TextBlockUnsupportedScript": "This script isn't supported in text blocks yet (right-to-left and complex scripts)",
   "TextEditRasterNeeded": "This line can only be changed by flattening the page",
   "TextEditRasterNeededHint": "Its text sits inside a nested object of the document and cannot be rewritten in place. NexusPDF will erase the line and put the new text over it — but to remove the old letters for good, this page becomes an image when you save. Text elsewhere on this page will stop being selectable and searchable. Other pages are untouched.",
   "TextEditRasterAccept": "Edit and flatten the page",
