@@ -1157,7 +1157,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     /// </summary>
     public bool ShowsTextProperties => !HasObjectSelection && HasSelection;
 
-    public bool ShowsPageProperties => !HasObjectSelection && !HasSelection;
+    public bool ShowsPageProperties => !HasObjectSelection && !HasSelection && !ShowsTextBlockProperties;
 
     /// <summary>Первые слова выделения: по ним видно, что именно взято.</summary>
     public string SelectedTextPreview
@@ -1881,8 +1881,38 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         NexusPdf.Pdf.Abstractions.OverlayGeometry.AbilitiesOf(ToDisplayFrame(s.Overlay, s.Page)).CanMove;
 
     public string SelectedObjectOrderText => SelectedObject is { } s
-        ? Loc.F("UxObjectOrder", s.OverlayIndex + 1, s.Page.PageRef.OverlayList.Count)
+        ? s.StoredId != null ? Loc.Get("UxObjectInFile")
+        : Loc.F("UxObjectOrder", s.OverlayIndex + 1, s.Page.PageRef.OverlayList.Count)
         : "";
+
+    public bool CanRotateSelectedObject => SelectedObject is { } s &&
+        NexusPdf.Pdf.Abstractions.OverlayGeometry.AbilitiesOf(ToDisplayFrame(s.Overlay, s.Page)).CanRotate;
+
+    /// <summary>Поворот выбранного блока, градусы по часовой.</summary>
+    public double SelectedObjectRotation
+    {
+        get => SelectedObject is { } s ? Math.Round(RotationOf(ToDisplayFrame(s.Overlay, s.Page)), 1) : 0;
+        set
+        {
+            if (_applyingObjectProperties || SelectedObject is not { } selection || !double.IsFinite(value)) return;
+            var rotated = NexusPdf.Pdf.Abstractions.OverlayGeometry.Rotated(ToDisplayFrame(selection.Overlay, selection.Page), value);
+            if (rotated == null)
+            {
+                RaiseObjectPropertyChanged();
+                return;
+            }
+            _applyingObjectProperties = true;
+            try
+            {
+                ReselectAfterChange(selection.Page, ApplySelectionChange(selection, rotated));
+            }
+            finally
+            {
+                _applyingObjectProperties = false;
+            }
+            RaiseObjectPropertyChanged();
+        }
+    }
 
     /// <summary>Положение и размер в миллиметрах: пользователь мыслит листом, а не пунктами.</summary>
     public double SelectedObjectXMm
@@ -1964,6 +1994,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         OnPropertyChanged(nameof(SelectedObjectOrderText));
         OnPropertyChanged(nameof(CanResizeSelectedObject));
         OnPropertyChanged(nameof(CanMoveSelectedObject));
+        OnPropertyChanged(nameof(CanRotateSelectedObject));
+        OnPropertyChanged(nameof(SelectedObjectRotation));
     }
 
     partial void OnSelectedObjectChanged(ObjectSelection? value) => RaiseObjectPropertyChanged();

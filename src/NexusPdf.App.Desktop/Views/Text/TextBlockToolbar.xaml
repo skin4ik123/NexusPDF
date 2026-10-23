@@ -1,0 +1,113 @@
+<UserControl x:Class="NexusPdf.App.Desktop.Views.Text.TextBlockToolbar"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:l="clr-namespace:NexusPdf.App.Desktop.Localization"
+             xmlns:app="clr-namespace:NexusPdf.App.Desktop"
+             xmlns:text="clr-namespace:NexusPdf.App.Desktop.Views.Text"
+             AutomationProperties.AutomationId="TextBlockToolbar">
+  <UserControl.Resources>
+    <app:EnumToBoolConverter x:Key="IsAlign"/>
+    <app:ArgbToBrushConverter x:Key="ArgbBrush"/>
+    <Style x:Key="BarButton" TargetType="ButtonBase" BasedOn="{StaticResource ToolButton}">
+      <Setter Property="Focusable" Value="False"/>
+      <Setter Property="MinWidth" Value="26"/>
+      <Setter Property="Height" Value="26"/>
+      <Setter Property="Padding" Value="4,0"/>
+      <Setter Property="Margin" Value="1,0"/>
+    </Style>
+  </UserControl.Resources>
+  <Border Background="{DynamicResource PanelBg}" BorderBrush="{DynamicResource PanelBorder}"
+          BorderThickness="1" CornerRadius="6" Padding="4">
+    <StackPanel Orientation="Horizontal">
+      <text:FontPicker x:Name="Family" VerticalAlignment="Center"/>
+
+      <Button Style="{StaticResource BarButton}" Margin="6,0,1,0" Content="−"
+              Command="{Binding TextSizeStepCommand}" CommandParameter="-"
+              ToolTip="{l:Loc TextSizeSmaller}" AutomationProperties.Name="{l:Loc TextSizeSmaller}"/>
+      <TextBox x:Name="Size" Width="40" Style="{StaticResource ThemedTextBox}" VerticalContentAlignment="Center"
+               Text="{Binding TextSizeText, UpdateSourceTrigger=LostFocus}"
+               ToolTip="{l:Loc FontSizeLabel}" AutomationProperties.Name="{l:Loc FontSizeLabel}"/>
+      <Button Style="{StaticResource BarButton}" Content="+"
+              Command="{Binding TextSizeStepCommand}" CommandParameter="+"
+              ToolTip="{l:Loc TextSizeLarger}" AutomationProperties.Name="{l:Loc TextSizeLarger}"/>
+
+      <ToggleButton Style="{StaticResource BarButton}" Margin="6,0,1,0" IsChecked="{Binding TextBold}"
+                    ToolTip="{l:Loc FontBold}" AutomationProperties.Name="{l:Loc FontBold}">
+        <TextBlock Text="B" FontWeight="Bold"/>
+      </ToggleButton>
+      <ToggleButton Style="{StaticResource BarButton}" IsChecked="{Binding TextItalic}"
+                    ToolTip="{l:Loc FontItalic}" AutomationProperties.Name="{l:Loc FontItalic}">
+        <TextBlock Text="I" FontStyle="Italic" FontFamily="Georgia"/>
+      </ToggleButton>
+      <ToggleButton Style="{StaticResource BarButton}" IsChecked="{Binding TextUnderline}"
+                    ToolTip="{l:Loc FontUnderline}" AutomationProperties.Name="{l:Loc FontUnderline}">
+        <TextBlock Text="U" TextDecorations="Underline"/>
+      </ToggleButton>
+      <ToggleButton Style="{StaticResource BarButton}" IsChecked="{Binding TextStrike}"
+                    ToolTip="{l:Loc FontStrike}" AutomationProperties.Name="{l:Loc FontStrike}">
+        <TextBlock Text="S" TextDecorations="Strikethrough"/>
+      </ToggleButton>
+
+      <Button x:Name="ColorButton" Style="{StaticResource BarButton}" Margin="6,0,1,0"
+              ToolTip="{l:Loc AtColor}" AutomationProperties.Name="{l:Loc AtColor}">
+        <Border Width="16" Height="16" CornerRadius="3" BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1"
+                Background="{Binding TextColorArgb, Converter={StaticResource ArgbBrush}}"/>
+      </Button>
+
+      <ToggleButton Style="{StaticResource BarButton}" Margin="6,0,1,0"
+                    IsChecked="{Binding TextAlignValue, Mode=OneWay, Converter={StaticResource IsAlign}, ConverterParameter=Left}"
+                    Command="{Binding SetTextAlignCommand}" CommandParameter="Left"
+                    ToolTip="{l:Loc TextAlignLeft}" AutomationProperties.Name="{l:Loc TextAlignLeft}">
+        <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8E4;"/>
+      </ToggleButton>
+      <ToggleButton Style="{StaticResource BarButton}"
+                    IsChecked="{Binding TextAlignValue, Mode=OneWay, Converter={StaticResource IsAlign}, ConverterParameter=Center}"
+                    Command="{Binding SetTextAlignCommand}" CommandParameter="Center"
+                    ToolTip="{l:Loc TextAlignCenter}" AutomationProperties.Name="{l:Loc TextAlignCenter}">
+        <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8E3;"/>
+      </ToggleButton>
+      <ToggleButton Style="{StaticResource BarButton}"
+                    IsChecked="{Binding TextAlignValue, Mode=OneWay, Converter={StaticResource IsAlign}, ConverterParameter=Right}"
+                    Command="{Binding SetTextAlignCommand}" CommandParameter="Right"
+                    ToolTip="{l:Loc TextAlignRight}" AutomationProperties.Name="{l:Loc TextAlignRight}">
+        <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8E2;"/>
+      </ToggleButton>
+      <ToggleButton Style="{StaticResource BarButton}"
+                    IsChecked="{Binding TextAlignValue, Mode=OneWay, Converter={StaticResource IsAlign}, ConverterParameter=Justify}"
+                    Command="{Binding SetTextAlignCommand}" CommandParameter="Justify"
+                    ToolTip="{l:Loc TextAlignJustify}" AutomationProperties.Name="{l:Loc TextAlignJustify}">
+        <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE700;"/>
+      </ToggleButton>
+
+      <ToggleButton x:Name="More" Style="{StaticResource BarButton}" Margin="6,0,0,0" Content="⋯"
+                    ToolTip="{l:Loc TextMoreOptions}" AutomationProperties.Name="{l:Loc TextMoreOptions}"/>
+      <Popup PlacementTarget="{Binding ElementName=More}" Placement="Bottom" StaysOpen="False"
+             AllowsTransparency="True" PopupAnimation="None"
+             IsOpen="{Binding IsChecked, ElementName=More, Mode=TwoWay}">
+        <Border Background="{DynamicResource PanelBg}" BorderBrush="{DynamicResource PanelBorder}"
+                BorderThickness="1" CornerRadius="6" Padding="10" Width="240">
+          <StackPanel>
+            <TextBlock Text="{l:Loc TextLineSpacing}" FontSize="11" Foreground="{DynamicResource TextSecondary}"/>
+            <TextBox Style="{StaticResource ThemedTextBox}" Margin="0,2,0,8"
+                     Text="{Binding TextLineSpacingText, UpdateSourceTrigger=LostFocus}"
+                     AutomationProperties.Name="{l:Loc TextLineSpacing}"/>
+            <TextBlock Text="{l:Loc TextLetterSpacing}" FontSize="11" Foreground="{DynamicResource TextSecondary}"/>
+            <TextBox Style="{StaticResource ThemedTextBox}" Margin="0,2,0,8"
+                     Text="{Binding TextLetterSpacingText, UpdateSourceTrigger=LostFocus}"
+                     AutomationProperties.Name="{l:Loc TextLetterSpacing}"/>
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+              <ToggleButton Style="{StaticResource BarButton}" IsChecked="{Binding TextSuperscript}"
+                            ToolTip="{l:Loc TextSuperscript}" AutomationProperties.Name="{l:Loc TextSuperscript}" Content="x²"/>
+              <ToggleButton Style="{StaticResource BarButton}" IsChecked="{Binding TextSubscript}"
+                            ToolTip="{l:Loc TextSubscript}" AutomationProperties.Name="{l:Loc TextSubscript}" Content="x₂"/>
+            </StackPanel>
+            <CheckBox Content="{l:Loc TextAutoHeight}" IsChecked="{Binding TextAutoHeight}" Margin="0,0,0,4"
+                      Foreground="{DynamicResource TextBrush}"/>
+            <CheckBox Content="{l:Loc TextShrinkToFit}" IsChecked="{Binding TextShrinkToFit}"
+                      Foreground="{DynamicResource TextBrush}"/>
+          </StackPanel>
+        </Border>
+      </Popup>
+    </StackPanel>
+  </Border>
+</UserControl>

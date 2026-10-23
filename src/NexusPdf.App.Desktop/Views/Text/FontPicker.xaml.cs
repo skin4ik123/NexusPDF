@@ -67,6 +67,13 @@ public partial class FontPicker : UserControl
         ShowCurrent();
     }
 
+    /// <summary>Показать гарнитуру текста под курсором, не считая это выбором.</summary>
+    internal void ShowFamily(string family)
+    {
+        Family = family;
+        ShowCurrent();
+    }
+
     private async Task OnOpenedAsync()
     {
         Search.Text = "";

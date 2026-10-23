@@ -1,4 +1,6 @@
+using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using NexusPdf.App.Desktop.Localization;
 using NexusPdf.Application;
 using NexusPdf.Pdf.Abstractions;
@@ -141,7 +143,10 @@ public sealed partial class DocumentViewModel
     {
         if (ActiveTextEdit is not { } edit) return;
         ActiveTextEdit = null;
+        edit.Model.Changed -= OnActiveTextChanged;
         OnPropertyChanged(nameof(ActiveTextBlock));
+        OnPropertyChanged(nameof(ShowsTextBlockProperties));
+        OnPropertyChanged(nameof(ShowsPageProperties));
         TextBlockEditEnded?.Invoke(this, EventArgs.Empty);
 
         var edited = edit.Model.Block with { PlacedRotation = edit.Page.PageRef.RotationOffset };
@@ -175,7 +180,11 @@ public sealed partial class DocumentViewModel
         }
         var edit = new TextBlockEdit(page, model, original, storedId, model.Block, coversOriginal);
         ActiveTextEdit = edit;
+        model.Changed += OnActiveTextChanged;
         OnPropertyChanged(nameof(ActiveTextBlock));
+        OnPropertyChanged(nameof(ShowsTextBlockProperties));
+        OnPropertyChanged(nameof(ShowsPageProperties));
+        RefreshTextStyle();
         StatusText = Loc.Get("TextBlockTyping");
         TextBlockEditStarted?.Invoke(this, edit);
     }
@@ -255,5 +264,243 @@ public sealed partial class DocumentViewModel
                 return stored;
         }
         return null;
+    }
+
+    // ----- Оформление блока в работе: панель над блоком и правая колонка -----
+
+    private const double PtPerMm = 72 / 25.4;
+    private bool _refreshingTextStyle;
+
+    private static readonly string[] TextStyleProperties =
+    [
+        nameof(TextFamily), nameof(TextSizeText), nameof(TextBold), nameof(TextItalic), nameof(TextUnderline),
+        nameof(TextStrike), nameof(TextColorArgb), nameof(TextColorHex), nameof(TextSuperscript), nameof(TextSubscript),
+        nameof(TextLetterSpacingText), nameof(TextAlignValue), nameof(TextLineSpacingText), nameof(TextAutoHeight),
+        nameof(TextShrinkToFit), nameof(TextRotationText), nameof(TextBoxXMm), nameof(TextBoxYMm), nameof(TextBoxWMm),
+        nameof(TextBoxHMm), nameof(TextOverflows),
+    ];
+
+    /// <summary>Набор в блоке идёт — показывать раздел «Текст» в правой колонке и панель над блоком.</summary>
+    public bool ShowsTextBlockProperties => ActiveTextBlock != null;
+
+    /// <summary>Просьба вернуть клавиатуру в редактор после щелчка по панели.</summary>
+    public event EventHandler? TextEditorFocusRequested;
+
+    private TextStyle CaretStyle => ActiveTextBlock?.StyleAtCaret ?? Defaults().Style;
+
+    private TextParagraph? CaretParagraph =>
+        ActiveTextBlock is { } m && m.Caret.Paragraph < m.Block.Paragraphs.Count ? m.Block.Paragraphs[m.Caret.Paragraph] : null;
+
+    public string TextFamily => CaretStyle.FontFamily;
+
+    public string TextSizeText
+    {
+        get => CaretStyle.FontSizePt.ToString("0.##", CultureInfo.CurrentCulture);
+        set
+        {
+            if (NexusPdf.Ux.TextBlockStyleCommands.TryParseSize(value, out var pt))
+                ApplyTextStyle(s => s with { FontSizePt = pt });
+            else
+                RefreshTextStyle();
+        }
+    }
+
+    public bool TextBold { get => CaretStyle.Bold; set => ApplyTextStyle(s => s with { Bold = value }); }
+    public bool TextItalic { get => CaretStyle.Italic; set => ApplyTextStyle(s => s with { Italic = value }); }
+    public bool TextUnderline { get => CaretStyle.Underline; set => ApplyTextStyle(s => s with { Underline = value }); }
+    public bool TextStrike { get => CaretStyle.Strike; set => ApplyTextStyle(s => s with { Strike = value }); }
+
+    public uint TextColorArgb => CaretStyle.ColorArgb;
+
+    public string TextColorHex
+    {
+        get => NexusPdf.Ux.TextBlockStyleCommands.FormatColor(CaretStyle.ColorArgb);
+        set
+        {
+            if (NexusPdf.Ux.TextBlockStyleCommands.TryParseColor(value, out var argb))
+                SetTextColor(argb);
+            else
+                RefreshTextStyle();
+        }
+    }
+
+    public bool TextSuperscript
+    {
+        get => CaretStyle.Baseline == BaselineShift.Superscript;
+        set => ApplyTextStyle(s => s with { Baseline = value ? BaselineShift.Superscript : BaselineShift.None });
+    }
+
+    public bool TextSubscript
+    {
+        get => CaretStyle.Baseline == BaselineShift.Subscript;
+        set => ApplyTextStyle(s => s with { Baseline = value ? BaselineShift.Subscript : BaselineShift.None });
+    }
+
+    /// <summary>Межбуквенный интервал, % размера (−50…500).</summary>
+    public string TextLetterSpacingText
+    {
+        get => CaretStyle.LetterSpacingPercent.ToString("0.#", CultureInfo.CurrentCulture);
+        set
+        {
+            if (TryParseNumber(value, -50, 500, out var percent))
+                ApplyTextStyle(s => s with { LetterSpacingPercent = percent });
+            else
+                RefreshTextStyle();
+        }
+    }
+
+    public TextAlign TextAlignValue => CaretParagraph?.Align ?? Defaults().Align;
+
+    public string TextLineSpacingText
+    {
+        get => (CaretParagraph?.LineSpacing ?? Defaults().LineSpacing).ToString("0.##", CultureInfo.CurrentCulture);
+        set
+        {
+            if (TryParseNumber(value, 0.5, 5, out var spacing) && ActiveTextBlock is { } m && !_refreshingTextStyle)
+            {
+                m.SetLineSpacing(spacing);
+                TextEditorFocusRequested?.Invoke(this, EventArgs.Empty);
+            }
+            else
+            {
+                RefreshTextStyle();
+            }
+        }
+    }
+
+    public bool TextAutoHeight
+    {
+        get => ActiveTextBlock?.Block.AutoHeight ?? true;
+        set => SetTextFrame(b => b with { AutoHeight = value });
+    }
+
+    public bool TextShrinkToFit
+    {
+        get => ActiveTextBlock?.Block.ShrinkToFit ?? false;
+        set => SetTextFrame(b => b with { ShrinkToFit = value });
+    }
+
+    /// <summary>Текст не помещается в рамку заданной высоты (виден знак «+» у рамки).</summary>
+    public bool TextOverflows => ActiveTextBlock?.Layout.Overflows ?? false;
+
+    public string TextRotationText
+    {
+        get => (ActiveTextBlock?.Block.RotationDegrees ?? 0).ToString("0.#", CultureInfo.CurrentCulture);
+        set
+        {
+            if (TryParseNumber(value, -360, 360, out var degrees))
+                SetTextFrame(b => b with { RotationDegrees = OverlayGeometry.NormalizeDegrees(degrees) });
+            else
+                RefreshTextStyle();
+        }
+    }
+
+    public double TextBoxXMm
+    {
+        get => (ActiveTextBlock?.Block.XPt ?? 0) / PtPerMm;
+        set => SetTextFrame(b => b with { XPt = value * PtPerMm });
+    }
+
+    public double TextBoxYMm
+    {
+        get => (ActiveTextBlock?.Block.YPt ?? 0) / PtPerMm;
+        set => SetTextFrame(b => b with { YPt = value * PtPerMm });
+    }
+
+    /// <summary>Заданная ширина делает блок блоком с переносом.</summary>
+    public double TextBoxWMm
+    {
+        get => (ActiveTextBlock?.Block.WidthPt ?? 0) / PtPerMm;
+        set => SetTextFrame(b => b with
+        {
+            WidthPt = Math.Max(OverlayGeometry.MinimumSizePt, value * PtPerMm), WidthMode = TextBlockWidthMode.Fixed,
+        });
+    }
+
+    /// <summary>Заданная высота выключает «Высота по тексту».</summary>
+    public double TextBoxHMm
+    {
+        get => (ActiveTextBlock?.Block.HeightPt ?? 0) / PtPerMm;
+        set => SetTextFrame(b => b with { HeightPt = Math.Max(OverlayGeometry.MinimumSizePt, value * PtPerMm), AutoHeight = false });
+    }
+
+    public void SetTextFamily(string family)
+    {
+        if (string.IsNullOrWhiteSpace(family)) return;
+        ApplyTextStyle(s => s with { FontFamily = family });
+    }
+
+    public void SetTextColor(uint argb) => ApplyTextStyle(s => s with { ColorArgb = argb });
+
+    [RelayCommand]
+    private void TextSizeStep(string? direction)
+    {
+        var step = direction == "-" ? -1 : 1;
+        var size = NexusPdf.Ux.TextBlockStyleCommands.NextSize(CaretStyle.FontSizePt, step);
+        ApplyTextStyle(s => s with { FontSizePt = size });
+    }
+
+    [RelayCommand]
+    private void SetTextAlign(string? align)
+    {
+        if (ActiveTextBlock is not { } m || !Enum.TryParse<TextAlign>(align, out var value)) return;
+        m.SetAlign(value);
+        TextEditorFocusRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Оформление под курсором становится оформлением новых блоков.</summary>
+    [RelayCommand]
+    private void UseTextStyleAsDefault()
+    {
+        if (ActiveTextBlock == null) return;
+        RememberTextDefaults?.Invoke(CaretStyle, TextAlignValue, CaretParagraph?.LineSpacing ?? 1.15);
+        StatusText = Loc.Get("TextStyleSavedAsDefault");
+        TextEditorFocusRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void ApplyTextStyle(Func<TextStyle, TextStyle> change)
+    {
+        if (_refreshingTextStyle || ActiveTextBlock is not { } model) return;
+        model.ApplyStyle(change);
+        TextEditorFocusRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void SetTextFrame(Func<TextBlockOverlay, TextBlockOverlay> change)
+    {
+        if (_refreshingTextStyle || ActiveTextBlock is not { } model) return;
+        var b = change(model.Block);
+        if (!double.IsFinite(b.XPt) || !double.IsFinite(b.YPt) || !double.IsFinite(b.WidthPt) || !double.IsFinite(b.HeightPt))
+        {
+            RefreshTextStyle();
+            return;
+        }
+        model.SetFrame(b.XPt, b.YPt, b.WidthPt, b.HeightPt, b.WidthMode, b.AutoHeight, b.ShrinkToFit, b.RotationDegrees);
+    }
+
+    private void OnActiveTextChanged(object? sender, EventArgs e) => RefreshTextStyle();
+
+    private void RefreshTextStyle()
+    {
+        _refreshingTextStyle = true;
+        try
+        {
+            foreach (var name in TextStyleProperties)
+                OnPropertyChanged(name);
+        }
+        finally
+        {
+            _refreshingTextStyle = false;
+        }
+    }
+
+    private static bool TryParseNumber(string? text, double min, double max, out double value)
+    {
+        var trimmed = (text ?? "").Trim().TrimEnd('%', '°').Trim();
+        if ((double.TryParse(trimmed, NumberStyles.Float, CultureInfo.CurrentCulture, out value) ||
+             double.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out value)) &&
+            double.IsFinite(value) && value >= min && value <= max)
+            return true;
+        value = 0;
+        return false;
     }
 }
