@@ -7,6 +7,9 @@ public enum BaselineShift { None, Superscript, Subscript }
 /// <summary>AutoWidth — блок растёт вправо, без переноса; Fixed — перенос по ширине рамки.</summary>
 public enum TextBlockWidthMode { AutoWidth, Fixed }
 
+/// <summary>Положение строк в рамке заданной высоты (при AutoHeight строки всегда сверху).</summary>
+public enum TextVerticalAlign { Top, Center, Bottom }
+
 /// <summary>Оформление фрагмента текста.</summary>
 /// <param name="LetterSpacingPercent">Межбуквенный интервал в процентах размера шрифта.</param>
 public sealed record TextStyle(
@@ -23,8 +26,14 @@ public sealed record TextStyle(
 /// <summary>Фрагмент текста одного оформления. Перевод строки внутри абзаца — <see cref="TextBlockText.LineBreak"/>.</summary>
 public sealed record TextRun(string Text, TextStyle Style);
 
-/// <summary>Абзац: фрагменты, выравнивание и межстрочный интервал (множитель высоты строки).</summary>
-public sealed record TextParagraph(IReadOnlyList<TextRun> Runs, TextAlign Align = TextAlign.Left, double LineSpacing = 1.15)
+/// <summary>
+/// Абзац: фрагменты, выравнивание и межстрочный интервал (множитель высоты строки).
+/// Первая строка начинается с LeftIndentPt + FirstLineIndentPt, остальные — с
+/// LeftIndentPt (отрицательный отступ первой строки — выступ, как в списках).
+/// </summary>
+public sealed record TextParagraph(
+    IReadOnlyList<TextRun> Runs, TextAlign Align = TextAlign.Left, double LineSpacing = 1.15,
+    double FirstLineIndentPt = 0, double LeftIndentPt = 0)
 {
     public string Text => string.Concat(Runs.Select(r => r.Text));
 }
@@ -44,7 +53,8 @@ public sealed record TextBlockOverlay(
     bool AutoHeight,
     bool ShrinkToFit,
     IReadOnlyList<TextParagraph> Paragraphs,
-    Guid BlockId = default) : PageOverlay;
+    Guid BlockId = default,
+    TextVerticalAlign VerticalAlign = TextVerticalAlign.Top) : PageOverlay;
 
 /// <summary>
 /// Правка блока, уже лежащего в файле: его объекты убираются со страницы и

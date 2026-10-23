@@ -182,7 +182,12 @@ public static class TextBlockLayout
 
     private sealed record LineRange(int First, int End, bool Forced, bool LastOfParagraph);
 
-    private static List<LineRange> Break(List<Glyph> glyphs, double available)
+    /// <summary>Отступ строки абзаца от левого поля рамки: первой или остальных; не меньше нуля.</summary>
+    public static double IndentPt(TextParagraph paragraph, bool firstLine) =>
+        Math.Max(0, paragraph.LeftIndentPt + (firstLine ? paragraph.FirstLineIndentPt : 0));
+
+    /// <summary>Строки абзаца: первая — шириной firstAvailable, остальные — restAvailable.</summary>
+    private static List<LineRange> Break(List<Glyph> glyphs, double firstAvailable, double restAvailable)
     {
         var lines = new List<LineRange>();
         var start = 0;
@@ -195,6 +200,7 @@ public static class TextBlockLayout
                     lines.Add(new LineRange(start, start, false, true));
                 break;
             }
+            var available = lines.Count == 0 ? firstAvailable : restAvailable;
             var width = 0.0;
             var lastBreak = -1;
             var end = glyphs.Count;
@@ -259,32 +265,51 @@ public static class TextBlockLayout
         foreach (var paragraph in block.Paragraphs)
         {
             var glyphs = Glyphs(paragraph, fonts, faces, scale);
-            var lines = Break(glyphs, available);
-            foreach (var line in lines) widest = Math.Max(widest, VisualWidth(glyphs, line));
+            var (first, rest) = (IndentPt(paragraph, true), IndentPt(paragraph, false));
+            var lines = Break(glyphs, Math.Max(0, available - first), Math.Max(0, available - rest));
+            for (var i = 0; i < lines.Count; i++)
+                widest = Math.Max(widest, (i == 0 ? first : rest) + VisualWidth(glyphs, lines[i]));
             paragraphs.Add((paragraph, glyphs, lines));
         }
         var alignWidth = fixedWidth ? available : widest;
 
-        var result = new List<LaidOutLine>();
-        var decorations = new List<LaidOutDecoration>();
-        var top = PaddingPt;
+        // Высоты строк — до расстановки: от их суммы зависит сдвиг по вертикали.
+        var measured = new List<(int Paragraph, LineRange Line, bool First, double Ascent, double Height)>();
+        var content = 0.0;
         for (var p = 0; p < paragraphs.Count; p++)
         {
             var (paragraph, glyphs, lines) = paragraphs[p];
-            foreach (var line in lines)
+            for (var i = 0; i < lines.Count; i++)
             {
-                var (ascent, natural) = Metrics(paragraph, glyphs, line, fonts, faces, scale);
+                var (ascent, natural) = Metrics(paragraph, glyphs, lines[i], fonts, faces, scale);
                 var height = natural * paragraph.LineSpacing;
-                var baseline = top + ascent;
-                var pieces = Pieces(p, paragraph, glyphs, line, alignWidth, fixedWidth, baseline, decorations);
-                var startOffset = line.First < glyphs.Count ? glyphs[line.First].Offset : paragraph.Text.Length;
-                var endOffset = line.End < glyphs.Count ? glyphs[line.End].Offset : paragraph.Text.Length;
-                result.Add(new LaidOutLine(p, startOffset, endOffset - startOffset, top, baseline, height, pieces));
-                top += height;
+                measured.Add((p, lines[i], i == 0, ascent, height));
+                content += height;
             }
         }
+        // Не вместившийся текст остаётся сверху: иначе первые строки ушли бы за рамку.
+        var free = block.AutoHeight ? 0 : Math.Max(0, block.HeightPt - 2 * PaddingPt - content);
+        var top = PaddingPt + free * block.VerticalAlign switch
+        {
+            TextVerticalAlign.Center => 0.5,
+            TextVerticalAlign.Bottom => 1.0,
+            _ => 0.0,
+        };
 
-        var content = top - PaddingPt;
+        var result = new List<LaidOutLine>();
+        var decorations = new List<LaidOutDecoration>();
+        foreach (var (p, line, first, ascent, height) in measured)
+        {
+            var (paragraph, glyphs, _) = paragraphs[p];
+            var baseline = top + ascent;
+            var pieces = Pieces(p, paragraph, glyphs, line, IndentPt(paragraph, first), alignWidth, fixedWidth,
+                baseline, decorations);
+            var startOffset = line.First < glyphs.Count ? glyphs[line.First].Offset : paragraph.Text.Length;
+            var endOffset = line.End < glyphs.Count ? glyphs[line.End].Offset : paragraph.Text.Length;
+            result.Add(new LaidOutLine(p, startOffset, endOffset - startOffset, top, baseline, height, pieces));
+            top += height;
+        }
+
         var width = fixedWidth ? block.WidthPt : widest + 2 * PaddingPt;
         var heightOut = block.AutoHeight ? content + 2 * PaddingPt : block.HeightPt;
         var overflows = !block.AutoHeight && content > block.HeightPt - 2 * PaddingPt + Epsilon;
@@ -320,8 +345,8 @@ public static class TextBlockLayout
     }
 
     private static List<LaidOutPiece> Pieces(
-        int paragraphIndex, TextParagraph paragraph, List<Glyph> glyphs, LineRange line, double alignWidth,
-        bool fixedWidth, double baseline, List<LaidOutDecoration> decorations)
+        int paragraphIndex, TextParagraph paragraph, List<Glyph> glyphs, LineRange line, double indent,
+        double alignWidth, bool fixedWidth, double baseline, List<LaidOutDecoration> decorations)
     {
         var pieces = new List<LaidOutPiece>();
         var lastVisible = LastVisible(glyphs, line);
@@ -333,12 +358,14 @@ public static class TextBlockLayout
         {
             if (glyphs[i].IsSpace) interior++;
         }
-        var extra = justify && interior > 0 ? Math.Max(0, (alignWidth - visual) / interior) : 0;
+        // Строка выравнивается в полосе от своего отступа до правого поля.
+        var room = alignWidth - indent;
+        var extra = justify && interior > 0 ? Math.Max(0, (room - visual) / interior) : 0;
 
-        var x = PaddingPt + (paragraph.Align switch
+        var x = PaddingPt + indent + (paragraph.Align switch
         {
-            TextAlign.Center => (alignWidth - visual) / 2,
-            TextAlign.Right => alignWidth - visual,
+            TextAlign.Center => (room - visual) / 2,
+            TextAlign.Right => room - visual,
             _ => 0,
         });
         var visualEnd = x + visual + extra * interior;

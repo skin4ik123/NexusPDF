@@ -20,6 +20,7 @@ public static class TextBlockCodec
     private const int MaxRuns = 100_000;
     private const int MaxTextLength = 1_000_000;
     private const double MaxCoordinate = 100_000;
+    private const double MaxIndent = 1_000;
 
     public static string EncodeStructure(TextBlockOverlay block)
     {
@@ -36,12 +37,17 @@ public static class TextBlockCodec
             w.WriteString("WM", block.WidthMode.ToString());
             w.WriteBoolean("AH", block.AutoHeight);
             w.WriteBoolean("SF", block.ShrinkToFit);
+            // Новые ключи пишутся только не по умолчанию: метка без них — та же,
+            // что писали прежние версии.
+            if (block.VerticalAlign != TextVerticalAlign.Top) w.WriteString("VA", block.VerticalAlign.ToString());
             w.WriteStartArray("P");
             foreach (var paragraph in block.Paragraphs)
             {
                 w.WriteStartObject();
                 w.WriteString("A", paragraph.Align.ToString());
                 w.WriteNumber("LS", paragraph.LineSpacing);
+                if (paragraph.FirstLineIndentPt != 0) w.WriteNumber("FI", paragraph.FirstLineIndentPt);
+                if (paragraph.LeftIndentPt != 0) w.WriteNumber("LI", paragraph.LeftIndentPt);
                 // Переводы строки внутри абзаца в PDF не пишутся (глифа нет) —
                 // их места хранятся здесь.
                 var text = paragraph.Text;
@@ -103,12 +109,14 @@ public static class TextBlockCodec
             var mode = Enum<TextBlockWidthMode>(root, "WM");
             var autoHeight = root.GetProperty("AH").GetBoolean();
             var shrink = root.GetProperty("SF").GetBoolean();
+            var vertical = root.TryGetProperty("VA", out _) ? Enum<TextVerticalAlign>(root, "VA") : TextVerticalAlign.Top;
 
             var paragraphsJson = root.GetProperty("P");
             if (paragraphsJson.ValueKind != JsonValueKind.Array || paragraphsJson.GetArrayLength() > MaxParagraphs)
                 return null;
 
-            var layouts = new List<(TextAlign Align, double Spacing, List<(int Length, TextStyle Style)> Runs, List<int> Breaks)>();
+            var layouts = new List<(TextAlign Align, double Spacing, double FirstIndent, double LeftIndent,
+                List<(int Length, TextStyle Style)> Runs, List<int> Breaks)>();
             var runCount = 0;
             long totalLength = 0;
             foreach (var p in paragraphsJson.EnumerateArray())
@@ -137,7 +145,8 @@ public static class TextBlockCodec
                         breaks.Add(at);
                     }
                 }
-                layouts.Add((Enum<TextAlign>(p, "A"), Number(p, "LS", 0.5, 5), runs, breaks));
+                layouts.Add((Enum<TextAlign>(p, "A"), Number(p, "LS", 0.5, 5),
+                    Optional(p, "FI", -MaxIndent, MaxIndent), Optional(p, "LI", -MaxIndent, MaxIndent), runs, breaks));
             }
 
             var texts = Assemble(layouts.Select(l => (l.Runs.Sum(r => r.Length), l.Breaks)).ToList(), pieces);
@@ -153,9 +162,10 @@ public static class TextBlockCodec
                     runs.Add(new TextRun(texts[i].Substring(offset, length), style));
                     offset += length;
                 }
-                paragraphs.Add(new TextParagraph(runs, layouts[i].Align, layouts[i].Spacing));
+                paragraphs.Add(new TextParagraph(runs, layouts[i].Align, layouts[i].Spacing,
+                    layouts[i].FirstIndent, layouts[i].LeftIndent));
             }
-            return new TextBlockOverlay(x, y, width, height, rotation, mode, autoHeight, shrink, paragraphs, id);
+            return new TextBlockOverlay(x, y, width, height, rotation, mode, autoHeight, shrink, paragraphs, id, vertical);
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException
                                        or FormatException or ArgumentException or OverflowException)
@@ -240,6 +250,9 @@ public static class TextBlockCodec
             throw new FormatException($"Значение {name} вне допустимого.");
         return value;
     }
+
+    private static double Optional(JsonElement e, string name, double min, double max) =>
+        e.TryGetProperty(name, out _) ? Number(e, name, min, max) : 0;
 
     private static T Enum<T>(JsonElement e, string name) where T : struct, System.Enum
     {
