@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>NexusPDF — текстовый блок (макет)</title>
+<style>
+  :root { --accent:#2563eb; --border:#d6d9e0; --panel:#ffffff; --muted:#6b7280; --bg:#eef0f4; --text:#1b1c20; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 "Segoe UI", system-ui, sans-serif; color:var(--text); background:var(--bg); }
+  h1 { font-size:20px; margin:20px 24px 4px; }
+  .sub { margin:0 24px 16px; color:var(--muted); }
+  section { background:#fff; margin:16px 24px; border:1px solid var(--border); border-radius:10px; padding:16px 20px 20px; }
+  section > h2 { font-size:16px; margin:0 0 4px; }
+  section > p.note { margin:0 0 14px; color:var(--muted); }
+  .row { display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap; }
+
+  /* окно программы */
+  .app { border:1px solid var(--border); border-radius:8px; overflow:hidden; background:#f6f7f9; flex:1 1 100%; min-width:860px; }
+  .ribbon { display:flex; gap:14px; align-items:center; padding:8px 12px; background:#fff; border-bottom:1px solid var(--border); font-size:13px; }
+  .ribbon .tool { padding:4px 8px; border-radius:6px; color:#374151; }
+  .ribbon .tool.on { background:#dbe6fd; color:var(--accent); font-weight:600; }
+  .work { display:flex; }
+  .canvas { flex:1; padding:70px 26px 30px; position:relative; }
+  .page { background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.18); padding:26px 28px; position:relative; min-height:330px; }
+  .page h3 { text-align:center; margin:0 0 14px; font:700 20px Arial, sans-serif; text-decoration:underline; }
+  table.form { width:100%; border-collapse:collapse; font:13px Arial, sans-serif; }
+  table.form td { border:1.5px solid #222; height:38px; padding:0 8px; }
+  table.form td.lbl { width:34%; text-align:right; font-weight:700; }
+
+  /* текстовый блок */
+  .block { position:absolute; border:1.5px solid var(--accent); background:rgba(37,99,235,.04); font:13px Arial, sans-serif; padding:3px 5px; }
+  .block .h { position:absolute; width:8px; height:8px; background:#fff; border:1.5px solid var(--accent); border-radius:2px; }
+  .block .rot { position:absolute; left:50%; top:-26px; width:10px; height:10px; margin-left:-5px; border-radius:50%; background:#fff; border:1.5px solid var(--accent); }
+  .block .rot::after { content:""; position:absolute; left:3px; top:10px; width:1.5px; height:14px; background:var(--accent); }
+  .caret { display:inline-block; width:1.5px; height:15px; background:#111; vertical-align:-3px; animation:blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  .sel { background:#bcd3ff; }
+
+  /* плавающая панель над блоком */
+  .float { position:absolute; display:flex; gap:4px; align-items:center; background:var(--panel); border:1px solid var(--border);
+           border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,.14); padding:5px 6px; font-size:12.5px; white-space:nowrap; z-index:5; }
+  .ctl { border:1px solid var(--border); border-radius:5px; padding:3px 7px; background:#fff; }
+  .ctl.dd::after { content:" ▾"; color:var(--muted); }
+  .btn { width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center; border-radius:5px; color:#374151; }
+  .btn.on { background:#dbe6fd; color:var(--accent); }
+  .sep { width:1px; height:20px; background:var(--border); margin:0 3px; }
+  .sw { width:16px; height:16px; border-radius:50%; display:inline-block; border:1px solid rgba(0,0,0,.15); }
+
+  /* правая панель */
+  .props { width:250px; background:#fff; border-left:1px solid var(--border); padding:10px 12px; font-size:12.5px; }
+  .props h4 { margin:10px 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  .props .line { display:flex; gap:6px; align-items:center; margin:5px 0; }
+  .props .line > span.lbl { width:78px; color:#4b5563; flex:none; }
+  .props .grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .chk { flex:none; display:inline-block; width:13px; height:13px; border:1.5px solid var(--accent); border-radius:3px; background:var(--accent); margin-right:6px; vertical-align:-2px; }
+
+  /* выпадающий список шрифтов */
+  .fontlist { width:330px; background:#fff; border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.16); font-size:13px; overflow:hidden; }
+  .fontlist .search { margin:8px; border:1.5px solid var(--accent); border-radius:6px; padding:6px 8px; color:#111; }
+  .fontlist .grp { padding:6px 12px 2px; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+  .fontlist .f { display:flex; justify-content:space-between; align-items:center; padding:5px 12px; }
+  .fontlist .f.cur { background:#eef3ff; }
+  .fontlist .f .name { font-size:15px; }
+  .fontlist .f .why { font-size:11px; color:#b45309; }
+  .fontlist .f.off { color:#9ca3af; }
+  .fontlist .f.off .why { color:#9ca3af; }
+
+  /* подписи-пояснения */
+  .callouts { flex:1 1 280px; min-width:260px; }
+  .callouts ol { margin:0; padding-left:20px; }
+  .callouts li { margin:0 0 8px; }
+  .badge { display:inline-block; min-width:18px; height:18px; border-radius:9px; background:#f59e0b; color:#fff; font:700 11px/18px "Segoe UI"; text-align:center; padding:0 5px; }
+  .pin { position:absolute; z-index:6; }
+  table.keys { border-collapse:collapse; font-size:13px; }
+  table.keys td { border-bottom:1px solid #eef0f4; padding:6px 10px 6px 0; vertical-align:top; }
+  table.keys td:first-child { white-space:nowrap; font-weight:600; }
+</style>
+</head>
+<body>
+<h1>NexusPDF — текстовый блок (этап 1), макет</h1>
+<p class="sub">Подписи интерфейса — как в программе у тебя (английский). Жёлтые номера — пояснения справа.</p>
+
+<section>
+  <h2>1. Ввод прямо на странице</h2>
+  <p class="note">Инструмент «Text» включён. Щелчок в клетку ETA — сразу мигающий курсор, над блоком панель оформления, справа — свойства.</p>
+  <div class="row">
+    <div class="app">
+      <div class="ribbon">
+        <span class="tool">Select</span><span class="tool on">T&nbsp;Text</span><span class="tool">Fill &amp; Sign</span>
+        <span class="tool">Draw</span><span class="tool">Comment</span><span class="tool">Image</span>
+      </div>
+      <div class="work">
+        <div class="canvas">
+          <div class="page">
+            <h3>POWER LIMITATION FORM</h3>
+            <table class="form">
+              <tr><td class="lbl">Date:</td><td></td></tr>
+              <tr><td class="lbl">Vessel Name:</td><td>MV EXAMPLE</td></tr>
+              <tr><td class="lbl">IMO Number:</td><td>9000000</td></tr>
+              <tr><td class="lbl">ETA Southwest Pass:</td><td><div style="position:relative; height:38px;">
+                <div class="block" style="left:-4px; top:4px; right:-4px; height:30px;">
+                  <span>24 Oct 2026, 06:00 LT</span><span class="caret"></span>
+                  <span class="h" style="left:-5px;top:-5px"></span><span class="h" style="left:50%;margin-left:-4px;top:-5px"></span><span class="h" style="right:-5px;top:-5px"></span>
+                  <span class="h" style="left:-5px;top:50%;margin-top:-4px"></span><span class="h" style="right:-5px;top:50%;margin-top:-4px"></span>
+                  <span class="h" style="left:-5px;bottom:-5px"></span><span class="h" style="left:50%;margin-left:-4px;bottom:-5px"></span><span class="h" style="right:-5px;bottom:-5px"></span>
+                  <span class="rot"></span>
+                  <span class="pin badge" style="right:-30px; top:4px;">2</span>
+                  <span class="pin badge" style="left:200px; top:3px;">3</span>
+                </div>
+                <div class="float" style="left:-60px; bottom:76px;">
+                  <span class="pin badge" style="left:-26px; top:8px;">1</span>
+                  <span class="ctl dd" style="width:118px">Arial</span>
+                  <span class="btn">−</span><span class="ctl" style="width:38px;text-align:center">11</span><span class="btn">+</span>
+                  <span class="sep"></span>
+                  <span class="btn on"><b>B</b></span><span class="btn"><i>I</i></span><span class="btn"><u>U</u></span><span class="btn"><s>S</s></span>
+                  <span class="sep"></span>
+                  <span class="ctl dd"><span class="sw" style="background:#1b1c20;vertical-align:-3px"></span></span>
+                  <span class="sep"></span>
+                  <span class="btn on">≡</span><span class="btn">☰</span><span class="btn">⋯</span>
+                </div>
+              </div></td></tr>
+              <tr><td class="lbl">Agent:</td><td>EXAMPLE AGENCY, INC.</td></tr>
+            </table>
+          </div>
+        </div>
+        <div class="props">
+          <span class="badge" style="float:right">4</span>
+          <b>Text</b>
+          <h4>Font</h4>
+          <div class="line"><span class="lbl">Family</span><span class="ctl dd" style="flex:1">Arial</span></div>
+          <div class="line"><span class="lbl">Size</span><span class="ctl" style="width:52px">11 pt</span><span class="btn on"><b>B</b></span><span class="btn"><i>I</i></span><span class="btn"><u>U</u></span></div>
+          <div class="line"><span class="lbl">Color</span><span class="sw" style="background:#1b1c20"></span><span class="sw" style="background:#d3282f"></span><span class="sw" style="background:#2563eb"></span><span class="sw" style="background:#15803d"></span><span class="ctl" style="font-size:11px">#1B1C20</span></div>
+          <h4>Paragraph</h4>
+          <div class="line"><span class="lbl">Align</span><span class="btn on">⯇</span><span class="btn">≡</span><span class="btn">⯈</span><span class="btn">☰</span></div>
+          <div class="line"><span class="lbl">Line spacing</span><span class="ctl dd">1.15</span></div>
+          <h4>Character</h4>
+          <div class="line"><span class="lbl">Spacing</span><span class="ctl" style="width:60px">0 %</span></div>
+          <div class="line"><span class="lbl">Baseline</span><span class="btn">x²</span><span class="btn">x₂</span></div>
+          <h4>Box</h4>
+          <div class="grid"><span class="ctl">X 61.4 mm</span><span class="ctl">Y 70.1 mm</span><span class="ctl">W 105.8 mm</span><span class="ctl">H 10.6 mm</span></div>
+          <div class="line"><span class="lbl">Rotation</span><span class="ctl" style="width:60px">0°</span></div>
+          <div class="line"><span class="chk"></span><span>Auto height</span></div>
+          <div class="line" style="margin-top:10px"><span class="ctl" style="white-space:nowrap">Use as default style</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="callouts">
+      <ol>
+        <li><span class="badge">1</span> Панель оформления над блоком: шрифт, размер с кнопками −/+, Ж/К/Ч/зачёркнутый, цвет, выравнивание, «⋯» — остальное. Видна, пока пишешь.</li>
+        <li><span class="badge">2</span> Рамка блока: 8 ручек — растянуть, верхний кружок — повернуть. За рамку блок перетаскивается.</li>
+        <li><span class="badge">3</span> Оформление можно задать и части текста: выделил слово — сделал жирным или другим цветом.</li>
+        <li><span class="badge">4</span> Правая панель — те же настройки плюс точные: межстрочный, межбуквенный интервал, верхний/нижний индекс, положение и размер в мм, поворот, «Use as default style» — новые блоки пишутся этим стилем.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>2. Выбор шрифта</h2>
+  <p class="note">Все шрифты, установленные в Windows, с поиском. Последние использованные — сверху. Шрифт, который не встроится или в котором нет нужных букв, виден, но помечен.</p>
+  <div class="row">
+    <div class="fontlist">
+      <div class="search">cal|</div>
+      <div class="grp">Recent</div>
+      <div class="f cur"><span class="name" style="font-family:Arial">Arial</span><span class="why">✓</span></div>
+      <div class="f"><span class="name" style="font-family:Calibri, sans-serif">Calibri</span></div>
+      <div class="grp">In this document</div>
+      <div class="f"><span class="name" style="font-family:Helvetica, Arial">Helvetica</span><span class="why">→ written with Arial</span></div>
+      <div class="grp">All fonts</div>
+      <div class="f"><span class="name" style="font-family:Calibri, sans-serif">Calibri</span></div>
+      <div class="f"><span class="name" style="font-family:Calibri, sans-serif;font-weight:300">Calibri Light</span></div>
+      <div class="f"><span class="name" style="font-family:Cambria, serif">Cambria</span></div>
+      <div class="f off"><span class="name" style="font-family:cursive">Calligraph Pro</span><span class="why">no Cyrillic</span></div>
+      <div class="f off"><span class="name" style="font-family:fantasy">Calisto Display</span><span class="why">🔒 can't be embedded</span></div>
+    </div>
+    <div class="callouts">
+      <ol>
+        <li>Названия шрифтов показаны их же начертанием.</li>
+        <li>«In this document» — шрифты, которыми уже написан документ. Если такого шрифта нет в Windows (Helvetica), подставляется ближайший похожий — видно, каким он напишется.</li>
+        <li>Шрифт без кириллицы выбрать можно для латиницы; при вводе русских букв программа предупредит сразу, а не после сохранения.</li>
+        <li>Шрифт, который автор запретил встраивать, в PDF не попадёт — он выключен с объяснением.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>3. Как с блоком работать</h2>
+  <table class="keys">
+    <tr><td>Щелчок с инструментом Text</td><td>Блок без переноса: растёт вправо, пока пишешь (как надпись в Acrobat).</td></tr>
+    <tr><td>Протянуть рамку</td><td>Блок заданной ширины, текст переносится по словам, высота растёт сама (или фиксированная — галочка Auto height).</td></tr>
+    <tr><td>Enter / Shift+Enter</td><td>Новый абзац / новая строка внутри абзаца.</td></tr>
+    <tr><td>Щелчок мимо или Esc</td><td>Закончить ввод: щелчок — сохранить набранное, Esc — тоже сохранить и выйти, Ctrl+Z — отменить.</td></tr>
+    <tr><td>Один щелчок по готовому блоку</td><td>Выделить: перетащить, растянуть, повернуть, Delete — удалить, Ctrl+D — копия.</td></tr>
+    <tr><td>Двойной щелчок</td><td>Снова писать в блоке — в том числе после сохранения файла и повторного открытия.</td></tr>
+    <tr><td>Стрелки при выделенном блоке</td><td>Сдвиг на 1 пт, с Shift — на 10 пт.</td></tr>
+  </table>
+</section>
+</body>
+</html>
