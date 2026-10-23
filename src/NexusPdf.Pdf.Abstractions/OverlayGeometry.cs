@@ -1,3 +1,5 @@
+using NexusPdf.Pdf.Abstractions.TextBlocks;
+
 namespace NexusPdf.Pdf.Abstractions;
 
 /// <summary>Прямоугольник в отображаемых пунктах страницы (начало — левый верхний угол).</summary>
@@ -16,7 +18,7 @@ public readonly record struct OverlayBox(double XPt, double YPt, double WidthPt,
 }
 
 /// <summary>Что можно делать с наложенным объектом мышью.</summary>
-public readonly record struct OverlayAbilities(bool CanSelect, bool CanMove, bool CanResize)
+public readonly record struct OverlayAbilities(bool CanSelect, bool CanMove, bool CanResize, bool CanRotate = false)
 {
     public static readonly OverlayAbilities None = new(false, false, false);
     public static readonly OverlayAbilities SelectOnly = new(true, false, false);
@@ -62,6 +64,8 @@ public static class OverlayGeometry
         // нельзя — она перестанет быть разметкой этого текста. Выделить и
         // удалить можно.
         TextMarkupDraft => OverlayAbilities.SelectOnly,
+        TextBlockOverlay => new OverlayAbilities(true, true, true, CanRotate: true),
+        TextBlockReplacement { NewBlock: { } block } => AbilitiesOf(block),
         _ => OverlayAbilities.None,
     };
 
@@ -88,6 +92,11 @@ public static class OverlayGeometry
         TextMarkupDraft markup => MarkupBounds(markup),
 
         MeasurementDraft measurement => MeasurementBounds(measurement),
+
+        // Рамка блока — его собственная (до поворота); поворот — вокруг её центра.
+        TextBlockOverlay block => new OverlayBox(block.XPt, block.YPt, block.WidthPt, block.HeightPt),
+
+        TextBlockReplacement { NewBlock: { } block } => BoundsOf(block),
 
         _ => null,
     };
@@ -171,6 +180,11 @@ public static class OverlayGeometry
             {
                 Points = measurement.Points.Select(p => new InkPoint(p.XPt + dx, p.YPt + dy)).ToList(),
             },
+            TextBlockOverlay block => block with { XPt = block.XPt + dx, YPt = block.YPt + dy },
+            TextBlockReplacement { NewBlock: { } block } replacement => replacement with
+            {
+                NewBlock = block with { XPt = block.XPt + dx, YPt = block.YPt + dy },
+            },
             _ => null,
         };
     }
@@ -203,8 +217,64 @@ public static class OverlayGeometry
                 WidthPt = normalized.WidthPt, HeightPt = normalized.HeightPt,
             },
             InkAnnotationDraft ink => ScaleInk(ink, normalized),
+            TextBlockOverlay block => ResizedBlock(block, normalized),
+            TextBlockReplacement { NewBlock: { } block } replacement => replacement with
+            {
+                NewBlock = ResizedBlock(block, normalized),
+            },
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Новая рамка блока. Рамка задаётся в осях самого блока (как до поворота),
+    /// поэтому у повёрнутого блока центр новой рамки доворачивается вокруг
+    /// прежнего центра — иначе противоположный край уезжал бы при растягивании.
+    /// Ширина после растягивания фиксирована; высота — только если её тянули.
+    /// </summary>
+    private static TextBlockOverlay ResizedBlock(TextBlockOverlay block, OverlayBox box)
+    {
+        var (oldX, oldY) = (block.XPt + block.WidthPt / 2, block.YPt + block.HeightPt / 2);
+        var (dx, dy) = (box.XPt + box.WidthPt / 2 - oldX, box.YPt + box.HeightPt / 2 - oldY);
+        var angle = block.RotationDegrees * Math.PI / 180;
+        var (cos, sin) = (Math.Cos(angle), Math.Sin(angle));
+        var (cx, cy) = (oldX + dx * cos - dy * sin, oldY + dx * sin + dy * cos);
+        return block with
+        {
+            XPt = cx - box.WidthPt / 2,
+            YPt = cy - box.HeightPt / 2,
+            WidthPt = box.WidthPt,
+            HeightPt = box.HeightPt,
+            WidthMode = TextBlockWidthMode.Fixed,
+            AutoHeight = block.AutoHeight && Math.Abs(box.HeightPt - block.HeightPt) < 1e-6,
+        };
+    }
+
+    /// <summary>
+    /// Объект с новым углом поворота (градусы по часовой стрелке на экране,
+    /// приводятся к [0, 360)); null — объект не поворачивается.
+    /// </summary>
+    public static PageOverlay? Rotated(PageOverlay overlay, double degrees)
+    {
+        if (!AbilitiesOf(overlay).CanRotate || !double.IsFinite(degrees)) return null;
+        var angle = NormalizeDegrees(degrees);
+        return overlay switch
+        {
+            TextBlockOverlay block => block with { RotationDegrees = angle },
+            TextBlockReplacement { NewBlock: { } block } replacement => replacement with
+            {
+                NewBlock = block with { RotationDegrees = angle },
+            },
+            _ => null,
+        };
+    }
+
+    /// <summary>Угол в [0, 360).</summary>
+    public static double NormalizeDegrees(double degrees)
+    {
+        var angle = degrees % 360;
+        if (angle < 0) angle += 360;
+        return angle >= 360 || Math.Abs(angle) < 1e-9 ? 0 : angle;
     }
 
     private static PageOverlay? ScaleInk(InkAnnotationDraft ink, OverlayBox targetBounds)

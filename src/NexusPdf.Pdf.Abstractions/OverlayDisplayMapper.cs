@@ -1,3 +1,5 @@
+using NexusPdf.Pdf.Abstractions.TextBlocks;
+
 namespace NexusPdf.Pdf.Abstractions;
 
 /// <summary>
@@ -206,8 +208,28 @@ public static class OverlayDisplayMapper
                 }
                 return (ocr with { Words = words }, -90.0 * delta);
             }
+            case TextBlockOverlay block:
+                return (TurnBlock(block, delta, finalWidth, finalHeight), 0);
+            case TextBlockReplacement { NewBlock: { } newBlock } replacement:
+                return (replacement with { NewBlock = TurnBlock(newBlock, delta, finalWidth, finalHeight) }, 0);
             default:
                 return (overlay, 0);
         }
+    }
+
+    /// <summary>
+    /// Блок поворачивается вместе со страницей: центр рамки переносится, а
+    /// угол блока растёт на четверть оборота за каждую четверть страницы.
+    /// </summary>
+    private static TextBlockOverlay TurnBlock(TextBlockOverlay block, int delta, double finalWidth, double finalHeight)
+    {
+        var centre = RemapPoint(
+            block.XPt + block.WidthPt / 2, block.YPt + block.HeightPt / 2, delta, finalWidth, finalHeight);
+        return block with
+        {
+            XPt = centre.X - block.WidthPt / 2,
+            YPt = centre.Y - block.HeightPt / 2,
+            RotationDegrees = OverlayGeometry.NormalizeDegrees(block.RotationDegrees + 90.0 * delta),
+        };
     }
 }
