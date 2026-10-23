@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Runtime.InteropServices;
-using System.Text;
 using NexusPdf.Pdf.Abstractions;
 using NexusPdf.Pdf.Abstractions.TextBlocks;
 using PDFiumCore;
@@ -13,8 +11,6 @@ namespace NexusPdf.Pdf.Pdfium;
 /// </summary>
 internal static partial class PdfiumOverlayWriter
 {
-    internal const string TextBlockMarkName = "NexusTextBlock";
-
     /// <summary>
     /// Точки привязки округляются до сотой пункта: такое число PDFium
     /// записывает в файл без потерь, и отпечаток блока после повторного
@@ -72,20 +68,35 @@ internal static partial class PdfiumOverlayWriter
             return; // пустой блок в файл не пишется
 
         var id = (block.BlockId == Guid.Empty ? Guid.NewGuid() : block.BlockId).ToString("N");
+        var version = TextBlockCodec.FormatVersion.ToString(CultureInfo.InvariantCulture);
         var hash = TextBlockHash.Compute(written.Select(w => Fingerprint(w.Obj, w.Text)));
         var first = written.FindIndex(w => w.Text.Length > 0);
         for (var i = 0; i < written.Count; i++)
         {
             var (obj, reference, _) = written[i];
-            var mark = AddMark(obj, TextBlockMarkName);
-            SetMarkParam(document, obj, mark, "Id", id);
-            SetMarkParam(document, obj, mark, "V", TextBlockCodec.FormatVersion.ToString(CultureInfo.InvariantCulture));
-            SetMarkParam(document, obj, mark, "R", reference);
+            var mark = PdfiumTextBlockMarks.Add(obj);
+            PdfiumTextBlockMarks.Set(document, obj, mark, "Id", id);
+            PdfiumTextBlockMarks.Set(document, obj, mark, "V", version);
+            PdfiumTextBlockMarks.Set(document, obj, mark, "R", reference);
             if (i == first)
             {
-                SetMarkParam(document, obj, mark, "Data", TextBlockCodec.EncodeStructure(block));
-                SetMarkParam(document, obj, mark, "Hash", hash);
+                PdfiumTextBlockMarks.Set(document, obj, mark, "Data", TextBlockCodec.EncodeStructure(block));
+                PdfiumTextBlockMarks.Set(document, obj, mark, "Hash", hash);
             }
+        }
+    }
+
+    /// <summary>Убирает со страницы все объекты блока (верхнего уровня — только так блок и пишется).</summary>
+    private static void RemoveTextBlock(FpdfPageT page, Guid blockId)
+    {
+        var id = blockId.ToString("N");
+        for (var i = fpdf_edit.FPDFPageCountObjects(page) - 1; i >= 0; i--)
+        {
+            var obj = fpdf_edit.FPDFPageGetObject(page, i);
+            if (obj == null || obj.__Instance == IntPtr.Zero || PdfiumTextBlockMarks.Read(obj)?.Id != id)
+                continue;
+            if (fpdf_edit.FPDFPageRemoveObject(page, obj) != 0)
+                fpdf_edit.FPDFPageObjDestroy(obj); // владение вернулось нам
         }
     }
 
@@ -189,28 +200,4 @@ internal static partial class PdfiumOverlayWriter
                     Math.Round(origin.X, OriginDecimals), Math.Round(origin.Y, OriginDecimals));
         }
     }
-
-    private static IntPtr AddMark(FpdfPageobjectT obj, string name)
-    {
-        var mark = NativeAddMark(obj.__Instance, Utf8Z(name));
-        if (mark == IntPtr.Zero)
-            throw new PdfEngineException("Не удалось пометить объект текстового блока.");
-        return mark;
-    }
-
-    private static void SetMarkParam(FpdfDocumentT document, FpdfPageobjectT obj, IntPtr mark, string key, string value)
-    {
-        if (NativeSetMarkString(document.__Instance, obj.__Instance, mark, Utf8Z(key), Utf8Z(value)) == 0)
-            throw new PdfEngineException("Не удалось записать описание текстового блока.");
-    }
-
-    private static byte[] Utf8Z(string value) => Encoding.UTF8.GetBytes(value + "\0");
-
-    // Обёртки PDFiumCore для меток принимают строки в кодировке системы;
-    // здесь байты передаются как есть.
-    [DllImport("pdfium", EntryPoint = "FPDFPageObj_AddMark", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr NativeAddMark(IntPtr pageObject, byte[] name);
-
-    [DllImport("pdfium", EntryPoint = "FPDFPageObjMark_SetStringParam", CallingConvention = CallingConvention.Cdecl)]
-    private static extern int NativeSetMarkString(IntPtr document, IntPtr pageObject, IntPtr mark, byte[] key, byte[] value);
 }

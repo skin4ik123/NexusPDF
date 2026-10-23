@@ -122,6 +122,9 @@ public static class TextBlockLayout
             var spacing = style.LetterSpacingPercent / 100 * size;
             var primary = faces.Primary(style);
             var primaryFont = fonts.Load(primary.Ref);
+            // Гарнитуры нет в системе (документ открыт на другом компьютере):
+            // текст рисуется заменой, и редактор должен это показать.
+            var substituted = !string.Equals(primary.Family, style.FontFamily, StringComparison.OrdinalIgnoreCase);
 
             var text = run.Text;
             for (var i = 0; i < text.Length;)
@@ -130,7 +133,7 @@ public static class TextBlockLayout
                 var codePoint = units == 2 ? char.ConvertToUtf32(text[i], text[i + 1]) : text[i];
                 var face = primary;
                 var font = primaryFont;
-                var fallback = false;
+                var fallback = substituted;
                 if (codePoint != TextBlockText.LineBreak && !primaryFont.HasGlyph(codePoint) &&
                     faces.Fallback(codePoint, style.Bold, style.Italic) is { } other)
                 {

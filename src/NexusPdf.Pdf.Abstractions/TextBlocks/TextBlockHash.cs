@@ -13,10 +13,12 @@ namespace NexusPdf.Pdf.Abstractions.TextBlocks;
 public static class TextBlockHash
 {
     /// <summary>
-    /// SHA-256 (hex, нижний регистр). Значения округляются до 0,1, порядок
-    /// объектов не важен: после пересохранения другой программой он может
-    /// поменяться, а смысл — нет. Прямоугольники подчёркивания передаются с
-    /// пустым текстом и нулевым кеглем.
+    /// SHA-256 (hex, нижний регистр). Значения округляются до 0,01: точки
+    /// привязки при записи стоят ровно на этой сетке, поэтому шум float после
+    /// записи в файл и чтения (~0,00001) никогда не доходит до границы
+    /// округления. Порядок объектов не важен: после пересохранения другой
+    /// программой он может поменяться, а смысл — нет. Прямоугольники
+    /// подчёркивания передаются с пустым текстом и нулевым кеглем.
     /// </summary>
     public static string Compute(IEnumerable<(string Text, double FontSizePt, uint ColorArgb, double XPt, double YPt)> pieces)
     {
@@ -32,7 +34,7 @@ public static class TextBlockHash
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
 
-    // + 0.0 убирает «минус ноль», который иначе печатался бы как "-0.0".
+    // + 0.0 убирает «минус ноль», который иначе печатался бы как "-0.00".
     private static string Round(double value) =>
-        (Math.Round(value, 1, MidpointRounding.AwayFromZero) + 0.0).ToString("0.0", CultureInfo.InvariantCulture);
+        (Math.Round(value, 2, MidpointRounding.AwayFromZero) + 0.0).ToString("0.00", CultureInfo.InvariantCulture);
 }

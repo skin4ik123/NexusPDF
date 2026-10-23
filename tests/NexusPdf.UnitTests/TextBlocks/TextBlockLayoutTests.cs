@@ -148,6 +148,17 @@ public sealed class TextBlockLayoutTests : IDisposable
     }
 
     [Fact]
+    public void Missing_Family_Is_Drawn_With_A_Substitute_And_Marked()
+    {
+        var layout = Lay(Block("ab", new TextStyle("Not Installed", 10), mode: TextBlockWidthMode.AutoWidth));
+
+        var piece = Assert.Single(layout.Lines[0].Pieces);
+        Assert.True(piece.IsFallback);
+        Assert.Contains(piece.Family, _fonts.FallbackFamilies);
+        Assert.False(Lay(Block("ab", Mono(), mode: TextBlockWidthMode.AutoWidth)).Lines[0].Pieces[0].IsFallback);
+    }
+
+    [Fact]
     public void Shrink_To_Fit_Reduces_Size_To_Fit()
     {
         var layout = Lay(Block("aaaa bbbb cccc dddd", Mono(20), width: 2 * Pad + 60,

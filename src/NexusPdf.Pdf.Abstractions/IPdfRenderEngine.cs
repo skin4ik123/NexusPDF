@@ -226,6 +226,15 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     Task<PdfTextObject?> GetTextObjectAtAsync(int pageIndex, int extraQuarterTurns, double xPt, double yPt, CancellationToken ct);
 
     /// <summary>
+    /// Текстовые блоки страницы, записанные этой программой: целые — для
+    /// правки, нецелые — только чтобы их узнать. Рамки — в отображаемых пунктах.
+    /// </summary>
+    Task<IReadOnlyList<TextBlocks.StoredTextBlock>> GetTextBlocksAsync(int pageIndex, int extraQuarterTurns, CancellationToken ct);
+
+    /// <summary>Имена шрифтов текста первых maxPages страниц, без повторов, в порядке появления.</summary>
+    Task<IReadOnlyList<string>> GetDocumentFontNamesAsync(int maxPages, CancellationToken ct);
+
+    /// <summary>
     /// Может ли шрифт указанного текстового объекта нарисовать переданный
     /// текст. Проверяется НЕ по таблицам, а рисованием пробного объекта тем же
     /// шрифтом: у встроенного подмножества нужных букв может не оказаться, и
