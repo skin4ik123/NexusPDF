@@ -575,12 +575,35 @@ public sealed class TextBlockEditorModel
     {
         var draft = _frame with { Paragraphs = _paras.Select(p => p.ToParagraph()).ToList() };
         Layout = TextBlockLayout.Compute(draft, _fonts);
-        Block = draft with
-        {
-            WidthPt = draft.WidthMode == TextBlockWidthMode.AutoWidth ? Layout.WidthPt : draft.WidthPt,
-            HeightPt = draft.AutoHeight ? Layout.HeightPt : draft.HeightPt,
-        };
+        var width = draft.WidthMode == TextBlockWidthMode.AutoWidth ? Layout.WidthPt : draft.WidthPt;
+        var height = draft.AutoHeight ? Layout.HeightPt : draft.HeightPt;
+        var (x, y) = AnchoredOrigin(_frame, width, height);
+        // Рамка запоминает действующий размер: от неё считается угол при
+        // следующем изменении размера.
+        _frame = _frame with { XPt = x, YPt = y, WidthPt = width, HeightPt = height };
+        Block = draft with { XPt = x, YPt = y, WidthPt = width, HeightPt = height };
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Левый верхний угол рамки нового размера, при котором ВИДИМЫЙ левый
+    /// верхний угол (после поворота вокруг центра) остаётся на месте. Без
+    /// этого повёрнутый блок при наборе уезжал бы: растёт рамка — сдвигается
+    /// центр поворота.
+    /// </summary>
+    private static (double X, double Y) AnchoredOrigin(TextBlockOverlay frame, double width, double height)
+    {
+        if (frame.RotationDegrees == 0)
+            return (frame.XPt, frame.YPt);
+        var angle = frame.RotationDegrees * Math.PI / 180;
+        var (cos, sin) = (Math.Cos(angle), Math.Sin(angle));
+        (double X, double Y) Corner(double cx, double cy, double w, double h) =>
+            (cx - w / 2 * cos + h / 2 * sin, cy - w / 2 * sin - h / 2 * cos);
+        var corner = Corner(frame.XPt + frame.WidthPt / 2, frame.YPt + frame.HeightPt / 2, frame.WidthPt, frame.HeightPt);
+        // Центр новой рамки — тот, при котором её угол совпадает с прежним.
+        var cx = corner.X + width / 2 * cos - height / 2 * sin;
+        var cy = corner.Y + width / 2 * sin + height / 2 * cos;
+        return (cx - width / 2, cy - height / 2);
     }
 
     /// <summary>Изменяемый абзац: текст и границы фрагментов стиля.</summary>
