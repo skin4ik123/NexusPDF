@@ -448,8 +448,8 @@ internal static class Program
             "The tab shows the saved file after Save As");
         var reopenedPage = reopened.Pages[0];
         await reopened.EnsureStoredTextBlocksAsync(reopenedPage);
-        Require(await reopened.EditTextBlockAsync(reopenedPage, block!.XPt + 4, block.YPt + 4),
-            "A double click opens the saved block again");
+        var opened = await reopened.EditTextBlockAsync(reopenedPage, block!.XPt + 4, block.YPt + 4);
+        Require(opened, "A double click opens the saved block again" + (opened ? "" : $" (status: {reopened.StatusText})"));
         editor = await FindTextEditorAsync("The saved block opens in the editor");
         Require(reopened.ActiveTextBlock?.Block.Paragraphs[0].Text == "24 Oct 2026", "The saved block keeps its text");
         reopened.ActiveTextBlock!.MoveCaret(CaretMove.BlockEnd, extend: false);

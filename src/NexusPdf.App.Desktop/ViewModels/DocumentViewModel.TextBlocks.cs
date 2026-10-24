@@ -312,31 +312,42 @@ public sealed partial class DocumentViewModel
 
     // ----- Блоки из файла -----
 
-    private readonly Dictionary<(IPdfDocumentHandle Handle, int Page, int Turns), IReadOnlyList<StoredTextBlock>> _storedBlocks = new();
+    // Чтение — задачей: пока оно идёт, второй вызов ждёт его, а не видит
+    // пустой список. Иначе двойной щелчок сразу после наведения открывал
+    // правку строки вместо блока.
+    private readonly Dictionary<(IPdfDocumentHandle Handle, int Page, int Turns), Task<IReadOnlyList<StoredTextBlock>>> _storedBlocks = new();
 
-    /// <summary>Прочитать блоки страницы из файла (один раз на страницу и поворот).</summary>
-    public async Task EnsureStoredTextBlocksAsync(PageViewModel page)
+    /// <summary>Прочитать блоки страницы из файла (один раз на страницу; повторный вызов ждёт того же чтения).</summary>
+    public Task EnsureStoredTextBlocksAsync(PageViewModel page)
     {
-        if (!Document.Handles.TryGetValue(page.PageRef.SourceId, out var handle)) return;
+        if (!Document.Handles.TryGetValue(page.PageRef.SourceId, out var handle)) return Task.CompletedTask;
         // Блоки читаются в исходной рамке страницы: на экран их переносит
         // тот же пересчёт, что и черновики (PlacedRotation = 0).
         var key = (handle, page.PageRef.SourcePageIndex, 0);
-        if (_storedBlocks.ContainsKey(key)) return;
-        _storedBlocks[key] = [];
+        if (!_storedBlocks.TryGetValue(key, out var task))
+            _storedBlocks[key] = task = ReadStoredBlocksAsync(handle, page);
+        return task;
+    }
+
+    private static async Task<IReadOnlyList<StoredTextBlock>> ReadStoredBlocksAsync(IPdfDocumentHandle handle, PageViewModel page)
+    {
         try
         {
-            _storedBlocks[key] = await handle.GetTextBlocksAsync(page.PageRef.SourcePageIndex, 0, CancellationToken.None);
+            return await handle.GetTextBlocksAsync(page.PageRef.SourcePageIndex, 0, CancellationToken.None);
         }
-        catch (Exception ex) when (ex is PdfEngineException or InvalidOperationException or ObjectDisposedException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Serilog.Log.Debug(ex, "Блоки страницы {Page} не прочитались", page.LogicalIndex + 1);
+            return [];
         }
     }
 
+    /// <summary>Прочитанные блоки страницы (без ожидания: пока чтение идёт — пусто).</summary>
     private IReadOnlyList<StoredTextBlock> StoredBlocksOf(PageViewModel page) =>
         Document.Handles.TryGetValue(page.PageRef.SourceId, out var handle) &&
-        _storedBlocks.TryGetValue((handle, page.PageRef.SourcePageIndex, 0), out var blocks)
-            ? blocks
+        _storedBlocks.TryGetValue((handle, page.PageRef.SourcePageIndex, 0), out var task) &&
+        task.IsCompletedSuccessfully
+            ? task.Result
             : [];
 
     private static bool HasPendingReplacement(PageViewModel page, Guid id) =>
