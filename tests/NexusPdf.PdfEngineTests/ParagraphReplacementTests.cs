@@ -257,6 +257,24 @@ public sealed class ParagraphReplacementTests : IAsyncLifetime
         Assert.Contains("Written on top", text);
     }
 
+    [Fact]
+    public async Task Any_Edit_Added_Before_A_Redaction_Is_Burned_Even_Far_From_It()
+    {
+        // Вымарка не полагается на оценку рамок: всё добавленное до неё уходит в растр.
+        var source = Source("BT /F1 12 Tf 72 700 Td (Page text) Tj ET");
+        var result = Path.Combine(_dir, "redacted-far.pdf");
+
+        await using (var document = await OpenedDocument.OpenAsync(_pdfium, source, null, CancellationToken.None))
+        {
+            document.Session.Apply(new AddOverlayOperation(0,
+                new TextOverlay("Far away words", 400, 700, 12, 0xFF000000, 0, "Liberation Sans", false, false)));
+            document.Session.Apply(new AddOverlayOperation(0, new RedactionDraft(60, 60, 100, 40)));
+            await new SaveService(_pdfium).SaveAsAsync(document, result, keepBackup: false, CancellationToken.None);
+        }
+
+        Assert.DoesNotContain("Far away", Flat(await PageTextAsync(result)));
+    }
+
     private static X509Certificate2 MakeSelfSigned()
     {
         using var rsa = RSA.Create(2048);

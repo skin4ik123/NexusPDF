@@ -179,9 +179,12 @@ public static class RedactionBaker
     }
 
     /// <summary>
-    /// Правки страницы, которые лежат под вымаркой или стиранием, добавленными
-    /// ПОСЛЕ них. Добавленное позже вымарки остаётся поверх — так человек его
-    /// и видел. Слой OCR не запекается: его слова отбрасываются по вымаркам.
+    /// Правки страницы, добавленные ДО вымарки, — все, без расчёта рамок:
+    /// ошибка в оценке места оставила бы вымаранный текст в файле. До
+    /// стирания — только те, что оно задевает (с запасом в 1 пт; правка с
+    /// неизвестной рамкой — задевает). Добавленное после — остаётся поверх,
+    /// так человек его и видел. Слой OCR не запекается: его слова
+    /// отбрасываются по вымаркам.
     /// </summary>
     private static HashSet<PageOverlay> Burned(ComposedPage page)
     {
@@ -190,13 +193,14 @@ public static class RedactionBaker
         var info = page.Source.Info.Pages[page.SourcePageIndex];
         for (var i = 0; i < overlays.Count; i++)
         {
-            if (overlays[i] is not (RedactionDraft or RegionEraseDraft) ||
-                Footprint(overlays[i], info) is not { } cut)
+            if (overlays[i] is not (RedactionDraft or RegionEraseDraft))
                 continue;
+            var cut = overlays[i] is RegionEraseDraft ? Footprint(overlays[i], info) : null;
             for (var j = 0; j < i; j++)
             {
                 if (overlays[j] is RedactionDraft or RegionEraseDraft or OcrTextLayerOverlay) continue;
-                if (Footprint(overlays[j], info) is { } box && Overlap(box, cut))
+                if (overlays[i] is RedactionDraft || cut is not { } area ||
+                    Footprint(overlays[j], info) is not { } box || Overlap(box, area, margin: 1))
                     burned.Add(overlays[j]);
             }
         }
@@ -207,6 +211,8 @@ public static class RedactionBaker
     private static OverlayBox? Footprint(PageOverlay overlay, PdfPageDescriptor size)
     {
         var (mapped, _) = OverlayDisplayMapper.ToFrame(overlay, 0, size.WidthPoints, size.HeightPoints);
+        if (mapped is RegionEraseDraft erase)
+            return new OverlayBox(erase.XPt, erase.YPt, erase.WidthPt, erase.HeightPt);
         var block = mapped switch
         {
             TextBlockOverlay b => b,
@@ -228,8 +234,9 @@ public static class RedactionBaker
         return OverlayGeometry.BoundsOf(mapped);
     }
 
-    private static bool Overlap(OverlayBox a, OverlayBox b) =>
-        a.XPt < b.XPt + b.WidthPt && b.XPt < a.XPt + a.WidthPt && a.YPt < b.YPt + b.HeightPt && b.YPt < a.YPt + a.HeightPt;
+    private static bool Overlap(OverlayBox a, OverlayBox b, double margin) =>
+        a.XPt - margin < b.XPt + b.WidthPt && b.XPt - margin < a.XPt + a.WidthPt &&
+        a.YPt - margin < b.YPt + b.HeightPt && b.YPt - margin < a.YPt + a.HeightPt;
 
     /// <summary>Вымарки страницы в НЕповёрнутой рамке (растр рендерится без добавочного поворота).</summary>
     private static List<RedactionDraft> RedactionRects(ComposedPage page, PdfPageDescriptor size)
