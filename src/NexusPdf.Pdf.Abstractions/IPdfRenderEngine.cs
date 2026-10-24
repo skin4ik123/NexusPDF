@@ -122,6 +122,15 @@ public interface IPdfDocumentHandle : IAsyncDisposable
     Task<RenderedPageImage> RenderPageContentOnlyAsync(int pageIndex, int pixelWidth, int pixelHeight, int extraQuarterTurns, CancellationToken ct);
 
     /// <summary>
+    /// Растр для распознавания: только содержимое и без текстовых блоков этой
+    /// программы — их текст и так настоящий, распознанный слой задвоил бы его.
+    /// </summary>
+    Task<RenderedPageImage> RenderPageForRecognitionAsync(int pageIndex, int pixelWidth, int pixelHeight, int extraQuarterTurns, CancellationToken ct);
+
+    /// <summary>Есть ли на странице текст, кроме текстовых блоков этой программы (то есть не «чистый» скан).</summary>
+    Task<bool> HasTextBesidesBlocksAsync(int pageIndex, CancellationToken ct);
+
+    /// <summary>
     /// Рендер для ПЕЧАТИ: состав содержимого задаёт вызывающий.
     ///
     /// Отдельно от обычного рендера, потому что на бумаге правила другие:

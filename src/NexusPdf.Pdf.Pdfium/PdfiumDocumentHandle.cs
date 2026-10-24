@@ -119,6 +119,16 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
         }
     }
 
+    public Task<RenderedPageImage> RenderPageForRecognitionAsync(int pageIndex, int pixelWidth, int pixelHeight, int extraQuarterTurns, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(
+                () => RenderCore(pageIndex, pixelWidth, pixelHeight, extraQuarterTurns, contentOnly: true, hideTextBlocks: true), ct);
+        }
+    }
+
     public Task<RenderedPageImage> RenderPageForPrintAsync(
         int pageIndex, int pixelWidth, int pixelHeight, int extraQuarterTurns,
         PrintContentOptions options, CancellationToken ct)
@@ -301,8 +311,10 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
     /// contentOnly — рендер БЕЗ аннотаций и полей форм (растр для OCR: текст
     /// штампов/полей не является содержимым страницы и не должен запекаться).
     /// </summary>
+    /// <param name="hideTextBlocks">Не рисовать объекты наших текстовых блоков (для распознавания).</param>
     private RenderedPageImage RenderCore(
-        int pageIndex, int width, int height, int extraQuarterTurns, bool contentOnly, bool forOutput = false)
+        int pageIndex, int width, int height, int extraQuarterTurns, bool contentOnly, bool forOutput = false,
+        bool hideTextBlocks = false)
     {
         if (width < 1 || height < 1)
             throw new ArgumentOutOfRangeException(nameof(width), "Размер растра должен быть положительным.");
@@ -310,13 +322,16 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
         if (!contentOnly)
             EnsureFormsForRender();
         var rotate = ((extraQuarterTurns % 4) + 4) % 4;
-        var activePage = _forms?.TryGetActivePage(pageIndex);
+        // Блоки прячутся на отдельно загруженной странице: страница, открытая
+        // режимом форм, остаётся нетронутой.
+        var activePage = hideTextBlocks ? null : _forms?.TryGetActivePage(pageIndex);
         var page = activePage ?? fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
         if (page == null || page.__Instance == IntPtr.Zero)
             throw new PdfEngineException($"Не удалось открыть страницу {pageIndex + 1}.");
         var transient = activePage == null;
         if (transient && _forms is { IsActive: true })
             _forms.OnTransientPageLoaded(page);
+        var hidden = hideTextBlocks ? HideTextBlocks(page) : [];
 
         try
         {
@@ -354,6 +369,8 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
         }
         finally
         {
+            foreach (var obj in hidden)
+                fpdf_edit.FPDFPageObjSetIsActive(obj, 1);
             if (transient)
             {
                 if (_forms is { IsActive: true })

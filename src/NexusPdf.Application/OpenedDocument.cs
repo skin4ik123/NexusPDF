@@ -309,6 +309,13 @@ public sealed class OpenedDocument : IAsyncDisposable
         return Handles[page.SourceId].RenderPageContentOnlyAsync(page.SourcePageIndex, pixelWidth, pixelHeight, page.RotationOffset, ct);
     }
 
+    /// <summary>Растр для распознавания: содержимое без наших текстовых блоков.</summary>
+    public Task<RenderedPageImage> RenderLogicalPageForRecognitionAsync(int logicalIndex, int pixelWidth, int pixelHeight, CancellationToken ct)
+    {
+        var page = Session.Model.Pages[logicalIndex];
+        return Handles[page.SourceId].RenderPageForRecognitionAsync(page.SourcePageIndex, pixelWidth, pixelHeight, page.RotationOffset, ct);
+    }
+
     /// <summary>Растр страницы для печати с заданным составом содержимого.</summary>
     public Task<RenderedPageImage> RenderLogicalPageForPrintAsync(
         int logicalIndex, int pixelWidth, int pixelHeight, PrintContentOptions options, CancellationToken ct)
