@@ -238,6 +238,9 @@ public sealed partial class DocumentViewModel
         (double Width, double Height)? cover = null)
     {
         CommitTextBlock();
+        // Завершённый ввод меняет страницу, и её модель в списке заменяется
+        // новой: редактор ставится на ту, что сейчас на экране.
+        page = CurrentPage(page);
         ClearObjectSelection();
         ClearTextSelection();
         var (style, _, _) = Defaults();
@@ -276,6 +279,10 @@ public sealed partial class DocumentViewModel
         StatusText = Loc.Get("TextUnderRedaction");
         return true;
     }
+
+    /// <summary>Модель страницы, которая сейчас в списке (после правки прежняя заменяется).</summary>
+    private PageViewModel CurrentPage(PageViewModel page) =>
+        Pages.FirstOrDefault(p => p.LogicalIndex == page.LogicalIndex) ?? page;
 
     private (TextStyle Style, TextAlign Align, double LineSpacing) Defaults() =>
         TextDefaults?.Invoke() ?? (new TextStyle(FontCatalog.DefaultFamily, 11), TextAlign.Left, 1.15);

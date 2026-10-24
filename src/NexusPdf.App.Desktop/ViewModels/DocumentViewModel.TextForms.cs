@@ -303,8 +303,8 @@ public sealed partial class DocumentViewModel
             PageTextOf(edit.Page)?.Forms is not { } forms ||
             forms.Next(from, backwards) is not { } next)
             return false;
-        var page = edit.Page;
         CommitTextBlock();
+        var page = CurrentPage(edit.Page);
         if (BlockInside(page, next.CellPt) is { } filled &&
             await EditTextBlockAsync(page, filled.XPt + filled.WidthPt / 2, filled.YPt + filled.HeightPt / 2))
         {
