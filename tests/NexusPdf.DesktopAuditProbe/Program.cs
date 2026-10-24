@@ -472,7 +472,9 @@ internal static class Program
         // пересобраны, прежняя страница уже не на экране.
         reopenedPage = await CurrentPageAsync(reopened, "The tab shows the re-saved file");
 
-        reopened.ToggleTextTool();
+        // Повторное открытие — та же вкладка (её перевело «Сохранить как»): инструмент
+        // мог остаться включённым, поэтому состояние задаётся явно.
+        if (!reopened.IsTextTool) reopened.ToggleTextTool();
         await reopened.BeginTextBlockInRectAsync(reopenedPage, new OverlayBox(60, 300, 120, 20));
         editor = await FindTextEditorAsync("A dragged frame opens a wrapping block");
         Type(editor, "Длинная строка текста переносится по словам внутри рамки заданной ширины");
@@ -481,6 +483,7 @@ internal static class Program
             "Text in a dragged frame wraps by words");
         Capture(_main, "text-block-wrapped");
         reopened.CommitTextBlock();
+        Require(reopened.IsTextTool, "The Text tool is on while blocks are written");
         reopened.ToggleTextTool();
         Require(!reopened.IsTextTool, "The Text tool turns off");
     }
