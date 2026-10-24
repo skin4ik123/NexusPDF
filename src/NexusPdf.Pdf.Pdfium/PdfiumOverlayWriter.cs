@@ -90,6 +90,12 @@ internal static partial class PdfiumOverlayWriter
         // растровой замены снимать нечего: на странице уже только растр.
         var removals = new List<FpdfPageobjectT>();
         var paragraphs = overlays.OfType<TextParagraphReplacement>().ToList();
+        // Снятие и правка существующих объектов перезаписывают поток страницы,
+        // а PDFium пишет только цвета RGB и серые: прочие (CMYK, ICC — так пишет
+        // Office, плашечные) стали бы чёрными. Цвета переводятся в RGB заранее.
+        if (!contentAdded && (paragraphs.Count > 0 ||
+            overlays.Any(o => o is TextBlockReplacement or TextObjectReplacement or ImageObjectReplacement)))
+            KeepColours(page);
         if (paragraphs.Count > 0 && !contentAdded)
         {
             removals.AddRange(ParagraphObjects(page, paragraphs));

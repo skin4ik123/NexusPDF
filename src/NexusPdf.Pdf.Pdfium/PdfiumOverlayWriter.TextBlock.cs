@@ -108,6 +108,28 @@ internal static partial class PdfiumOverlayWriter
         return found;
     }
 
+    /// <summary>
+    /// Цвета текста и путей страницы — в RGB, тем же видимым цветом. Генератор
+    /// содержимого PDFium записывает только RGB и серый; объект в CMYK, ICC,
+    /// CalRGB или плашечном цвете после перезаписи потока рисовался бы чёрным.
+    /// </summary>
+    private static void KeepColours(FpdfPageT page)
+    {
+        var count = fpdf_edit.FPDFPageCountObjects(page);
+        for (var i = 0; i < count; i++)
+        {
+            var obj = fpdf_edit.FPDFPageGetObject(page, i);
+            if (obj == null || obj.__Instance == IntPtr.Zero ||
+                fpdf_edit.FPDFPageObjGetType(obj) is not (PageObjectText or PageObjectPath))
+                continue;
+            uint r = 0, g = 0, b = 0, a = 0;
+            if (fpdf_edit.FPDFPageObjGetFillColor(obj, ref r, ref g, ref b, ref a) != 0)
+                fpdf_edit.FPDFPageObjSetFillColor(obj, r, g, b, a);
+            if (fpdf_edit.FPDFPageObjGetStrokeColor(obj, ref r, ref g, ref b, ref a) != 0)
+                fpdf_edit.FPDFPageObjSetStrokeColor(obj, r, g, b, a);
+        }
+    }
+
     /// <summary>Снять объекты со страницы (каждый один раз).</summary>
     private static void RemoveObjects(FpdfPageT page, IEnumerable<FpdfPageobjectT> objects)
     {

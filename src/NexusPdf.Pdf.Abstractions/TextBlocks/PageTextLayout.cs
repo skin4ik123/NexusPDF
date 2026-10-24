@@ -27,9 +27,14 @@ public sealed record PageLineObject(IReadOnlyList<int> Path, OverlayBox BoundsPt
 /// <summary>Граница таблицы в отображаемых пунктах: Position — y горизонтальной, x вертикальной.</summary>
 public sealed record PageRuling(bool Horizontal, double PositionPt, double StartPt, double EndPt);
 
-/// <summary>Текст, тонкие линии и границы таблиц страницы — всё, из чего собираются абзацы и клетки бланка.</summary>
+/// <summary>
+/// Текст, тонкие линии и границы таблиц страницы — всё, из чего собираются абзацы и клетки бланка.
+/// HasGradients — на странице есть объекты-градиенты: перезапись её содержимого
+/// (снятие или правка объектов) их потеряла бы.
+/// </summary>
 public sealed record PageTextLayout(
-    IReadOnlyList<PageTextObject> Objects, IReadOnlyList<PageLineObject> Lines, IReadOnlyList<PageRuling> Rulings)
+    IReadOnlyList<PageTextObject> Objects, IReadOnlyList<PageLineObject> Lines, IReadOnlyList<PageRuling> Rulings,
+    bool HasGradients = false)
 {
     public static readonly PageTextLayout Empty = new([], [], []);
 }

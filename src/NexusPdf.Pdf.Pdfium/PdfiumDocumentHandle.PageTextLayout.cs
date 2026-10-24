@@ -64,7 +64,7 @@ internal sealed partial class PdfiumDocumentHandle
                     lines.Add(new PageLineObject(node.Path, box, PathColor(node.Object), PageTextFingerprint.OfPath(l, b, r, t)));
                 AddRulings(node, frame, l, b, r, t, rulings);
             }
-            return new PageTextLayout(objects, lines, rulings);
+            return new PageTextLayout(objects, lines, rulings, HasGradientObjects(page));
         }
         finally
         {
@@ -72,6 +72,25 @@ internal sealed partial class PdfiumDocumentHandle
                 fpdf_text.FPDFTextClosePage(textPage);
             fpdfview.FPDF_ClosePage(page);
         }
+    }
+
+    private const int PageObjectShading = 4;
+
+    /// <summary>
+    /// Есть ли на странице (верхнего уровня) объекты-градиенты. Перезапись
+    /// содержимого страницы средствами PDFium их теряет: такую страницу
+    /// правкой «на месте» не трогают.
+    /// </summary>
+    internal static bool HasGradientObjects(FpdfPageT page)
+    {
+        var count = fpdf_edit.FPDFPageCountObjects(page);
+        for (var i = 0; i < count; i++)
+        {
+            var obj = fpdf_edit.FPDFPageGetObject(page, i);
+            if (obj != null && obj.__Instance != IntPtr.Zero && fpdf_edit.FPDFPageObjGetType(obj) == PageObjectShading)
+                return true;
+        }
+        return false;
     }
 
     /// <summary>Номера букв страницы по объектам — только записанные, без додуманных PDFium пробелов.</summary>
