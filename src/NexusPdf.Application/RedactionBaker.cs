@@ -71,11 +71,16 @@ public static class RedactionBaker
         // блоков: удалённый блок иначе остался бы в файле картинкой.
         var prePath = TempFile("pre");
         var specs = new List<ImagePageSpec>(redactedIndices.Count);
+        // Правки, поверх которых позже легла вымарка или стирание, уходят в
+        // растр вместе со страницей: перенесённые поверх растра, они оставили
+        // бы вымаранный текст в файле.
+        var burned = redactedIndices.ToDictionary(i => i, i => Burned(composition[i]));
         try
         {
             var prePages = redactedIndices
-                .Select(i => composition[i])
-                .Select(p => new ComposedPage(p.Source, p.SourcePageIndex, 0, BlockRemovals(p), p.RemovedAnnotations))
+                .Select(i => (Page: composition[i], Burned: burned[i]))
+                .Select(p => new ComposedPage(p.Page.Source, p.Page.SourcePageIndex, 0,
+                    PreOverlays(p.Page, p.Burned), p.Page.RemovedAnnotations))
                 .ToList();
             await engine.ComposeAsync(prePages, prePath, ct).ConfigureAwait(false);
 
@@ -138,7 +143,7 @@ public static class RedactionBaker
                 // Оверлеи переносятся КАК ЕСТЬ (PlacedRotation сохранён), а
                 // замена получает исходный поворот: компоновка сама ремапит
                 // координаты и углы штатным OverlayDisplayMapper'ом.
-                var carried = CarryOverlays(page, new PdfPageDescriptor(size.WidthPoints, size.HeightPoints));
+                var carried = CarryOverlays(page, new PdfPageDescriptor(size.WidthPoints, size.HeightPoints), burned[index]);
                 patched[index] = new ComposedPage(
                     rasterHandle, k, page.ExtraQuarterTurns,
                     carried.Count > 0 ? carried : null);
@@ -153,17 +158,78 @@ public static class RedactionBaker
         }
     }
 
-    /// <summary>Снятие прежних объектов текстовых блоков, которые на странице изменены или удалены.</summary>
-    private static IReadOnlyList<PageOverlay>? BlockRemovals(ComposedPage page)
+    /// <summary>
+    /// Что пишется в промежуточную страницу до растра: снятие прежних объектов
+    /// изменённых и удалённых блоков и абзацев, а правки, накрытые более
+    /// поздней вымаркой или стиранием, — целиком, в прежнем порядке.
+    /// </summary>
+    private static IReadOnlyList<PageOverlay>? PreOverlays(ComposedPage page, HashSet<PageOverlay> burned)
     {
-        var removals = page.Overlays?
-            .OfType<TextBlockReplacement>()
-            .Select(r => (PageOverlay)new TextBlockReplacement(r.BlockId, null))
-            .Concat(page.Overlays.OfType<TextParagraphReplacement>()
-                .Select(r => (PageOverlay)new TextParagraphReplacement(r.Objects, null)))
-            .ToList();
-        return removals is { Count: > 0 } ? removals : null;
+        var result = new List<PageOverlay>();
+        foreach (var overlay in page.Overlays ?? [])
+        {
+            if (burned.Contains(overlay))
+                result.Add(overlay);
+            else if (overlay is TextBlockReplacement block)
+                result.Add(new TextBlockReplacement(block.BlockId, null));
+            else if (overlay is TextParagraphReplacement paragraph)
+                result.Add(new TextParagraphReplacement(paragraph.Objects, null));
+        }
+        return result.Count > 0 ? result : null;
     }
+
+    /// <summary>
+    /// Правки страницы, которые лежат под вымаркой или стиранием, добавленными
+    /// ПОСЛЕ них. Добавленное позже вымарки остаётся поверх — так человек его
+    /// и видел. Слой OCR не запекается: его слова отбрасываются по вымаркам.
+    /// </summary>
+    private static HashSet<PageOverlay> Burned(ComposedPage page)
+    {
+        var burned = new HashSet<PageOverlay>(ReferenceEqualityComparer.Instance);
+        var overlays = page.Overlays ?? [];
+        var info = page.Source.Info.Pages[page.SourcePageIndex];
+        for (var i = 0; i < overlays.Count; i++)
+        {
+            if (overlays[i] is not (RedactionDraft or RegionEraseDraft) ||
+                Footprint(overlays[i], info) is not { } cut)
+                continue;
+            for (var j = 0; j < i; j++)
+            {
+                if (overlays[j] is RedactionDraft or RegionEraseDraft or OcrTextLayerOverlay) continue;
+                if (Footprint(overlays[j], info) is { } box && Overlap(box, cut))
+                    burned.Add(overlays[j]);
+            }
+        }
+        return burned;
+    }
+
+    /// <summary>Описанная рамка правки в неповёрнутой рамке страницы (у повёрнутого блока — по углам).</summary>
+    private static OverlayBox? Footprint(PageOverlay overlay, PdfPageDescriptor size)
+    {
+        var (mapped, _) = OverlayDisplayMapper.ToFrame(overlay, 0, size.WidthPoints, size.HeightPoints);
+        var block = mapped switch
+        {
+            TextBlockOverlay b => b,
+            TextBlockReplacement { NewBlock: { } b } => b,
+            TextParagraphReplacement { NewBlock: { } b } => b,
+            _ => null,
+        };
+        if (block is { RotationDegrees: not 0 })
+        {
+            var a = block.RotationDegrees * Math.PI / 180;
+            var (cx, cy) = (block.XPt + block.WidthPt / 2, block.YPt + block.HeightPt / 2);
+            var corners = new[] { (-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0) }
+                .Select(c => (X: cx + c.Item1 * block.WidthPt / 2 * Math.Cos(a) - c.Item2 * block.HeightPt / 2 * Math.Sin(a),
+                              Y: cy + c.Item1 * block.WidthPt / 2 * Math.Sin(a) + c.Item2 * block.HeightPt / 2 * Math.Cos(a)))
+                .ToList();
+            var (left, top) = (corners.Min(c => c.X), corners.Min(c => c.Y));
+            return new OverlayBox(left, top, corners.Max(c => c.X) - left, corners.Max(c => c.Y) - top);
+        }
+        return OverlayGeometry.BoundsOf(mapped);
+    }
+
+    private static bool Overlap(OverlayBox a, OverlayBox b) =>
+        a.XPt < b.XPt + b.WidthPt && b.XPt < a.XPt + a.WidthPt && a.YPt < b.YPt + b.HeightPt && b.YPt < a.YPt + a.HeightPt;
 
     /// <summary>Вымарки страницы в НЕповёрнутой рамке (растр рендерится без добавочного поворота).</summary>
     private static List<RedactionDraft> RedactionRects(ComposedPage page, PdfPageDescriptor size)
@@ -200,12 +266,14 @@ public static class RedactionBaker
     /// из OCR-слоя отбрасываются слова, пересекающие вымарку — иначе
     /// вымаранный текст вернулся бы НЕВИДИМЫМ, но копируемым слоем.
     /// </summary>
-    private static List<PageOverlay> CarryOverlays(ComposedPage page, PdfPageDescriptor size)
+    private static List<PageOverlay> CarryOverlays(ComposedPage page, PdfPageDescriptor size, HashSet<PageOverlay> burned)
     {
         var rects = RedactionRects(page, size);
         var carried = new List<PageOverlay>();
         foreach (var overlay in page.Overlays!)
         {
+            if (burned.Contains(overlay))
+                continue; // уже в растре, под вымаркой
             switch (overlay)
             {
                 case RedactionDraft:
