@@ -116,14 +116,16 @@ public sealed record PdfTextObject(
     double XPt,
     double YPt,
     double WidthPt,
-    double HeightPt)
+    double HeightPt,
+    bool PageHasGradients = false)
 {
     /// <summary>
-    /// Можно ли сохранить правку этой строки. Ложь для текста внутри
+    /// Можно ли сохранить правку этой строки на месте. Ложь для текста внутри
     /// Form XObject: найти его получается, а записать изменение обратно в
-    /// файл — нет, поэтому предлагать правку нечестно.
+    /// файл — нет. Ложь и на странице с объектами-градиентами: перезапись
+    /// содержимого страницы их бы потеряла — такая строка правится стиранием.
     /// </summary>
-    public bool CanEdit => ObjectPath.Count == 1;
+    public bool CanEdit => ObjectPath.Count == 1 && !PageHasGradients;
 }
 
 /// <summary>

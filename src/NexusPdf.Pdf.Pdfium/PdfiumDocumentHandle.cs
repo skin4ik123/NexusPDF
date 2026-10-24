@@ -1167,7 +1167,7 @@ internal sealed partial class PdfiumDocumentHandle : IPdfDocumentHandle
                             (float)left, (float)bottom, (float)right, (float)top);
                         return new PdfTextObject(node.Path, text, size,
                             (a << 24) | (r << 16) | (g << 8) | b,
-                            fontName, embedded, x, y, w, h);
+                            fontName, embedded, x, y, w, h, HasGradientObjects(page));
                     }
                     return null;
                 }

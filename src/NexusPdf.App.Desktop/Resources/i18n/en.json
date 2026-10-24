@@ -968,6 +968,7 @@
   "TextParagraphInvisible": "This is invisible text (an OCR layer) — it is edited as a line.",
   "TextParagraphOverlap": "This text is drawn over itself and can't be taken as a paragraph — it is edited as a line.",
   "TextParagraphClipped": "Part of this text is hidden by clipping (text overflowing a cell) — it is edited as a line.",
+  "TextParagraphGradient": "This page has gradients that rewriting its content would lose — the text is edited as a line.",
   "TextUnderRedaction": "This text is under a redaction that has not been saved yet — save the redaction first.",
   "TextLineInPendingParagraph": "This line belongs to a paragraph already edited as a block — edit that block instead.",
   "TextBlockChangedElsewhere": "This block was changed by another program — it is edited as plain text.",

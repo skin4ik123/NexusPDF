@@ -73,7 +73,7 @@ public static class ParagraphBuilder
         {
             var lines = BuildLines(group.Select(o => ToItem(o, angle)).ToList());
             foreach (var paragraph in GroupLines(lines))
-                result.Add(Describe(paragraph, angle, layout.Lines, cells, fonts));
+                result.Add(Describe(paragraph, angle, layout.Lines, cells, fonts, layout.HasGradients));
         }
         return result;
     }
@@ -252,7 +252,7 @@ public static class ParagraphBuilder
     // ----- абзац → блок -----
 
     private static DetectedParagraph Describe(List<Line> lines, double angle, IReadOnlyList<PageLineObject> thinLines,
-        FormTargetIndex cells, IFontProvider fonts)
+        FormTargetIndex cells, IFontProvider fonts, bool pageHasGradients)
     {
         var items = lines.SelectMany(l => l.Items).ToList();
         var objects = items.Select(i => i.Source).ToList();
@@ -263,6 +263,7 @@ public static class ParagraphBuilder
             : objects.Any(o => o.Type3) ? "TextParagraphType3"
             : objects.Any(o => o.Invisible) ? "TextParagraphInvisible"
             : objects.Any(o => o.Clipped) ? "TextParagraphClipped"
+            : pageHasGradients ? "TextParagraphGradient"
             : objects.Any(o => !Supported(o.Text)) ? "TextBlockUnsupportedScript"
             : lines.Any(l => l.Overlap) ? "TextParagraphOverlap"
             : null;
