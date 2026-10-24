@@ -159,6 +159,8 @@ public static class RedactionBaker
         var removals = page.Overlays?
             .OfType<TextBlockReplacement>()
             .Select(r => (PageOverlay)new TextBlockReplacement(r.BlockId, null))
+            .Concat(page.Overlays.OfType<TextParagraphReplacement>()
+                .Select(r => (PageOverlay)new TextParagraphReplacement(r.Objects, null)))
             .ToList();
         return removals is { Count: > 0 } ? removals : null;
     }
@@ -214,6 +216,11 @@ public static class RedactionBaker
                     // поверх него текстом, как остальные добавленные блоки.
                     if (replacement.NewBlock is { } newBlock)
                         carried.Add(newBlock with { BlockId = replacement.BlockId, PlacedRotation = replacement.PlacedRotation });
+                    break;
+                case TextParagraphReplacement paragraph:
+                    // Объекты абзаца сняты до растра; блок ложится поверх него.
+                    if (paragraph.NewBlock is { } paragraphBlock)
+                        carried.Add(paragraphBlock with { PlacedRotation = paragraph.PlacedRotation });
                     break;
                 case OcrTextLayerOverlay ocr:
                 {

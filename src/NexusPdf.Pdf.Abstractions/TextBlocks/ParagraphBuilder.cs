@@ -406,6 +406,8 @@ public static class ParagraphBuilder
         var (cos, sin) = CosSin(angle);
         foreach (var thin in thinLines)
         {
+            // Линию внутри формы запись снять не может — она не часть абзаца.
+            if (thin.Path.Count != 1) continue;
             var b = thin.BoundsPt;
             var corners = new[] { (b.XPt, b.YPt), (b.XPt + b.WidthPt, b.YPt), (b.XPt, b.YPt + b.HeightPt), (b.XPt + b.WidthPt, b.YPt + b.HeightPt) }
                 .Select(p => (U: p.Item1 * cos + p.Item2 * sin, V: -p.Item1 * sin + p.Item2 * cos)).ToList();

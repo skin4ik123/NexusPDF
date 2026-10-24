@@ -66,6 +66,7 @@ public static class OverlayGeometry
         TextMarkupDraft => OverlayAbilities.SelectOnly,
         TextBlockOverlay => new OverlayAbilities(true, true, true, CanRotate: true),
         TextBlockReplacement { NewBlock: { } block } => AbilitiesOf(block),
+        TextParagraphReplacement { NewBlock: { } block } => AbilitiesOf(block),
         _ => OverlayAbilities.None,
     };
 
@@ -97,6 +98,7 @@ public static class OverlayGeometry
         TextBlockOverlay block => new OverlayBox(block.XPt, block.YPt, block.WidthPt, block.HeightPt),
 
         TextBlockReplacement { NewBlock: { } block } => BoundsOf(block),
+        TextParagraphReplacement { NewBlock: { } block } => BoundsOf(block),
 
         _ => null,
     };
@@ -185,6 +187,10 @@ public static class OverlayGeometry
             {
                 NewBlock = block with { XPt = block.XPt + dx, YPt = block.YPt + dy },
             },
+            TextParagraphReplacement { NewBlock: { } block } replacement => replacement with
+            {
+                NewBlock = block with { XPt = block.XPt + dx, YPt = block.YPt + dy },
+            },
             _ => null,
         };
     }
@@ -219,6 +225,10 @@ public static class OverlayGeometry
             InkAnnotationDraft ink => ScaleInk(ink, normalized),
             TextBlockOverlay block => ResizedBlock(block, normalized),
             TextBlockReplacement { NewBlock: { } block } replacement => replacement with
+            {
+                NewBlock = ResizedBlock(block, normalized),
+            },
+            TextParagraphReplacement { NewBlock: { } block } replacement => replacement with
             {
                 NewBlock = ResizedBlock(block, normalized),
             },
@@ -262,6 +272,10 @@ public static class OverlayGeometry
         {
             TextBlockOverlay block => block with { RotationDegrees = angle },
             TextBlockReplacement { NewBlock: { } block } replacement => replacement with
+            {
+                NewBlock = block with { RotationDegrees = angle },
+            },
+            TextParagraphReplacement { NewBlock: { } block } replacement => replacement with
             {
                 NewBlock = block with { RotationDegrees = angle },
             },

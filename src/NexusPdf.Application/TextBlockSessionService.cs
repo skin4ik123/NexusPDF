@@ -67,6 +67,48 @@ public static class TextBlockSessionService
     }
 
     /// <summary>
+    /// Абзац существующего текста после ввода: его объекты и линии под ним
+    /// снимаются при записи, на их место ложится блок. Повторная правка того
+    /// же абзаца до сохранения правит ту же замену; пустой блок — абзац удалён.
+    /// </summary>
+    public static void CommitParagraph(DocumentSession session, int pageIndex, DetectedParagraph source, TextBlockOverlay? edited) =>
+        CommitParagraph(session, pageIndex,
+            source.Objects.Select(o => new ParagraphObjectRef(o.Path, o.Fingerprint))
+                .Concat(source.Decorations.Select(d => new ParagraphObjectRef(d.Path, d.Fingerprint)))
+                .ToList(),
+            edited);
+
+    /// <param name="objects">Объекты абзаца — из найденного абзаца или из уже ждущей замены.</param>
+    public static void CommitParagraph(
+        DocumentSession session, int pageIndex, IReadOnlyList<ParagraphObjectRef> objects, TextBlockOverlay? edited)
+    {
+        if (pageIndex < 0 || pageIndex >= session.Model.Pages.Count || objects.Count == 0)
+            return;
+        var empty = edited == null || edited.Paragraphs.All(p => p.Text.Length == 0);
+        var pending = PendingParagraph(session, pageIndex, objects);
+        var id = pending?.NewBlock?.BlockId is { } known && known != Guid.Empty ? known
+            : edited?.BlockId is { } own && own != Guid.Empty ? own
+            : Guid.NewGuid();
+        var replacement = new TextParagraphReplacement(objects, empty ? null : edited! with { BlockId = id })
+        {
+            PlacedRotation = edited?.PlacedRotation ?? pending?.PlacedRotation ?? 0,
+        };
+        session.Apply(pending != null
+            ? new ReplaceOverlayOperation(pageIndex, pending, replacement)
+            : new AddOverlayOperation(pageIndex, replacement));
+    }
+
+    /// <summary>Ждущая замена того же абзаца (те же объекты) на странице.</summary>
+    private static TextParagraphReplacement? PendingParagraph(
+        DocumentSession session, int pageIndex, IReadOnlyList<ParagraphObjectRef> objects) =>
+        session.Model.Pages[pageIndex].OverlayList
+            .OfType<TextParagraphReplacement>()
+            .LastOrDefault(r => r.Objects.Count == objects.Count &&
+                                r.Objects.Zip(objects).All(pair =>
+                                    pair.First.Fingerprint == pair.Second.Fingerprint &&
+                                    pair.First.Path.SequenceEqual(pair.Second.Path)));
+
+    /// <summary>
     /// Удалить объект страницы. Замена сохранённого блока не снимается (иначе
     /// блок вернулся бы в прежнем виде), а становится заменой без новой версии.
     /// </summary>
@@ -77,6 +119,8 @@ public static class TextBlockSessionService
         if (overlayIndex < 0 || overlayIndex >= overlays.Count) return;
         if (overlays[overlayIndex] is TextBlockReplacement replacement)
             Commit(session, pageIndex, null, replacement.BlockId, null);
+        else if (overlays[overlayIndex] is TextParagraphReplacement paragraph)
+            CommitParagraph(session, pageIndex, paragraph.Objects, null);
         else
             session.Apply(new RemoveOverlayAtOperation(pageIndex, overlayIndex));
     }

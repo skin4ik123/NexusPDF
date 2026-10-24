@@ -85,6 +85,16 @@ internal static partial class PdfiumOverlayWriter
             contentAdded = true;
         }
 
+        // Замена абзаца: его объекты снимаются по путям — раньше всего прочего,
+        // пока номера объектов страницы те же, что видел пользователь. После
+        // растровой замены снимать нечего: на странице уже только растр.
+        var paragraphs = overlays.OfType<TextParagraphReplacement>().ToList();
+        if (paragraphs.Count > 0 && !contentAdded)
+        {
+            RemoveParagraphObjects(page, paragraphs);
+            contentAdded = true;
+        }
+
         // Замена текстового блока: прежние объекты блока убираются до всего
         // остального, новая версия ляжет в общем порядке с тем же Id.
         foreach (var blockReplacement in overlays.OfType<TextBlockReplacement>())
@@ -108,6 +118,12 @@ internal static partial class PdfiumOverlayWriter
                     break;
                 case TextBlockReplacement { NewBlock: { } newBlock } blockReplacement:
                     ApplyTextBlock(document, page, fonts, newBlock with { BlockId = blockReplacement.BlockId },
+                        rotation, left, bottom, contentWidth, contentHeight);
+                    break;
+                case TextParagraphReplacement { NewBlock: { } paragraphBlock }:
+                    // Абзац становится нашим блоком: после сохранения он правится как свой.
+                    ApplyTextBlock(document, page, fonts,
+                        paragraphBlock.BlockId == Guid.Empty ? paragraphBlock with { BlockId = Guid.NewGuid() } : paragraphBlock,
                         rotation, left, bottom, contentWidth, contentHeight);
                     break;
                 case TextBlockOverlay block:

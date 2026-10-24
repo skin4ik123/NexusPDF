@@ -15,7 +15,7 @@ public static class OverlayLayers
     public static bool IsDrawnOnTop(PageOverlay overlay) =>
         overlay is not (TextObjectReplacement or ImageObjectReplacement or PageRasterReplacement
             // Замена блока убирает его прежние объекты со страницы.
-            or TextBlocks.TextBlockReplacement
+            or TextBlocks.TextBlockReplacement or TextBlocks.TextParagraphReplacement
             // Маркер — полупрозрачная заливка с режимом наложения «умножение»:
             // на прозрачном слое он стал бы сплошной плашкой поверх текста.
             or TextMarkupDraft { Kind: TextMarkupKind.Highlight });
@@ -33,7 +33,7 @@ public static class OverlayLayers
     public static bool ChangesText(PageOverlay overlay) =>
         overlay is TextOverlay or OcrEditableTextOverlay or OcrTextLayerOverlay
             or TextObjectReplacement or PageRasterReplacement
-            or TextBlocks.TextBlockOverlay or TextBlocks.TextBlockReplacement;
+            or TextBlocks.TextBlockOverlay or TextBlocks.TextBlockReplacement or TextBlocks.TextParagraphReplacement;
 
     /// <summary>
     /// Слой для показа: вымарка и стирание до сохранения рисуются тем, чем

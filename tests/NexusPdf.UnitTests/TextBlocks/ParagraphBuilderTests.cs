@@ -224,6 +224,17 @@ public sealed class ParagraphBuilderTests : IDisposable
     }
 
     [Fact]
+    public void Underline_Inside_A_Form_Is_Not_Taken()
+    {
+        // Объекты внутри форм запись не снимает (форма общая): такая линия
+        // остаётся на странице и стилем блока не становится.
+        var nested = new PageLineObject([1, 0], new OverlayBox(70, 101.5, 15, 0.6), 0xFF000000);
+        var detected = Assert.Single(Build([Obj("aaa bbb", 50, 100)], [nested]));
+        Assert.Empty(detected.Decorations);
+        Assert.All(Paragraph(detected).Runs, r => Assert.False(r.Style.Underline));
+    }
+
+    [Fact]
     public void Strike_Line_Becomes_Strike()
     {
         var strike = new PageLineObject([1], new OverlayBox(50, 97, 35, 0.6), 0xFF000000);
