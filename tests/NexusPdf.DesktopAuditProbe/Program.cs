@@ -157,6 +157,8 @@ internal static class Program
             await VerifyWorkflowsAsync();
         }
         _editor.Dispose();
+        // Несохранённая вкладка остановила бы закрытие на диалоге — лучше явная ошибка, чем зависание.
+        Require(_main.ViewModel.Documents.All(d => !d.IsDirty), "No tab is left with unsaved changes before closing");
         await _main.ViewModel.TryCloseAllAsync();
         _main.Close();
         await _services.DisposeAsync();
@@ -483,6 +485,11 @@ internal static class Program
             "Text in a dragged frame wraps by words");
         Capture(_main, "text-block-wrapped");
         reopened.CommitTextBlock();
+        // Вкладка не остаётся с несохранённым: иначе закрытие в конце пробы
+        // остановилось бы на вопросе «Сохранить изменения?».
+        await _services.SaveService.SaveAsAsync(reopened.Document, Path.Combine(_output, "text-block-wrapped.pdf"),
+            keepBackup: false, CancellationToken.None);
+        Require(!reopened.IsDirty, "The wrapped block is saved and the tab has no unsaved changes");
         Require(reopened.IsTextTool, "The Text tool is on while blocks are written");
         reopened.ToggleTextTool();
         Require(!reopened.IsTextTool, "The Text tool turns off");
@@ -587,6 +594,7 @@ internal static class Program
             "After saving, the paragraph is our block with the edited text");
         reopened.CommitTextBlock();
         if (reopened.IsTextTool) reopened.ToggleTextTool();
+        Require(!reopened.IsDirty, "Opening a block without changes leaves the form tab saved");
     }
 
     /// <summary>
