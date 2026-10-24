@@ -298,7 +298,9 @@ public sealed class FormTargetIndex
     private List<FormTarget> CellsOf(Table table)
     {
         var cells = new List<FormTarget>();
-        if ((long)Math.Max(0, table.Ys.Length - 1) * Math.Max(0, table.Xs.Length - 1) > MaxTableSlots)
+        // Без двух строк и двух колонок промежутков нет (линии не сомкнулись в сетку).
+        if (table.Ys.Length < 2 || table.Xs.Length < 2 ||
+            (long)(table.Ys.Length - 1) * (table.Xs.Length - 1) > MaxTableSlots)
             return cells;
         var bounds = new OverlayBox(table.Xs[0], table.Ys[0], table.Xs[^1] - table.Xs[0], table.Ys[^1] - table.Ys[0]);
         var texts = TextsIn(_texts, bounds);

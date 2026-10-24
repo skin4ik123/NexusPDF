@@ -256,4 +256,21 @@ public sealed class FormTargetsTests
         Assert.Null(next);
         Assert.True(watch.ElapsedMilliseconds < 200, $"{watch.ElapsedMilliseconds} ms");
     }
+
+    [Fact]
+    public void Cell_Whose_Sides_Do_Not_Touch_The_Top_Line_Has_No_Tab_Order()
+    {
+        // Боковые линии начинаются на 5 пт ниже верхней: клетка замкнута (92 %),
+        // но верхняя линия ни с чем не связана — таблицы из одной линии нет.
+        var rulings = new List<PageRuling>
+        {
+            new(true, 100, 100, 200), new(true, 160, 100, 200),
+            new(false, 100, 105, 160), new(false, 200, 105, 160),
+        };
+        var index = Index(rulings);
+        var cell = index.At(150, 130);
+
+        Assert.Equal(FormTargetKind.Cell, cell!.Kind);
+        Assert.Null(index.Next(cell, backwards: false));
+    }
 }
