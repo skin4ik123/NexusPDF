@@ -8,6 +8,7 @@
   <UserControl.Resources>
     <app:EnumToBoolConverter x:Key="IsAlign"/>
     <app:ArgbToBrushConverter x:Key="ArgbBrush"/>
+    <BooleanToVisibilityConverter x:Key="BoolToVis"/>
     <Style x:Key="BarButton" TargetType="ButtonBase" BasedOn="{StaticResource ToolButton}">
       <Setter Property="Focusable" Value="False"/>
       <Setter Property="MinWidth" Value="26"/>
@@ -18,6 +19,7 @@
   </UserControl.Resources>
   <Border Background="{DynamicResource PanelBg}" BorderBrush="{DynamicResource PanelBorder}"
           BorderThickness="1" CornerRadius="6" Padding="4">
+    <StackPanel>
     <StackPanel Orientation="Horizontal">
       <text:FontPicker x:Name="Family" VerticalAlignment="Center"/>
 
@@ -121,6 +123,12 @@
           </StackPanel>
         </Border>
       </Popup>
+    </StackPanel>
+    <!-- Шрифта документа нет в системе: чем пишется вместо него -->
+    <TextBlock Text="{Binding TextFontNote}" Margin="4,4,4,0" FontSize="11" TextWrapping="Wrap" MaxWidth="520"
+               HorizontalAlignment="Left" Foreground="{DynamicResource TextSecondary}"
+               Visibility="{Binding HasTextFontNote, Converter={StaticResource BoolToVis}}"
+               AutomationProperties.AutomationId="TextFontNote"/>
     </StackPanel>
   </Border>
 </UserControl>

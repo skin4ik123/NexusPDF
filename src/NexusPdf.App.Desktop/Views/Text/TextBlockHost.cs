@@ -32,7 +32,9 @@ internal sealed class TextBlockHost
         _edit = edit;
         Canvas = new TextBlockCanvas(edit.Model, page.DisplayScale);
         if (edit.CoversOriginal)
-            Canvas.CoverPt = new Size(edit.StartBlock.WidthPt, edit.StartBlock.HeightPt);
+            Canvas.CoverPt = edit.CoverPt is { } cover
+                ? new Size(cover.Width, cover.Height)
+                : new Size(edit.StartBlock.WidthPt, edit.StartBlock.HeightPt);
         _popup = new Popup
         {
             Child = new Border { Child = Canvas, LayoutTransform = _rotation },

@@ -1435,6 +1435,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         NexusPdf.Pdf.Abstractions.MeasurementDraft => NexusPdf.Ux.SelectionKind.Annotation,
         NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockOverlay => NexusPdf.Ux.SelectionKind.TextObject,
         NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockReplacement => NexusPdf.Ux.SelectionKind.TextObject,
+        NexusPdf.Pdf.Abstractions.TextBlocks.TextParagraphReplacement => NexusPdf.Ux.SelectionKind.TextObject,
         _ => NexusPdf.Ux.SelectionKind.Nothing,
     };
 
@@ -1488,6 +1489,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
     {
         NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockOverlay block => block,
         NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockReplacement { NewBlock: { } block } => block,
+        NexusPdf.Pdf.Abstractions.TextBlocks.TextParagraphReplacement { NewBlock: { } block } => block,
         _ => null,
     };
 
@@ -1846,6 +1848,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
             NexusPdf.Pdf.Abstractions.TextMarkupDraft => "UxObjectMarkup",
             NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockOverlay => "UxObjectTextBlock",
             NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockReplacement => "UxObjectTextBlock",
+            NexusPdf.Pdf.Abstractions.TextBlocks.TextParagraphReplacement => "UxObjectTextBlock",
             _ => "UxObjectOther",
         };
 
@@ -1875,8 +1878,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         NexusPdf.Pdf.Abstractions.RedactionDraft => Loc.Get("UxObjectRedaction"),
         NexusPdf.Pdf.Abstractions.TextMarkupDraft => Loc.Get("UxObjectMarkup"),
         NexusPdf.Pdf.Abstractions.MeasurementDraft measurement => Loc.Get("UxObjectMeasure") + ": " + measurement.Label,
-        NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockOverlay or NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockReplacement =>
-            Loc.Get("UxObjectTextBlock"),
+        NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockOverlay or NexusPdf.Pdf.Abstractions.TextBlocks.TextBlockReplacement
+            or NexusPdf.Pdf.Abstractions.TextBlocks.TextParagraphReplacement => Loc.Get("UxObjectTextBlock"),
         _ => Loc.Get("UxObjectOther"),
     };
 

@@ -18,10 +18,10 @@ public enum TextHoverKind { None, Block, Paragraph, Cell, Line }
 /// </summary>
 public sealed partial class DocumentViewModel
 {
-    /// <summary>Описание страницы и поиск мест бланка по нему.</summary>
-    private sealed record PageText(PageTextLayout Layout, FormTargetIndex Forms);
+    /// <summary>Описание страницы, места бланка и абзацы чужого текста (без наших целых блоков).</summary>
+    private sealed record PageText(PageTextLayout Layout, FormTargetIndex Forms, IReadOnlyList<DetectedParagraph> Paragraphs);
 
-    private readonly Dictionary<(IPdfDocumentHandle Handle, int Page, int Turns), PageText?> _pageTexts = new();
+    private readonly Dictionary<(IPdfDocumentHandle Handle, int Page, int Turns), Task<PageText?>> _pageTexts = new();
 
     /// <summary>Место бланка, в котором идёт ввод: от него Tab ищет следующую клетку.</summary>
     private FormTarget? _activeFormTarget;
@@ -57,32 +57,76 @@ public sealed partial class DocumentViewModel
 
     public static readonly IReadOnlyList<string> TextMarks = ["✓", "✗", "●"];
 
-    /// <summary>Прочитать описание страницы (текст, линии, клетки) — один раз на страницу и поворот.</summary>
-    public async Task EnsurePageTextAsync(PageViewModel page)
+    /// <summary>Прочитать описание страницы (текст, линии, клетки, абзацы) — один раз на страницу и поворот.</summary>
+    public Task EnsurePageTextAsync(PageViewModel page) => PageTextAsync(page);
+
+    private Task<PageText?> PageTextAsync(PageViewModel page)
     {
-        if (!Document.Handles.TryGetValue(page.PageRef.SourceId, out var handle)) return;
+        if (!Document.Handles.TryGetValue(page.PageRef.SourceId, out var handle))
+            return Task.FromResult<PageText?>(null);
         var key = (handle, page.PageRef.SourcePageIndex, page.PageRef.RotationOffset);
-        if (_pageTexts.ContainsKey(key)) return;
-        _pageTexts[key] = null;
+        if (!_pageTexts.TryGetValue(key, out var task))
+            _pageTexts[key] = task = ReadPageTextAsync(page, handle);
+        return task;
+    }
+
+    private async Task<PageText?> ReadPageTextAsync(PageViewModel page, IPdfDocumentHandle handle)
+    {
         try
         {
             var layout = await handle.GetPageTextLayoutAsync(
                 page.PageRef.SourcePageIndex, page.PageRef.RotationOffset, CancellationToken.None);
+            await EnsureStoredTextBlocksAsync(page);
+            await EnsureBlockFontsAsync();
+            // Объекты наших целых блоков правятся как блоки, абзацами их не собирать.
+            var own = StoredBlocksOf(page).Where(b => b.Block != null)
+                .Select(b => (TextBlockOverlay)ToDisplayFrame(b.Block!, page)).ToList();
+            var foreign = layout with
+            {
+                Objects = layout.Objects.Where(o => !own.Any(b => FrameContains(b,
+                    o.BoundsPt.XPt + o.BoundsPt.WidthPt / 2, o.BoundsPt.YPt + o.BoundsPt.HeightPt / 2, 1))).ToList(),
+            };
             var size = Defaults().Style.FontSizePt;
-            var forms = await Task.Run(() => FormTargetIndex.Build(layout, size));
-            _pageTexts[key] = new PageText(layout, forms);
+            return await Task.Run(() =>
+            {
+                var forms = FormTargetIndex.Build(layout, size);
+                return new PageText(layout, forms, ParagraphBuilder.Build(foreign, forms, BlockFonts));
+            });
         }
         catch (Exception ex) when (ex is PdfEngineException or InvalidOperationException or ObjectDisposedException)
         {
             Serilog.Log.Debug(ex, "Описание страницы {Page} не прочиталось", page.LogicalIndex + 1);
+            return null;
         }
     }
 
+    /// <summary>Описание страницы, если оно уже прочитано (для наведения — без ожидания).</summary>
     private PageText? PageTextOf(PageViewModel page) =>
         Document.Handles.TryGetValue(page.PageRef.SourceId, out var handle) &&
-        _pageTexts.TryGetValue((handle, page.PageRef.SourcePageIndex, page.PageRef.RotationOffset), out var text)
-            ? text
+        _pageTexts.TryGetValue((handle, page.PageRef.SourcePageIndex, page.PageRef.RotationOffset), out var task) &&
+        task.IsCompletedSuccessfully
+            ? task.Result
             : null;
+
+    /// <summary>
+    /// Абзац чужого текста под точкой — наименьший из накрывающих её. Абзацы,
+    /// замена которых уже ждёт записи, правятся своей заменой.
+    /// </summary>
+    private DetectedParagraph? ParagraphAt(PageViewModel page, double xPt, double yPt)
+    {
+        if (PageTextOf(page) is not { } text) return null;
+        var pending = page.PageRef.OverlayList.OfType<TextParagraphReplacement>()
+            .SelectMany(r => r.Objects).Select(o => o.Fingerprint).ToHashSet(StringComparer.Ordinal);
+        return text.Paragraphs
+            .Where(p => p.BoundsPt.Contains(xPt, yPt) || Near(p.BoundsPt, xPt, yPt, 1))
+            .Where(p => !p.Objects.Any(o => pending.Contains(o.Fingerprint)))
+            .OrderBy(p => p.BoundsPt.WidthPt * p.BoundsPt.HeightPt)
+            .FirstOrDefault();
+    }
+
+    private static bool Near(OverlayBox box, double x, double y, double margin) =>
+        x >= box.XPt - margin && x <= box.XPt + box.WidthPt + margin &&
+        y >= box.YPt - margin && y <= box.YPt + box.HeightPt + margin;
 
     /// <summary>Место бланка под точкой (отображаемые пункты) или null, если страница ещё не прочитана.</summary>
     private FormTarget? FormTargetAt(PageViewModel page, double xPt, double yPt) =>
@@ -118,7 +162,11 @@ public sealed partial class DocumentViewModel
         var tolerance = 2 / Math.Max(Zoom, 0.1);
         if (BlockAt(page, xPt, yPt, tolerance) is { } block)
             return (TextHoverKind.Block, Frame(block), block.RotationDegrees);
-        if (FormTargetAt(page, xPt, yPt) is not { } target)
+        // Пропуск «____» внутри строки — место для ввода, а не правка этой строки.
+        var target = FormTargetAt(page, xPt, yPt);
+        if (target is not { Kind: FormTargetKind.TextBlank } && ParagraphAt(page, xPt, yPt) is { } paragraph)
+            return (TextHoverKind.Paragraph, paragraph.BoundsPt, 0);
+        if (target == null)
             return null;
         // Клетка, в которой уже есть блок, правится этим блоком.
         if (BlockInside(page, target.CellPt) is { } filled)
@@ -151,6 +199,9 @@ public sealed partial class DocumentViewModel
                 case TextBlockReplacement { NewBlock: { } pending }:
                     yield return pending;
                     break;
+                case TextParagraphReplacement { NewBlock: { } paragraph }:
+                    yield return paragraph;
+                    break;
             }
         }
         foreach (var stored in StoredBlocksOf(page))
@@ -174,10 +225,21 @@ public sealed partial class DocumentViewModel
             await PlaceTextMarkAsync(page, xPt, yPt, mark[0]);
             return;
         }
-        if (await EditTextBlockAsync(page, xPt, yPt))
-            return;
         await EnsurePageTextAsync(page);
-        if (FormTargetAt(page, xPt, yPt) is { } target)
+        var target = FormTargetAt(page, xPt, yPt);
+        if (target is not { Kind: FormTargetKind.TextBlank })
+        {
+            switch (await EditAtAsync(page, xPt, yPt))
+            {
+                case EditResult.Started:
+                    return;
+                case EditResult.Refused:
+                    // Абзац взять нельзя — нынешняя правка строки; почему — в строке состояния.
+                    RequestInlineEdit(page, xPt, yPt, isExplicit: true);
+                    return;
+            }
+        }
+        if (target != null)
         {
             if (BlockInside(page, target.CellPt) is { } filled)
             {
