@@ -215,6 +215,48 @@ public sealed class ParagraphReplacementTests : IAsyncLifetime
         Assert.Contains("изменил", error.Message);
     }
 
+    [Fact]
+    public async Task Edited_Paragraph_Under_A_Later_Redaction_Is_Burned_Into_The_Raster()
+    {
+        // Сначала абзац переписан, потом поверх него — вымарка: новый текст
+        // обязан уйти под чёрное вместе со страницей, а не лечь поверх растра.
+        var source = Source(ThreeParagraphs);
+        var middle = await MiddleAsync(source);
+        var result = Path.Combine(_dir, "redacted.pdf");
+
+        await using (var document = await OpenedDocument.OpenAsync(_pdfium, source, null, CancellationToken.None))
+        {
+            document.Session.Apply(new AddOverlayOperation(0, Replace(middle, "Hidden secret words")));
+            document.Session.Apply(new AddOverlayOperation(0, new RedactionDraft(60, 140, 300, 40)));
+            await new SaveService(_pdfium).SaveAsAsync(document, result, keepBackup: false, CancellationToken.None);
+        }
+
+        Assert.DoesNotContain("Hidden", Flat(await PageTextAsync(result)));
+    }
+
+    [Fact]
+    public async Task Block_Under_A_Later_Redaction_Is_Burned_But_A_Block_Added_After_It_Stays_Text()
+    {
+        var source = Source("BT /F1 12 Tf 72 700 Td (Page text) Tj ET");
+        var style = new TextStyle("Liberation Sans", 12);
+        TextBlockOverlay Block(string text, double y) => new TextBlockEditorModel(
+            new TextBlockOverlay(100, y, 10, 10, 0, TextBlockWidthMode.AutoWidth, true, false,
+                [new TextParagraph([new TextRun(text, style)])], Guid.NewGuid()), _fonts, style).Block;
+        var result = Path.Combine(_dir, "redacted-block.pdf");
+
+        await using (var document = await OpenedDocument.OpenAsync(_pdfium, source, null, CancellationToken.None))
+        {
+            document.Session.Apply(new AddOverlayOperation(0, Block("Underneath secret", 300)));
+            document.Session.Apply(new AddOverlayOperation(0, new RedactionDraft(80, 290, 300, 40)));
+            document.Session.Apply(new AddOverlayOperation(0, Block("Written on top", 300)));
+            await new SaveService(_pdfium).SaveAsAsync(document, result, keepBackup: false, CancellationToken.None);
+        }
+
+        var text = Flat(await PageTextAsync(result));
+        Assert.DoesNotContain("Underneath", text);
+        Assert.Contains("Written on top", text);
+    }
+
     private static X509Certificate2 MakeSelfSigned()
     {
         using var rsa = RSA.Create(2048);
