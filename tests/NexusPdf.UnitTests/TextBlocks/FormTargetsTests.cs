@@ -240,4 +240,20 @@ public sealed class FormTargetsTests
         Assert.Equal(100, found);
         Assert.True(watch.ElapsedMilliseconds < 200, $"{watch.ElapsedMilliseconds} ms");
     }
+
+    [Fact]
+    public void Huge_Grid_Gives_No_Tab_Order_Instead_Of_Freezing()
+    {
+        // 150 × 150 клеток — 22 500 промежутков сетки: не таблица бланка, а чертёж.
+        var cells = Enumerable.Repeat(10.0, 150).ToArray();
+        var index = Index(Grid(0, 0, cells, cells));
+        var first = index.At(5, 5)!;
+
+        var watch = Stopwatch.StartNew();
+        var next = index.Next(first, backwards: false);
+        watch.Stop();
+
+        Assert.Null(next);
+        Assert.True(watch.ElapsedMilliseconds < 200, $"{watch.ElapsedMilliseconds} ms");
+    }
 }

@@ -35,6 +35,9 @@ public sealed class FormTargetIndex
     private const double MinFreeHeightPt = 6;
     private const int CandidatesPerSide = 4;
     private const int MaxTableSegments = 5000;
+    // Столько промежутков сетки у бланка не бывает (200 строк × 20 колонок);
+    // обходить больше по Tab — заморозить окно на чертеже или карте.
+    private const int MaxTableSlots = 4000;
 
     private readonly Segment[] _h;
     private readonly Segment[] _v;
@@ -182,16 +185,21 @@ public sealed class FormTargetIndex
     }
 
     /// <summary>Клетка — пустая, с подписью (свободная часть) или заполненная (null).</summary>
-    private FormTarget? Describe(OverlayBox cell, int topSegment, double x, double y)
+    private FormTarget? Describe(OverlayBox cell, int topSegment, double x, double y) =>
+        Describe(cell, TableOf(topSegment), x, y, _texts);
+
+    private static List<PageTextObject> TextsIn(IEnumerable<PageTextObject> texts, OverlayBox box) =>
+        texts.Where(t => Contains(box, t.BoundsPt.XPt + t.BoundsPt.WidthPt / 2,
+            t.BoundsPt.YPt + t.BoundsPt.HeightPt / 2, -0.5)).ToList();
+
+    private static FormTarget? Describe(OverlayBox cell, Table? table, double x, double y, IReadOnlyList<PageTextObject> texts)
     {
-        var table = TableOf(topSegment);
         var (row, column) = table == null
             ? (0, 0)
             : (Nearest(table.Ys, cell.YPt), Nearest(table.Xs, cell.XPt));
         var id = table?.Id ?? -1;
 
-        var inside = _texts.Where(t => Contains(cell, t.BoundsPt.XPt + t.BoundsPt.WidthPt / 2,
-            t.BoundsPt.YPt + t.BoundsPt.HeightPt / 2, -0.5)).ToList();
+        var inside = TextsIn(texts, cell);
         if (inside.Count == 0)
             return new FormTarget(FormTargetKind.Cell, cell, cell, id, row, column);
         if (FreePart(cell, inside, x, y) is { } free)
@@ -290,18 +298,26 @@ public sealed class FormTargetIndex
     private List<FormTarget> CellsOf(Table table)
     {
         var cells = new List<FormTarget>();
+        if ((long)Math.Max(0, table.Ys.Length - 1) * Math.Max(0, table.Xs.Length - 1) > MaxTableSlots)
+            return cells;
+        var bounds = new OverlayBox(table.Xs[0], table.Ys[0], table.Xs[^1] - table.Xs[0], table.Ys[^1] - table.Ys[0]);
+        var texts = TextsIn(_texts, bounds);
+        var seen = new HashSet<(long, long, long, long)>();
         for (var r = 0; r + 1 < table.Ys.Length; r++)
         for (var c = 0; c + 1 < table.Xs.Length; c++)
         {
             var x = (table.Xs[c] + table.Xs[c + 1]) / 2;
             var y = (table.Ys[r] + table.Ys[r + 1]) / 2;
-            if (CellAt(x, y) is not { } cell || cells.Any(known => Same(known.CellPt, cell.Box)))
+            if (CellAt(x, y) is not { } cell ||
+                !seen.Add((Key(cell.Box.XPt), Key(cell.Box.YPt), Key(cell.Box.WidthPt), Key(cell.Box.HeightPt))))
                 continue;
-            if (Describe(cell.Box, cell.Top, cell.Box.XPt + cell.Box.WidthPt, cell.Box.YPt + cell.Box.HeightPt) is { } target &&
-                target.TableId == table.Id)
+            if (TableOf(cell.Top) is { } owner && owner.Id == table.Id &&
+                Describe(cell.Box, owner, cell.Box.XPt + cell.Box.WidthPt, cell.Box.YPt + cell.Box.HeightPt, texts) is { } target)
                 cells.Add(target);
         }
         return cells.OrderBy(c => Math.Round(c.CellPt.YPt)).ThenBy(c => c.CellPt.XPt).ToList();
+
+        static long Key(double value) => (long)Math.Round(value * 2);
     }
 
     // ----- строки и пропуски -----
