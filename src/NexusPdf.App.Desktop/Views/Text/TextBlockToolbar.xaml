@@ -79,6 +79,19 @@
         <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE700;"/>
       </ToggleButton>
 
+      <Button Style="{StaticResource BarButton}" Margin="6,0,1,0" Content="✓"
+              Command="{Binding InsertTextMarkCommand}" CommandParameter="✓"
+              ToolTip="{Binding TextMarkCheckTip}" ToolTipService.ShowOnDisabled="True"
+              AutomationProperties.Name="{l:Loc TextMarkCheck}"/>
+      <Button Style="{StaticResource BarButton}" Content="✗"
+              Command="{Binding InsertTextMarkCommand}" CommandParameter="✗"
+              ToolTip="{Binding TextMarkCrossTip}" ToolTipService.ShowOnDisabled="True"
+              AutomationProperties.Name="{l:Loc TextMarkCross}"/>
+      <Button Style="{StaticResource BarButton}" Content="●"
+              Command="{Binding InsertTextMarkCommand}" CommandParameter="●"
+              ToolTip="{Binding TextMarkDotTip}" ToolTipService.ShowOnDisabled="True"
+              AutomationProperties.Name="{l:Loc TextMarkDot}"/>
+
       <ToggleButton x:Name="More" Style="{StaticResource BarButton}" Margin="6,0,0,0" Content="⋯"
                     ToolTip="{l:Loc TextMoreOptions}" AutomationProperties.Name="{l:Loc TextMoreOptions}"/>
       <Popup PlacementTarget="{Binding ElementName=More}" Placement="Bottom" StaysOpen="False"

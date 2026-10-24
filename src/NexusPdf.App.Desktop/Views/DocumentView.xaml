@@ -379,6 +379,34 @@
                   </Rectangle>
                 </Canvas>
 
+                <!-- Цель инструмента «Текст» под курсором: блок, абзац, клетка, строка -->
+                <Canvas IsHitTestVisible="False">
+                  <Canvas.LayoutTransform>
+                    <ScaleTransform ScaleX="{Binding DisplayScale}" ScaleY="{Binding DisplayScale}"/>
+                  </Canvas.LayoutTransform>
+                  <Rectangle Canvas.Left="{Binding HoverTargetRect.X}" Canvas.Top="{Binding HoverTargetRect.Y}"
+                             Width="{Binding HoverTargetRect.Width}" Height="{Binding HoverTargetRect.Height}"
+                             Fill="#262563EB"
+                             Visibility="{Binding HoverIsArea, Converter={StaticResource BoolToVis}}"/>
+                  <Rectangle Canvas.Left="{Binding HoverTargetRect.X}" Canvas.Top="{Binding HoverTargetRect.Y}"
+                             Width="{Binding HoverTargetRect.Width}" Height="{Binding HoverTargetRect.Height}"
+                             Stroke="{DynamicResource Accent}" StrokeThickness="0.75" RenderTransformOrigin="0.5,0.5"
+                             Visibility="{Binding HoverIsBlock, Converter={StaticResource BoolToVis}}">
+                    <Rectangle.RenderTransform>
+                      <RotateTransform Angle="{Binding HoverTargetAngle}"/>
+                    </Rectangle.RenderTransform>
+                  </Rectangle>
+                  <Rectangle Canvas.Left="{Binding HoverTargetRect.X}" Canvas.Top="{Binding HoverTargetRect.Y}"
+                             Width="{Binding HoverTargetRect.Width}" Height="{Binding HoverTargetRect.Height}"
+                             Stroke="{DynamicResource Accent}" StrokeThickness="0.75" StrokeDashArray="3 2"
+                             RenderTransformOrigin="0.5,0.5"
+                             Visibility="{Binding HoverIsParagraph, Converter={StaticResource BoolToVis}}">
+                    <Rectangle.RenderTransform>
+                      <RotateTransform Angle="{Binding HoverTargetAngle}"/>
+                    </Rectangle.RenderTransform>
+                  </Rectangle>
+                </Canvas>
+
                 <!-- Живой штрих при рисовании -->
                 <Canvas IsHitTestVisible="False"
                         Visibility="{Binding HasDrawPreview, Converter={StaticResource BoolToVis}}">
