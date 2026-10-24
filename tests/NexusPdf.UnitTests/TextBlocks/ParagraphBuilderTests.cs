@@ -200,6 +200,21 @@ public sealed class ParagraphBuilderTests : IDisposable
     }
 
     [Fact]
+    public void Font_Name_With_A_PostScript_Suffix_Is_Not_Reported_As_Missing()
+    {
+        var detected = Single(Obj("aaa", 50, 100, font: "ABCDEF+Mono500MT"));
+        Assert.Equal("Mono500", Paragraph(detected).Runs[0].Style.FontFamily);
+        Assert.Empty(detected.SubstitutedFonts);
+    }
+
+    [Fact]
+    public void Clipped_Text_Is_Refused()
+    {
+        var detected = Single(Obj("aaa", 50, 100) with { Clipped = true });
+        Assert.Equal("TextParagraphClipped", detected.RefusedKey);
+    }
+
+    [Fact]
     public void Runs_Keep_Size_And_Colour()
     {
         var detected = Single(Obj("aaa ", 50, 100), Obj("bbb", 70, 100, size: 12, color: 0xFFD3282F));

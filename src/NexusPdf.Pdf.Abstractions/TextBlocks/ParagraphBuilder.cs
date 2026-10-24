@@ -262,6 +262,7 @@ public static class ParagraphBuilder
             objects.Any(o => o.InForm) ? "TextParagraphInForm"
             : objects.Any(o => o.Type3) ? "TextParagraphType3"
             : objects.Any(o => o.Invisible) ? "TextParagraphInvisible"
+            : objects.Any(o => o.Clipped) ? "TextParagraphClipped"
             : objects.Any(o => !Supported(o.Text)) ? "TextBlockUnsupportedScript"
             : lines.Any(l => l.Overlap) ? "TextParagraphOverlap"
             : null;
@@ -464,6 +465,9 @@ public static class ParagraphBuilder
                     var value = char.IsControl(ch) ? " " : ch.ToString();
                     pieces.Add((value, Decorate(style, marks, u + advance / 2)));
                     u += advance;
+                    // Зазор внутри объекта (сдвиг в TJ) — пробел между словами.
+                    if (item.Source.SpaceAfter?.Contains(k) == true && k + 1 < text.Length && !char.IsWhiteSpace(text[k + 1]))
+                        pieces.Add((" ", Decorate(style, marks, u)));
                 }
                 previous = item;
             }
@@ -524,6 +528,7 @@ public static class ParagraphBuilder
                 if (blank) continue;
                 started = true;
                 width += k < advances.Count ? advances[k] : 0;
+                if (item.Source.SpaceAfter?.Contains(k) == true) return width;
             }
             previous = item;
         }

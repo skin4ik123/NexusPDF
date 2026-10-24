@@ -10,12 +10,16 @@ namespace NexusPdf.Pdf.Abstractions.TextBlocks;
 /// стрелке на экране. Text — ровно записанные в объекте буквы, без пробелов,
 /// которые PDFium додумывает между объектами. FontSizePt — кегль с учётом
 /// матриц (cm, Tm, формы). Path — адрес объекта (вложенный — через формы).
+/// Clipped — часть объекта срезана обтравкой (текст, вылезающий из клетки
+/// Excel). SpaceAfter — номера букв, после которых внутри объекта стоит
+/// зазор-пробел (сдвиг в TJ, так пишет pdfTeX): в Text этих пробелов нет.
 /// </summary>
 public sealed record PageTextObject(
     IReadOnlyList<int> Path, string Text, OverlayBox BoundsPt,
     double OriginXPt, double OriginYPt, double AngleDeg, double FontSizePt, string FontName,
     bool Bold, bool Italic, uint ColorArgb, bool Invisible, bool Type3, bool InForm,
-    IReadOnlyList<double> CharAdvancesPt, string Fingerprint);
+    IReadOnlyList<double> CharAdvancesPt, string Fingerprint,
+    bool Clipped = false, IReadOnlyList<int>? SpaceAfter = null);
 
 /// <summary>Тонкая линия страницы (подчёркивание, линия бланка): залитый узкий прямоугольник или отрезок.</summary>
 public sealed record PageLineObject(IReadOnlyList<int> Path, OverlayBox BoundsPt, uint ColorArgb, string Fingerprint = "");

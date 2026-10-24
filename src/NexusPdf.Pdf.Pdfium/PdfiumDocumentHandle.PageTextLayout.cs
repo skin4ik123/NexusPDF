@@ -158,8 +158,14 @@ internal sealed partial class PdfiumDocumentHandle
 
         var value = TextOf(indices, textPage);
         var advances = new List<double>(value.Length);
+        // Зазор-пробел внутри объекта (сдвиг в TJ): PDFium ставит между
+        // буквами «сгенерированный» пробел — в Text его нет, но слово кончилось.
+        var spaceAfter = new List<int>();
+        var position = 0;
         for (var k = 0; k < indices.Count; k++)
         {
+            if (k > 0 && GeneratedSpaceBetween(textPage, indices[k - 1], indices[k]))
+                spaceAfter.Add(position - 1);
             var code = fpdf_text.FPDFTextGetUnicode(textPage, indices[k]);
             var units = code > 0xFFFF && code <= 0x10FFFF ? 2 : code is > 0 and <= 0xFFFF ? 1 : 0;
             if (units == 0)
@@ -185,6 +191,7 @@ internal sealed partial class PdfiumDocumentHandle
             }
             advances.Add(Math.Max(0, advance));
             if (units == 2) advances.Add(0);
+            position += units;
         }
         if (value.Length == 0)
             return null;
@@ -223,7 +230,55 @@ internal sealed partial class PdfiumDocumentHandle
             node.Path, value, Displayed(frame, l, b, r, t), dx, dy, angle, fontSize, fontName,
             bold, italic, (ca << 24) | ((cr & 0xFF) << 16) | ((cg & 0xFF) << 8) | (cb & 0xFF),
             mode is TextRenderInvisible or TextRenderClip, type3, node.Path.Length > 1,
-            advances, PageTextFingerprint.Of(value, ox, oy, fontSize));
+            advances, PageTextFingerprint.Of(value, ox, oy, fontSize),
+            Clipped(obj, node.ToPage, l, b, r, t), spaceAfter.Count > 0 ? spaceAfter : null);
+    }
+
+    private static bool GeneratedSpaceBetween(FpdfTextpageT textPage, int from, int to)
+    {
+        for (var j = from + 1; j < to; j++)
+        {
+            if (fpdf_text.FPDFTextIsGenerated(textPage, j) != 0 &&
+                fpdf_text.FPDFTextGetUnicode(textPage, j) is ' ' or '\u00A0')
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Срезан ли объект обтравкой: его рамка выходит за пересечение контуров
+    /// обтравки больше чем на 1 пт (текст, вылезающий из клетки Excel, обрезан —
+    /// блок из него показал бы скрытое).
+    /// </summary>
+    private static bool Clipped(FpdfPageobjectT obj, PdfObjectTree.Transform toPage,
+        double left, double bottom, double right, double top)
+    {
+        var clip = fpdf_transformpage.FPDFPageObjGetClipPath(obj);
+        if (clip == null || clip.__Instance == IntPtr.Zero)
+            return false;
+        double cl = double.MinValue, cb = double.MinValue, cr = double.MaxValue, ct = double.MaxValue;
+        var any = false;
+        for (var p = 0; p < fpdf_transformpage.FPDFClipPathCountPaths(clip); p++)
+        {
+            var segments = fpdf_transformpage.FPDFClipPathCountPathSegments(clip, p);
+            if (segments <= 0) continue;
+            double pl = double.MaxValue, pb = double.MaxValue, pr = double.MinValue, pt = double.MinValue;
+            for (var s = 0; s < segments; s++)
+            {
+                var segment = fpdf_transformpage.FPDFClipPathGetPathSegment(clip, p, s);
+                float x = 0, y = 0;
+                if (segment == null || segment.__Instance == IntPtr.Zero ||
+                    fpdf_edit.FPDFPathSegmentGetPoint(segment, ref x, ref y) == 0)
+                    continue;
+                var (px, py) = toPage.Apply(x, y);
+                (pl, pb, pr, pt) = (Math.Min(pl, px), Math.Min(pb, py), Math.Max(pr, px), Math.Max(pt, py));
+            }
+            if (pl > pr) continue;
+            (cl, cb, cr, ct) = (Math.Max(cl, pl), Math.Max(cb, pb), Math.Min(cr, pr), Math.Min(ct, pt));
+            any = true;
+        }
+        const double slack = 1;
+        return any && (left < cl - slack || bottom < cb - slack || right > cr + slack || top > ct + slack);
     }
 
     private static bool NameSays(string name, params string[] words) =>
