@@ -132,6 +132,15 @@ internal sealed class TextBlockCanvas : FrameworkElement
     /// <summary>Ввод закончен: Esc или фокус ушёл на страницу.</summary>
     public event EventHandler? CommitRequested;
 
+    /// <summary>
+    /// Tab (Shift+Tab — назад): решает тот, кто поставил редактор — в клетке
+    /// бланка это переход к следующей клетке; иначе он вызывает <see cref="InsertTab"/>.
+    /// </summary>
+    public event EventHandler<TabRequestedEventArgs>? TabRequested;
+
+    /// <summary>Обычный Tab — табуляция в тексте.</summary>
+    public void InsertTab() => Report(_model.Insert("\t"));
+
     /// <summary>Ввод отвергнут; аргумент — ключ словаря для строки состояния.</summary>
     public event EventHandler<string>? InputRejected;
 
@@ -408,7 +417,10 @@ internal sealed class TextBlockCanvas : FrameworkElement
             case Key.Delete: _model.Delete(ctrl); break;
             case Key.Enter when shift: _model.LineBreak(); break;
             case Key.Enter: _model.NewParagraph(); break;
-            case Key.Tab when !ctrl: Report(_model.Insert("\t")); break;
+            case Key.Tab when !ctrl:
+                if (TabRequested is { } tab) tab(this, new TabRequestedEventArgs(shift));
+                else InsertTab();
+                break;
             case Key.Insert when shift: Paste(); break;
             case Key.Insert when ctrl: Copy(); break;
             case Key.Escape:
@@ -630,4 +642,10 @@ internal sealed class TextBlockCanvas : FrameworkElement
 
     [DllImport("imm32.dll")]
     private static extern bool ImmSetCompositionWindow(IntPtr context, ref CompositionForm form);
+}
+
+/// <summary>Tab в редакторе блока; Backwards — с Shift.</summary>
+internal sealed class TabRequestedEventArgs(bool backwards) : EventArgs
+{
+    public bool Backwards { get; } = backwards;
 }

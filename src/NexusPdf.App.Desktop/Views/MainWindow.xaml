@@ -237,6 +237,25 @@
                         AutomationProperties.AutomationId="TextTool">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8D2;"/>
           </ToggleButton>
+          <!-- Отметки для бланков: видны, пока включён «Текст»; щелчок по странице ставит знак -->
+          <StackPanel Orientation="Horizontal"
+                      Visibility="{Binding ActiveDocument.IsTextTool, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
+            <ToggleButton Style="{StaticResource ToolButton}" Content="✓"
+                          Command="{Binding ActiveDocument.ArmTextMarkCommand}" CommandParameter="✓"
+                          IsChecked="{Binding ActiveDocument.ArmedCheck, Mode=OneWay, FallbackValue=False}"
+                          ToolTip="{Binding ActiveDocument.TextMarkCheckTip}" ToolTipService.ShowOnDisabled="True"
+                          AutomationProperties.Name="{l:Loc TextMarkCheck}"/>
+            <ToggleButton Style="{StaticResource ToolButton}" Content="✗"
+                          Command="{Binding ActiveDocument.ArmTextMarkCommand}" CommandParameter="✗"
+                          IsChecked="{Binding ActiveDocument.ArmedCross, Mode=OneWay, FallbackValue=False}"
+                          ToolTip="{Binding ActiveDocument.TextMarkCrossTip}" ToolTipService.ShowOnDisabled="True"
+                          AutomationProperties.Name="{l:Loc TextMarkCross}"/>
+            <ToggleButton Style="{StaticResource ToolButton}" Content="●"
+                          Command="{Binding ActiveDocument.ArmTextMarkCommand}" CommandParameter="●"
+                          IsChecked="{Binding ActiveDocument.ArmedDot, Mode=OneWay, FallbackValue=False}"
+                          ToolTip="{Binding ActiveDocument.TextMarkDotTip}" ToolTipService.ShowOnDisabled="True"
+                          AutomationProperties.Name="{l:Loc TextMarkDot}"/>
+          </StackPanel>
           <Button Style="{StaticResource ToolButton}" Command="{Binding InsertImageOverlayCommand}"
                   IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc InsertImageMenu}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xEB9F;"/>

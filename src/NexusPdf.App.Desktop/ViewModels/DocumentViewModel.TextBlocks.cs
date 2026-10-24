@@ -57,6 +57,8 @@ public sealed partial class DocumentViewModel
         if (IsTextTool)
         {
             CommitTextBlock();
+            ArmedTextMark = null;
+            ClearTextHover();
             IsTextTool = false;
             StatusText = Loc.Get("Ready");
             return;
@@ -72,8 +74,9 @@ public sealed partial class DocumentViewModel
         ClearTextSelection();
         IsTextTool = true;
         StatusText = Loc.Get("TextToolHint");
-        // Список шрифтов сканируется заранее, пока человек выбирает место.
-        _ = Task.Run(() => _ = FontCatalog.System.Families);
+        // Список шрифтов сканируется заранее, пока человек выбирает место;
+        // заодно — для каких отметок ✓ ✗ ● есть шрифт.
+        _ = RefreshTextMarksAsync();
     }
 
     /// <summary>Щелчок инструментом: блок без переноса, растёт вправо при наборе.</summary>
@@ -150,6 +153,7 @@ public sealed partial class DocumentViewModel
     {
         if (ActiveTextEdit is not { } edit) return;
         ActiveTextEdit = null;
+        _activeFormTarget = null;
         edit.Model.Changed -= OnActiveTextChanged;
         OnPropertyChanged(nameof(ActiveTextBlock));
         OnPropertyChanged(nameof(ShowsTextBlockProperties));
@@ -192,6 +196,10 @@ public sealed partial class DocumentViewModel
         OnPropertyChanged(nameof(ShowsTextBlockProperties));
         OnPropertyChanged(nameof(ShowsPageProperties));
         RefreshTextStyle();
+        // Блок открыт двойным щелчком без инструмента — кнопкам отметок в
+        // панели тоже нужно знать, для каких знаков есть шрифт.
+        if (AvailableTextMarks.Count == 0)
+            _ = RefreshTextMarksAsync();
         StatusText = Loc.Get("TextBlockTyping");
         TextBlockEditStarted?.Invoke(this, edit);
     }

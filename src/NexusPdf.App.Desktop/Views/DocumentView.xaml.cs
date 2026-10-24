@@ -558,6 +558,7 @@ public partial class DocumentView : UserControl
             _dragElement = textElement;
             _dragStartPt = new Point(textPos.X / textScale, textPos.Y / textScale);
             _textToolDrag = true;
+            _vm.ClearTextHover();
             PagesList.CaptureMouse();
             PagesList.Focus();
             e.Handled = true;
@@ -938,6 +939,9 @@ public partial class DocumentView : UserControl
                 _ = _vm.EnsureStoredTextBlocksAsync(hoverPage);
                 var overLink = _vm.LinkAt(hoverPage, hoverPos.X, hoverPos.Y) != null;
                 var hoverScale = hoverPage.DisplayScale;
+                // Инструмент «Текст» подсвечивает, куда ляжет текст: блок, клетку, строку.
+                if (_vm.IsTextTool && hoverScale > 0)
+                    _vm.UpdateTextHover(hoverPage, hoverPos.X / hoverScale, hoverPos.Y / hoverScale);
                 var field = _vm.PendingOverlay == null && hoverScale > 0
                     ? _vm.FormFieldAt(hoverPage, hoverPos.X / hoverScale, hoverPos.Y / hoverScale)
                     : null;
@@ -957,6 +961,7 @@ public partial class DocumentView : UserControl
             }
             else
             {
+                _vm.ClearTextHover();
                 // Поле вокруг страницы: там ни текста, ни ссылок — только рука.
                 wanted = _vm.PendingOverlay != null ? Cursors.Cross
                     : CanPan() ? HandCursors.Open
@@ -1043,8 +1048,7 @@ public partial class DocumentView : UserControl
     private async Task TextToolClickAsync(PageViewModel page, Point pointPt)
     {
         if (_vm == null) return;
-        if (!await _vm.EditTextBlockAsync(page, pointPt.X, pointPt.Y))
-            await _vm.BeginTextBlockAtAsync(page, pointPt.X, pointPt.Y);
+        await _vm.TextToolClickAsync(page, pointPt.X, pointPt.Y);
     }
 
     private void OnTextBlockEditStarted(object? sender, DocumentViewModel.TextBlockEdit edit)
@@ -1060,6 +1064,7 @@ public partial class DocumentView : UserControl
         if (_vm == null) return;
         var host = new Text.TextBlockHost(element, edit.Page, edit, _vm, FontContext());
         host.Canvas.CommitRequested += (_, _) => _vm?.CommitTextBlock();
+        host.Canvas.TabRequested += OnEditorTab;
         host.Canvas.InputRejected += (_, key) =>
         {
             if (_vm != null) _vm.StatusText = Loc.Get(key);
@@ -1070,6 +1075,14 @@ public partial class DocumentView : UserControl
     }
 
     private void OnTextEditorFocusRequested(object? sender, EventArgs e) => _textHost?.FocusEditor();
+
+    /// <summary>Tab в блоке-клетке — следующая клетка; нет её — обычный Tab в тексте.</summary>
+    private async void OnEditorTab(object? sender, Text.TabRequestedEventArgs e)
+    {
+        if (_vm == null || sender is not Text.TextBlockCanvas canvas) return;
+        if (!await _vm.MoveToNextCellAsync(e.Backwards))
+            canvas.InsertTab();
+    }
 
     private void OnTextPanelFamilyChanged(object? sender, EventArgs e) => _vm?.SetTextFamily(TextPanelFamily.Family);
 

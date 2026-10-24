@@ -201,6 +201,35 @@ public sealed partial class PageViewModel : ObservableObject
     public double DragRectWPt => DragPreviewRect?.Width ?? 0;
     public double DragRectHPt => DragPreviewRect?.Height ?? 0;
 
+    // ----- Цель инструмента «Текст» под курсором (пункты страницы) -----
+
+    /// <summary>Блок или абзац — рамкой, клетка или строка бланка — светлой заливкой.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HoverIsArea))]
+    [NotifyPropertyChangedFor(nameof(HoverIsBlock))]
+    [NotifyPropertyChangedFor(nameof(HoverIsParagraph))]
+    private TextHoverKind _hoverTargetKind;
+
+    [ObservableProperty]
+    private Rect _hoverTargetRect;
+
+    [ObservableProperty]
+    private double _hoverTargetAngle;
+
+    public bool HoverIsArea => HoverTargetKind is TextHoverKind.Cell or TextHoverKind.Line;
+    public bool HoverIsBlock => HoverTargetKind == TextHoverKind.Block;
+    public bool HoverIsParagraph => HoverTargetKind == TextHoverKind.Paragraph;
+
+    public void SetTextHover(TextHoverKind kind, NexusPdf.Pdf.Abstractions.OverlayBox? rect, double angle)
+    {
+        if (rect is { } box)
+        {
+            HoverTargetRect = new Rect(box.XPt, box.YPt, Math.Max(0, box.WidthPt), Math.Max(0, box.HeightPt));
+            HoverTargetAngle = angle;
+        }
+        HoverTargetKind = rect == null ? TextHoverKind.None : kind;
+    }
+
     // ----- Рамка выделенного объекта (в пунктах страницы) -----
 
     /// <summary>
