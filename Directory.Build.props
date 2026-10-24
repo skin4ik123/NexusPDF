@@ -11,10 +11,10 @@
          РѕРґРЅР°Р¶РґС‹ РѕРєР°Р·Р°Р»СЃСЏ Р·Р°РєРѕРґРёСЂРѕРІР°РЅ РґРІР°Р¶РґС‹, Рё РІ СЃРІРѕР№СЃС‚РІР°С… exe РіРѕРґР°РјРё СЃС‚РѕСЏР»Рѕ
          В«Р’В© 2026 NexusPDFВ». РўР°Рє СЌС‚Рѕ РЅРµ РїРѕРІС‚РѕСЂРёС‚СЃСЏ РЅРё РїСЂРё РєР°РєРѕР№ РїРµСЂРµРєРѕРґРёСЂРѕРІРєРµ. -->
     <Copyright>Copyright &#169; 2026 Artur Yurchuk</Copyright>
-    <Version>1.0.0</Version>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
-    <InformationalVersion>1.0.0</InformationalVersion>
+    <Version>1.0.1</Version>
+    <AssemblyVersion>1.0.1.0</AssemblyVersion>
+    <FileVersion>1.0.1.0</FileVersion>
+    <InformationalVersion>1.0.1</InformationalVersion>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest</AnalysisLevel>
     <NeutralLanguage>en</NeutralLanguage>
