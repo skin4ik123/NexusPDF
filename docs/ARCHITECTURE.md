@@ -12,7 +12,10 @@ Domain                           — DocumentSession, PageRef, операции,
 Pdf.Abstractions                 — интерфейсы движков и модели данных;
                                    TextBlocks: чтение TrueType, каталог шрифтов,
                                    модель, раскладка и редактирование текстовых
-                                   блоков (общие для экрана и записи в PDF)
+                                   блоков (общие для экрана и записи в PDF);
+                                   абзацы чужого текста (ParagraphBuilder) и
+                                   места бланка (FormTargetIndex, FormFill) —
+                                   по описанию страницы от движка (PageTextLayout)
    ▲
    ├── Pdf.Pdfium                — рендер/текст/компоновка/формы (PDFium)
    ├── Pdf.MuPdf                 — сжатие, запись XFA-данных гибридных форм (MuPDF)

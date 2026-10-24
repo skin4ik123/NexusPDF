@@ -396,6 +396,7 @@ internal static class Program
             "Word export recognizes scans after switching the OCR engine");
         await InspectReaderToolsAsync();
         await VerifyTextBlocksAsync();
+        await VerifyTextEditingAsync();
     }
 
     /// <summary>
@@ -479,6 +480,139 @@ internal static class Program
         reopened.CommitTextBlock();
         reopened.ToggleTextTool();
         Require(!reopened.IsTextTool, "The Text tool turns off");
+    }
+
+    /// <summary>
+    /// Один режим «Текст» на бланке: щелчок в клетку таблицы — блок в клетке,
+    /// Tab — следующая клетка, ✓ — отметка по центру клетки, щелчок над
+    /// строкой-подчёркиванием — текст на линии; щелчок по абзацу чужого текста —
+    /// правка его блоком, рамку можно сдвинуть, не выходя из ввода. После
+    /// сохранения абзац открывается снова как наш блок.
+    /// </summary>
+    private static async Task VerifyTextEditingAsync()
+    {
+        var formPath = Path.Combine(_output, "text-form.pdf");
+        File.WriteAllBytes(formPath, FormFixture());
+        await _main.ViewModel.OpenFilesAsync(new[] { formPath });
+        var doc = _main.ViewModel.ActiveDocument ?? throw new InvalidOperationException("Form fixture did not open");
+        await WaitUntilAsync(() => doc.Pages.Count > 0 && doc.Document.Handles.ContainsKey(doc.Pages[0].PageRef.SourceId),
+            "The form fixture is shown");
+        var page = doc.Pages[0];
+        await doc.EnsurePageTextAsync(page);
+        doc.ToggleTextTool();
+        Require(doc.IsTextTool, "The Text tool turns on for the form");
+
+        // Клетка (строка 0, колонка 0): 72…172 × 92…112 в отображаемых пунктах.
+        await doc.TextToolClickAsync(page, 120, 102);
+        var editor = await FindTextEditorAsync("A click in an empty cell opens a block in the cell");
+        Type(editor, "Cell one");
+        var first = doc.ActiveTextBlock!.Block;
+        Require(first.VerticalAlign == TextVerticalAlign.Center && Math.Abs(first.WidthPt - 98) < 0.5 && first.ShrinkToFit,
+            "The cell block fills the cell, centred by height, shrinking to fit");
+        Require(await doc.MoveToNextCellAsync(backwards: false), "Tab goes to the next cell");
+        editor = await FindTextEditorAsync("The next cell opens a block");
+        Type(editor, "Cell two");
+        Require(Math.Abs(doc.ActiveTextBlock!.Block.XPt - 173) < 0.5, "The second block sits in the second cell");
+        doc.CommitTextBlock();
+        var overlays = doc.Document.Session.Model.Pages[0].OverlayList;
+        Require(overlays.OfType<TextBlockOverlay>().Count() == 2, "Two cells hold two blocks");
+
+        await WaitUntilAsync(() => doc.ArmTextMarkCommand.CanExecute("✓"), "A font for ✓ is found");
+        doc.ArmTextMarkCommand.Execute("✓");
+        await doc.TextToolClickAsync(page, 320, 102);
+        Require(doc.Document.Session.Model.Pages[0].OverlayList.OfType<TextBlockOverlay>()
+                .Any(b => b.Paragraphs[0].Text == "✓" && b.VerticalAlign == TextVerticalAlign.Center),
+            "The ✓ mark lands centred in the clicked cell");
+
+        // Строка-подчёркивание y = 792 − 598 = 194: щелчок над ней.
+        await doc.TextToolClickAsync(page, 150, 188);
+        editor = await FindTextEditorAsync("A click above an underline line opens a block on the line");
+        Type(editor, "Captain");
+        Require(doc.ActiveTextBlock!.Block.VerticalAlign == TextVerticalAlign.Bottom &&
+                Math.Abs(doc.ActiveTextBlock.Block.YPt + doc.ActiveTextBlock.Block.HeightPt - 193) < 0.5,
+            "The line block stands on the line");
+        doc.CommitTextBlock();
+        Capture(_main, "text-form-filled");
+
+        // Абзац чужого текста: базовая линия 792 − 520 = 272.
+        await doc.TextToolClickAsync(page, 100, 268);
+        editor = await FindTextEditorAsync("A click on a paragraph opens it as a block");
+        Require(doc.ActiveTextEdit?.ParagraphObjects is { Count: > 0 }, "The paragraph's objects are listed for removal");
+        var model = doc.ActiveTextBlock!;
+        Require(model.Block.Paragraphs[0].Text.StartsWith("Existing paragraph to edit", StringComparison.Ordinal),
+            "The paragraph's text is in the block");
+        model.MoveCaret(CaretMove.BlockEnd, extend: false);
+        Type(editor, " (edited)");
+        // Перенос рамки за край — без выхода из ввода.
+        var start = model.Block;
+        var moved = BlockFrameDrag.Apply(start, FrameZone.Border, FrameHandle.None, 0, 30, 0, 0);
+        model.SetFrame(moved.XPt, moved.YPt, moved.WidthPt, moved.HeightPt, moved.WidthMode, moved.AutoHeight,
+            moved.ShrinkToFit, moved.RotationDegrees);
+        Require(Math.Abs(model.Block.YPt - start.YPt - 30) < 0.01 && doc.ActiveTextBlock == model,
+            "Dragging the frame border moves the block while typing goes on");
+        doc.CommitTextBlock();
+        var replacement = doc.Document.Session.Model.Pages[0].OverlayList.OfType<TextParagraphReplacement>().SingleOrDefault();
+        Require(replacement?.NewBlock != null, "The edited paragraph becomes a pending replacement");
+        Capture(_main, "text-paragraph-edited");
+
+        var saved = Path.Combine(_output, "text-form-saved.pdf");
+        await _services.SaveService.SaveAsAsync(doc.Document, saved, keepBackup: false, CancellationToken.None);
+        await _main.ViewModel.OpenFilesAsync(new[] { saved });
+        var reopened = _main.ViewModel.ActiveDocument ?? throw new InvalidOperationException("Saved form did not open");
+        await WaitUntilAsync(() => reopened.Pages.Count > 0 &&
+            reopened.Document.Handles.ContainsKey(reopened.Pages[0].PageRef.SourceId),
+            "The tab shows the saved form after Save As");
+        await using (var check = await _services.Engine.OpenAsync(saved, null, CancellationToken.None))
+        {
+            var text = System.Text.RegularExpressions.Regex.Replace(
+                await check.GetPageTextAsync(0, CancellationToken.None), @"\s+", " ");
+            foreach (var expected in new[] { "Cell one", "Cell two", "Captain", "(edited)" })
+                Require(text.Contains(expected, StringComparison.Ordinal), "The saved form holds: " + expected);
+            Require(System.Text.RegularExpressions.Regex.Matches(text, "with a second line").Count == 1,
+                "The old paragraph is gone from the file, only its block remains");
+        }
+        var reopenedPage = reopened.Pages[0];
+        await reopened.EnsureStoredTextBlocksAsync(reopenedPage);
+        var newBlock = replacement!.NewBlock!;
+        Require(await reopened.EditTextBlockAsync(reopenedPage, newBlock.XPt + 4, newBlock.YPt + 4),
+            "The edited paragraph opens again as a block");
+        Require(reopened.ActiveTextEdit?.StoredId != null &&
+                reopened.ActiveTextBlock!.Block.Paragraphs[0].Text.EndsWith("(edited)", StringComparison.Ordinal),
+            "After saving, the paragraph is our block with the edited text");
+        reopened.CommitTextBlock();
+        if (reopened.IsTextTool) reopened.ToggleTextTool();
+    }
+
+    /// <summary>Бланк: таблица 3 × 2 из линий, строка «Name: ____» линией и абзац из двух строк.</summary>
+    private static byte[] FormFixture()
+    {
+        var content = new System.Text.StringBuilder("0.8 w ");
+        foreach (var y in new[] { 700, 680, 660 }) content.Append($"72 {y} m 372 {y} l S ");
+        foreach (var x in new[] { 72, 172, 272, 372 }) content.Append($"{x} 660 m {x} 700 l S ");
+        content.Append("BT /F1 11 Tf 72 600 Td (Name:) Tj ET 110 598 m 300 598 l S ");
+        content.Append("BT /F1 12 Tf 72 520 Td (Existing paragraph to edit in place) Tj ET ");
+        content.Append("BT /F1 12 Tf 72 506 Td (with a second line of text) Tj ET");
+        var stream = content.ToString();
+        var objects = new[]
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+            $"<< /Length {stream.Length} >>\nstream\n{stream}\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        };
+        var pdf = new System.Text.StringBuilder("%PDF-1.7\n");
+        var offsets = new List<int>();
+        for (var i = 0; i < objects.Length; i++)
+        {
+            offsets.Add(pdf.Length);
+            pdf.Append($"{i + 1} 0 obj\n{objects[i]}\nendobj\n");
+        }
+        var xref = pdf.Length;
+        pdf.Append($"xref\n0 {objects.Length + 1}\n0000000000 65535 f \n");
+        foreach (var offset in offsets) pdf.Append($"{offset:D10} 00000 n \n");
+        pdf.Append($"trailer\n<< /Size {objects.Length + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
+        return System.Text.Encoding.ASCII.GetBytes(pdf.ToString());
     }
 
     /// <summary>Редактор блока — отдельное окно поверх страницы: ищется среди всех окон по AutomationId.</summary>
