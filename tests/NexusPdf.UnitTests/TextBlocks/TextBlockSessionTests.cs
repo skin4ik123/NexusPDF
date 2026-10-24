@@ -164,4 +164,62 @@ public sealed class TextBlockSessionTests
 
         Assert.Equal([0, 1, 0], seen);
     }
+
+    private static DetectedParagraph Paragraph(params (int Path, string Fingerprint)[] objects) =>
+        new(objects.Select(o => new PageTextObject([o.Path], "old", new OverlayBox(10, 10, 50, 12), 10, 20, 0, 11, "Arial",
+                false, false, 0xFF000000, false, false, false, [5.5, 5.5, 5.5], o.Fingerprint)).ToList(),
+            [new PageLineObject([9], new OverlayBox(10, 22, 50, 0.6), 0xFF000000, "line-print")],
+            new OverlayBox(10, 10, 50, 12), Block("old"), null, []);
+
+    [Fact]
+    public void Editing_A_Paragraph_Adds_A_Replacement_Of_Its_Objects()
+    {
+        var session = Session();
+        TextBlockSessionService.CommitParagraph(session, 1, Paragraph((0, "a"), (3, "b")), Block("new"));
+
+        var replacement = Assert.IsType<TextParagraphReplacement>(Assert.Single(Overlays(session)));
+        Assert.Equal([[0], [3], [9]], replacement.Objects.Select(o => o.Path.ToArray()));
+        Assert.Equal(["a", "b", "line-print"], replacement.Objects.Select(o => o.Fingerprint));
+        Assert.Equal("new", replacement.NewBlock!.Paragraphs[0].Text);
+        Assert.NotEqual(Guid.Empty, replacement.NewBlock.BlockId);
+        session.Undo();
+        Assert.Empty(Overlays(session));
+    }
+
+    [Fact]
+    public void Second_Edit_Of_A_Paragraph_Replaces_The_Pending_Replacement()
+    {
+        var session = Session();
+        var paragraph = Paragraph((0, "a"));
+        TextBlockSessionService.CommitParagraph(session, 1, paragraph, Block("first"));
+        var first = Assert.IsType<TextParagraphReplacement>(Assert.Single(Overlays(session)));
+
+        TextBlockSessionService.CommitParagraph(session, 1, first.Objects, Block("second"));
+
+        var second = Assert.IsType<TextParagraphReplacement>(Assert.Single(Overlays(session)));
+        Assert.Equal("second", second.NewBlock!.Paragraphs[0].Text);
+        Assert.Equal(first.NewBlock!.BlockId, second.NewBlock.BlockId);
+    }
+
+    [Fact]
+    public void Deleting_A_Paragraph_Writes_A_Replacement_Without_A_Block()
+    {
+        var session = Session();
+        TextBlockSessionService.CommitParagraph(session, 1, Paragraph((0, "a")), Block(""));
+
+        var replacement = Assert.IsType<TextParagraphReplacement>(Assert.Single(Overlays(session)));
+        Assert.Null(replacement.NewBlock);
+    }
+
+    [Fact]
+    public void Deleting_A_Pending_Paragraph_Replacement_Keeps_The_Old_Text_Removed()
+    {
+        var session = Session();
+        TextBlockSessionService.CommitParagraph(session, 1, Paragraph((0, "a")), Block("new"));
+
+        TextBlockSessionService.Delete(session, 1, 0);
+
+        var replacement = Assert.IsType<TextParagraphReplacement>(Assert.Single(Overlays(session)));
+        Assert.Null(replacement.NewBlock);
+    }
 }

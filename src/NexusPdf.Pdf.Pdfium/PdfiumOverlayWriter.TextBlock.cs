@@ -107,6 +107,59 @@ internal static partial class PdfiumOverlayWriter
             throw new PdfEngineException("Страница перегружена метками блоков: заменить блок на ней нельзя.");
     }
 
+    private const int PageObjectText = 1;
+    private const int PageObjectPath = 2;
+
+    private const string ParagraphChanged =
+        "Текст страницы изменился после того, как абзац открыли для правки, — заменять его нельзя: " +
+        "запись сняла бы чужие объекты. Откройте документ заново и повторите правку.";
+
+    /// <summary>
+    /// Снять объекты заменяемых абзацев. Сначала проверяются ВСЕ: каждый путь
+    /// обязан вести к объекту с тем же отпечатком (текст, место, кегль или рамка
+    /// линии), иначе — отказ записи с объяснением, а не тихая порча страницы.
+    /// Снимаются только объекты верхнего уровня: формы общие для страниц.
+    /// </summary>
+    private static void RemoveParagraphObjects(FpdfPageT page, IReadOnlyList<TextParagraphReplacement> paragraphs)
+    {
+        var refs = paragraphs.SelectMany(p => p.Objects).ToList();
+        if (refs.Count == 0)
+            return;
+        var found = new List<FpdfPageobjectT>();
+        var textPage = fpdf_text.FPDFTextLoadPage(page);
+        try
+        {
+            var chars = PdfiumDocumentHandle.CharsByObject(textPage, CancellationToken.None);
+            foreach (var reference in refs)
+            {
+                var obj = reference.Path.Count == 1 ? PdfObjectTree.Resolve(page, reference.Path) : null;
+                if (obj == null || obj.__Instance == IntPtr.Zero)
+                    throw new PdfEngineException(ParagraphChanged);
+                var actual = fpdf_edit.FPDFPageObjGetType(obj) switch
+                {
+                    PageObjectText when textPage != null && chars.TryGetValue(obj.__Instance, out var indices) =>
+                        PdfiumDocumentHandle.TextFingerprint(obj, PdfObjectTree.Transform.Identity, indices, textPage),
+                    PageObjectPath => PdfiumDocumentHandle.PathFingerprint(obj, PdfObjectTree.Transform.Identity),
+                    _ => null,
+                };
+                if (actual == null || !string.Equals(actual, reference.Fingerprint, StringComparison.Ordinal))
+                    throw new PdfEngineException(ParagraphChanged);
+                if (!found.Any(f => f.__Instance == obj.__Instance))
+                    found.Add(obj);
+            }
+        }
+        finally
+        {
+            if (textPage != null && textPage.__Instance != IntPtr.Zero)
+                fpdf_text.FPDFTextClosePage(textPage);
+        }
+        foreach (var obj in found)
+        {
+            if (fpdf_edit.FPDFPageRemoveObject(page, obj) != 0)
+                fpdf_edit.FPDFPageObjDestroy(obj); // владение вернулось нам
+        }
+    }
+
     private static string PieceRef(int paragraph, int start) =>
         paragraph.ToString(CultureInfo.InvariantCulture) + ":" + start.ToString(CultureInfo.InvariantCulture);
 

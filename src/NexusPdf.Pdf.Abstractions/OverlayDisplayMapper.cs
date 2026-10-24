@@ -212,6 +212,8 @@ public static class OverlayDisplayMapper
                 return (TurnBlock(block, delta, finalWidth, finalHeight), 0);
             case TextBlockReplacement { NewBlock: { } newBlock } replacement:
                 return (replacement with { NewBlock = TurnBlock(newBlock, delta, finalWidth, finalHeight) }, 0);
+            case TextParagraphReplacement { NewBlock: { } newBlock } replacement:
+                return (replacement with { NewBlock = TurnBlock(newBlock, delta, finalWidth, finalHeight) }, 0);
             default:
                 return (overlay, 0);
         }

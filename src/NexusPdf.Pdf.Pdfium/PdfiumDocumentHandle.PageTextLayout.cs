@@ -61,7 +61,7 @@ internal sealed partial class PdfiumDocumentHandle
                 var box = Displayed(frame, l, b, r, t);
                 if (Math.Min(box.WidthPt, box.HeightPt) < MaxThinLinePt &&
                     Math.Max(box.WidthPt, box.HeightPt) >= MinThinLineLengthPt)
-                    lines.Add(new PageLineObject(node.Path, box, PathColor(node.Object)));
+                    lines.Add(new PageLineObject(node.Path, box, PathColor(node.Object), PageTextFingerprint.OfPath(l, b, r, t)));
                 AddRulings(node, frame, l, b, r, t, rulings);
             }
             return new PageTextLayout(objects, lines, rulings);
@@ -75,7 +75,7 @@ internal sealed partial class PdfiumDocumentHandle
     }
 
     /// <summary>Номера букв страницы по объектам — только записанные, без додуманных PDFium пробелов.</summary>
-    private static Dictionary<IntPtr, List<int>> CharsByObject(FpdfTextpageT? textPage, CancellationToken ct)
+    internal static Dictionary<IntPtr, List<int>> CharsByObject(FpdfTextpageT? textPage, CancellationToken ct)
     {
         var result = new Dictionary<IntPtr, List<int>>();
         if (textPage == null || textPage.__Instance == IntPtr.Zero)
@@ -97,35 +97,72 @@ internal sealed partial class PdfiumDocumentHandle
         return result;
     }
 
+    /// <summary>Буквы объекта по номерам букв страницы (суррогатные пары — двумя единицами UTF-16).</summary>
+    internal static string TextOf(List<int> indices, FpdfTextpageT textPage)
+    {
+        var text = new System.Text.StringBuilder(indices.Count);
+        foreach (var index in indices)
+        {
+            var code = fpdf_text.FPDFTextGetUnicode(textPage, index);
+            if (code > 0xFFFF && code <= 0x10FFFF)
+                text.Append(char.ConvertFromUtf32((int)code));
+            else if (code is > 0 and <= 0xFFFF)
+                text.Append((char)code);
+        }
+        return text.ToString();
+    }
+
+    /// <summary>Матрица текста до страницы: матрица объекта (с cm), затем формы над ним.</summary>
+    internal static bool TryTextMatrix(FpdfPageobjectT obj, PdfObjectTree.Transform toPage, out PdfObjectTree.Transform full)
+    {
+        full = PdfObjectTree.Transform.Identity;
+        var matrix = new FS_MATRIX_();
+        if (fpdf_edit.FPDFPageObjGetMatrix(obj, matrix) == 0)
+            return false;
+        full = new PdfObjectTree.Transform(matrix.A, matrix.B, matrix.C, matrix.D, matrix.E, matrix.F).Then(toPage);
+        return true;
+    }
+
+    /// <summary>Кегль с учётом матриц.</summary>
+    internal static double FontSizeOf(FpdfPageobjectT obj, PdfObjectTree.Transform full)
+    {
+        float size = 0;
+        fpdf_edit.FPDFTextObjGetFontSize(obj, ref size);
+        return size * Math.Sqrt(Math.Abs(full.A * full.D - full.B * full.C));
+    }
+
+    /// <summary>Отпечаток текстового объекта — один и тот же для описания страницы и для проверки при записи.</summary>
+    internal static string? TextFingerprint(FpdfPageobjectT obj, PdfObjectTree.Transform toPage, List<int> indices, FpdfTextpageT textPage) =>
+        TryTextMatrix(obj, toPage, out var full)
+            ? PageTextFingerprint.Of(TextOf(indices, textPage), full.E, full.F, FontSizeOf(obj, full))
+            : null;
+
+    /// <summary>Отпечаток пути — по его рамке на странице.</summary>
+    internal static string? PathFingerprint(FpdfPageobjectT obj, PdfObjectTree.Transform toPage) =>
+        PdfObjectTree.TryGetPageBounds(obj, toPage, out var l, out var b, out var r, out var t)
+            ? PageTextFingerprint.OfPath(l, b, r, t)
+            : null;
+
     private static unsafe PageTextObject? DescribeText(
         PdfObjectTree.Node node, List<int> indices, FpdfTextpageT textPage, PageFrame frame)
     {
         var obj = node.Object;
-        var matrix = new FS_MATRIX_();
-        if (fpdf_edit.FPDFPageObjGetMatrix(obj, matrix) == 0)
-            return null;
         // Матрица текста уже включает cm страницы; формы над ним — в node.ToPage.
-        var full = new PdfObjectTree.Transform(matrix.A, matrix.B, matrix.C, matrix.D, matrix.E, matrix.F).Then(node.ToPage);
+        if (!TryTextMatrix(obj, node.ToPage, out var full))
+            return null;
         var (ox, oy) = (full.E, full.F);
         var length = Math.Sqrt(full.A * full.A + full.B * full.B);
         if (!(length > 1e-9))
             return null;
         var (ux, uy) = (full.A / length, full.B / length);
 
-        var text = new System.Text.StringBuilder();
-        var advances = new List<double>(indices.Count);
+        var value = TextOf(indices, textPage);
+        var advances = new List<double>(value.Length);
         for (var k = 0; k < indices.Count; k++)
         {
             var code = fpdf_text.FPDFTextGetUnicode(textPage, indices[k]);
-            var units = 1;
-            if (code > 0xFFFF && code <= 0x10FFFF)
-            {
-                text.Append(char.ConvertFromUtf32((int)code));
-                units = 2;
-            }
-            else if (code is > 0 and <= 0xFFFF)
-                text.Append((char)code);
-            else
+            var units = code > 0xFFFF && code <= 0x10FFFF ? 2 : code is > 0 and <= 0xFFFF ? 1 : 0;
+            if (units == 0)
                 continue;
 
             double x = 0, y = 0;
@@ -149,12 +186,10 @@ internal sealed partial class PdfiumDocumentHandle
             advances.Add(Math.Max(0, advance));
             if (units == 2) advances.Add(0);
         }
-        if (text.Length == 0)
+        if (value.Length == 0)
             return null;
 
-        float size = 0;
-        fpdf_edit.FPDFTextObjGetFontSize(obj, ref size);
-        var fontSize = size * Math.Sqrt(Math.Abs(full.A * full.D - full.B * full.C));
+        var fontSize = FontSizeOf(obj, full);
 
         if (!PdfObjectTree.TryGetPageBounds(obj, node.ToPage, out var l, out var b, out var r, out var t))
             return null;
@@ -184,7 +219,6 @@ internal sealed partial class PdfiumDocumentHandle
                     fpdf_edit.FPDFFontGetFontData(font, null, 0, ref dataLength) != 0 && dataLength == 0;
         }
 
-        var value = text.ToString();
         return new PageTextObject(
             node.Path, value, Displayed(frame, l, b, r, t), dx, dy, angle, fontSize, fontName,
             bold, italic, (ca << 24) | ((cr & 0xFF) << 16) | ((cg & 0xFF) << 8) | (cb & 0xFF),

@@ -18,7 +18,7 @@ public sealed record PageTextObject(
     IReadOnlyList<double> CharAdvancesPt, string Fingerprint);
 
 /// <summary>Тонкая линия страницы (подчёркивание, линия бланка): залитый узкий прямоугольник или отрезок.</summary>
-public sealed record PageLineObject(IReadOnlyList<int> Path, OverlayBox BoundsPt, uint ColorArgb);
+public sealed record PageLineObject(IReadOnlyList<int> Path, OverlayBox BoundsPt, uint ColorArgb, string Fingerprint = "");
 
 /// <summary>Граница таблицы в отображаемых пунктах: Position — y горизонтальной, x вертикальной.</summary>
 public sealed record PageRuling(bool Horizontal, double PositionPt, double StartPt, double EndPt);
@@ -43,6 +43,11 @@ public static class PageTextFingerprint
         var key = string.Join('\u0001', text, Round(originXPt), Round(originYPt), Round(fontSizePt));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
     }
+
+    /// <summary>Отпечаток пути (линии) — по его рамке в координатах содержимого страницы.</summary>
+    public static string OfPath(double left, double bottom, double right, double top) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+            string.Join('\u0001', "path", Round(left), Round(bottom), Round(right), Round(top)))));
 
     private static string Round(double value) =>
         double.IsFinite(value) ? (Math.Round(value, 2) + 0.0).ToString("0.00", CultureInfo.InvariantCulture) : "NaN";

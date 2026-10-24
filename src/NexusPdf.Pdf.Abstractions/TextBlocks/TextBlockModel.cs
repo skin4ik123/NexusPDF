@@ -62,5 +62,16 @@ public sealed record TextBlockOverlay(
 /// </summary>
 public sealed record TextBlockReplacement(Guid BlockId, TextBlockOverlay? NewBlock) : PageOverlay;
 
+/// <summary>Объект страницы, который снимает замена абзаца: путь и отпечаток (см. <see cref="PageTextFingerprint"/>).</summary>
+public sealed record ParagraphObjectRef(IReadOnlyList<int> Path, string Fingerprint);
+
+/// <summary>
+/// Абзац существующего текста, ставший блоком: при записи эти объекты (текст
+/// и линии подчёркивания) снимаются со страницы — только если они на месте и
+/// совпадают с отпечатком, — а NewBlock ложится блоком с меткой. NewBlock =
+/// null — абзац удалён.
+/// </summary>
+public sealed record TextParagraphReplacement(IReadOnlyList<ParagraphObjectRef> Objects, TextBlockOverlay? NewBlock) : PageOverlay;
+
 /// <summary>Кусок текста абзаца, как он записан одним объектом страницы.</summary>
 public sealed record TextPiece(int Paragraph, int Start, string Text);
