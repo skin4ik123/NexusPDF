@@ -20,9 +20,17 @@ public sealed partial class DocumentViewModel
     /// <param name="StoredId">Id блока из файла; null — блок ещё не сохранялся.</param>
     /// <param name="StartBlock">Блок в начале ввода (в рамке текущего показа) — для «ничего не менялось».</param>
     /// <param name="CoversOriginal">Под редактором нарисован прежний вид блока, и его надо закрыть.</param>
+    /// <param name="ParagraphObjects">Правится абзац существующего текста: его объекты снимет запись.</param>
+    /// <param name="FontNote">Строка о замене шрифта документа, которого нет в системе.</param>
+    /// <param name="CoverPt">Сколько закрыть подложкой (пункты от угла рамки); null — рамку блока.</param>
     public sealed record TextBlockEdit(
         PageViewModel Page, TextBlockEditorModel Model, TextBlockOverlay? Original, Guid? StoredId,
-        TextBlockOverlay StartBlock, bool CoversOriginal);
+        TextBlockOverlay StartBlock, bool CoversOriginal,
+        IReadOnlyList<ParagraphObjectRef>? ParagraphObjects = null, string? FontNote = null,
+        (double Width, double Height)? CoverPt = null);
+
+    /// <summary>Чем кончилась попытка открыть для правки то, что под точкой.</summary>
+    private enum EditResult { None, Started, Refused }
 
     [ObservableProperty]
     private bool _isTextTool;
@@ -108,9 +116,17 @@ public sealed partial class DocumentViewModel
     /// false — блока здесь нет (или он изменён другой программой — тогда
     /// объяснение уже в строке состояния).
     /// </summary>
-    public async Task<bool> EditTextBlockAsync(PageViewModel page, double xPt, double yPt)
+    public async Task<bool> EditTextBlockAsync(PageViewModel page, double xPt, double yPt) =>
+        await EditAtAsync(page, xPt, yPt) == EditResult.Started;
+
+    /// <summary>
+    /// Блок под точкой (черновик, замена, блок из файла), иначе абзац
+    /// существующего текста. Абзац, который взять нельзя, — Refused, причина
+    /// уже в строке состояния.
+    /// </summary>
+    private async Task<EditResult> EditAtAsync(PageViewModel page, double xPt, double yPt)
     {
-        if (IsBusy) return false;
+        if (IsBusy) return EditResult.None;
         await EnsureBlockFontsAsync();
         var tolerance = 2 / Math.Max(Zoom, 0.1);
 
@@ -121,10 +137,15 @@ public sealed partial class DocumentViewModel
             {
                 case TextBlockOverlay draft when FrameContains(draft, xPt, yPt, tolerance):
                     StartTextEdit(page, draft, (TextBlockOverlay)overlays[i], null, coversOriginal: true, xPt, yPt);
-                    return true;
+                    return EditResult.Started;
                 case TextBlockReplacement { NewBlock: { } pending } replacement when FrameContains(pending, xPt, yPt, tolerance):
                     StartTextEdit(page, pending, null, replacement.BlockId, coversOriginal: true, xPt, yPt);
-                    return true;
+                    return EditResult.Started;
+                case TextParagraphReplacement { NewBlock: { } pendingParagraph } paragraphReplacement
+                    when FrameContains(pendingParagraph, xPt, yPt, tolerance):
+                    StartTextEdit(page, pendingParagraph, null, null, coversOriginal: true, xPt, yPt,
+                        paragraphReplacement.Objects);
+                    return EditResult.Started;
             }
         }
 
@@ -143,9 +164,34 @@ public sealed partial class DocumentViewModel
             var displayed = (TextBlockOverlay)ToDisplayFrame(block, page);
             if (!FrameContains(displayed, xPt, yPt, tolerance)) continue;
             StartTextEdit(page, displayed, null, stored.Id, coversOriginal: true, xPt, yPt);
-            return true;
+            return EditResult.Started;
         }
-        return false;
+
+        await EnsurePageTextAsync(page);
+        if (ParagraphAt(page, xPt, yPt) is not { } paragraph)
+            return EditResult.None;
+        if (paragraph.Block is not { } paragraphBlock)
+        {
+            StatusText = Loc.Get(paragraph.RefusedKey ?? "TextParagraphOverlap");
+            return EditResult.Refused;
+        }
+        // Абзац становится блоком в памяти; документ изменится, только если
+        // что-то поменяли. Подложка закрывает прежний вид целиком.
+        var taken = paragraphBlock with { PlacedRotation = page.PageRef.RotationOffset };
+        var bounds = paragraph.BoundsPt;
+        (double, double)? cover = taken.RotationDegrees == 0
+            ? (Math.Max(taken.WidthPt, bounds.XPt + bounds.WidthPt - taken.XPt + 1),
+               Math.Max(taken.HeightPt, bounds.YPt + bounds.HeightPt - taken.YPt + 1))
+            : null;
+        var note = paragraph.SubstitutedFonts.Count == 0
+            ? null
+            : string.Join("; ", paragraph.SubstitutedFonts.Select(f =>
+                string.Format(CultureInfo.CurrentCulture, Loc.Get("TextFontSubstituted"), f.Document, f.Written)));
+        StartTextEdit(page, taken, null, null, coversOriginal: true, xPt, yPt,
+            paragraph.Objects.Select(o => new ParagraphObjectRef(o.Path, o.Fingerprint))
+                .Concat(paragraph.Decorations.Select(d => new ParagraphObjectRef(d.Path, d.Fingerprint))).ToList(),
+            note, cover);
+        return EditResult.Started;
     }
 
     /// <summary>Закончить ввод: набранное уходит в документ одним шагом отмены.</summary>
@@ -160,12 +206,17 @@ public sealed partial class DocumentViewModel
         OnPropertyChanged(nameof(ShowsPageProperties));
         TextBlockEditEnded?.Invoke(this, EventArgs.Empty);
 
+        OnPropertyChanged(nameof(TextFontNote));
+        OnPropertyChanged(nameof(HasTextFontNote));
         var edited = edit.Model.Block with { PlacedRotation = edit.Page.PageRef.RotationOffset };
         if (!TextBlockSessionService.SameContent(edit.StartBlock, edited))
         {
             // Оформление по умолчанию меняет только «Сделать оформлением по
             // умолчанию»: иначе правка чужого блока делала бы его стиль своим.
-            TextBlockSessionService.Commit(Document.Session, edit.Page.LogicalIndex, edit.Original, edit.StoredId, edited);
+            if (edit.ParagraphObjects is { } objects)
+                TextBlockSessionService.CommitParagraph(Document.Session, edit.Page.LogicalIndex, objects, edited);
+            else
+                TextBlockSessionService.Commit(Document.Session, edit.Page.LogicalIndex, edit.Original, edit.StoredId, edited);
         }
         if (StatusText == Loc.Get("TextBlockTyping"))
             StatusText = IsTextTool ? Loc.Get("TextToolHint") : Loc.Get("Ready");
@@ -173,7 +224,9 @@ public sealed partial class DocumentViewModel
 
     private void StartTextEdit(
         PageViewModel page, TextBlockOverlay block, TextBlockOverlay? original, Guid? storedId,
-        bool coversOriginal, double? xPt = null, double? yPt = null)
+        bool coversOriginal, double? xPt = null, double? yPt = null,
+        IReadOnlyList<ParagraphObjectRef>? paragraphObjects = null, string? fontNote = null,
+        (double Width, double Height)? cover = null)
     {
         CommitTextBlock();
         ClearObjectSelection();
@@ -189,12 +242,15 @@ public sealed partial class DocumentViewModel
         {
             model.MoveCaret(CaretMove.BlockEnd, extend: false);
         }
-        var edit = new TextBlockEdit(page, model, original, storedId, model.Block, coversOriginal);
+        var edit = new TextBlockEdit(page, model, original, storedId, model.Block, coversOriginal,
+            paragraphObjects, fontNote, cover);
         ActiveTextEdit = edit;
         model.Changed += OnActiveTextChanged;
         OnPropertyChanged(nameof(ActiveTextBlock));
         OnPropertyChanged(nameof(ShowsTextBlockProperties));
         OnPropertyChanged(nameof(ShowsPageProperties));
+        OnPropertyChanged(nameof(TextFontNote));
+        OnPropertyChanged(nameof(HasTextFontNote));
         RefreshTextStyle();
         // Блок открыт двойным щелчком без инструмента — кнопкам отметок в
         // панели тоже нужно знать, для каких знаков есть шрифт.
@@ -297,6 +353,11 @@ public sealed partial class DocumentViewModel
 
     /// <summary>Набор в блоке идёт — показывать раздел «Текст» в правой колонке и панель над блоком.</summary>
     public bool ShowsTextBlockProperties => ActiveTextBlock != null;
+
+    /// <summary>«Шрифт документа «X» не установлен — пишется «Y»» — строка в панели над блоком.</summary>
+    public string? TextFontNote => ActiveTextEdit?.FontNote;
+
+    public bool HasTextFontNote => TextFontNote != null;
 
     /// <summary>Просьба вернуть клавиатуру в редактор после щелчка по панели.</summary>
     public event EventHandler? TextEditorFocusRequested;
