@@ -468,6 +468,9 @@ internal static class Program
             Require(stored.Count(b => b.Intact) == 1 && stored.Single(b => b.Intact).Id == block.BlockId,
                 "The file holds exactly one intact block with the original Id");
         }
+        // Второе «Сохранить как» снова перевело вкладку на новый файл: страницы
+        // пересобраны, прежняя страница уже не на экране.
+        reopenedPage = await CurrentPageAsync(reopened, "The tab shows the re-saved file");
 
         reopened.ToggleTextTool();
         await reopened.BeginTextBlockInRectAsync(reopenedPage, new OverlayBox(60, 300, 120, 20));
@@ -495,9 +498,7 @@ internal static class Program
         File.WriteAllBytes(formPath, FormFixture());
         await _main.ViewModel.OpenFilesAsync(new[] { formPath });
         var doc = _main.ViewModel.ActiveDocument ?? throw new InvalidOperationException("Form fixture did not open");
-        await WaitUntilAsync(() => doc.Pages.Count > 0 && doc.Document.Handles.ContainsKey(doc.Pages[0].PageRef.SourceId),
-            "The form fixture is shown");
-        var page = doc.Pages[0];
+        var page = await CurrentPageAsync(doc, "The form fixture is shown");
         await doc.EnsurePageTextAsync(page);
         doc.ToggleTextTool();
         Require(doc.IsTextTool, "The Text tool turns on for the form");
@@ -559,9 +560,7 @@ internal static class Program
         await _services.SaveService.SaveAsAsync(doc.Document, saved, keepBackup: false, CancellationToken.None);
         await _main.ViewModel.OpenFilesAsync(new[] { saved });
         var reopened = _main.ViewModel.ActiveDocument ?? throw new InvalidOperationException("Saved form did not open");
-        await WaitUntilAsync(() => reopened.Pages.Count > 0 &&
-            reopened.Document.Handles.ContainsKey(reopened.Pages[0].PageRef.SourceId),
-            "The tab shows the saved form after Save As");
+        await CurrentPageAsync(reopened, "The tab shows the saved form after Save As");
         await using (var check = await _services.Engine.OpenAsync(saved, null, CancellationToken.None))
         {
             var text = System.Text.RegularExpressions.Regex.Replace(
@@ -571,7 +570,7 @@ internal static class Program
             Require(System.Text.RegularExpressions.Regex.Matches(text, "with a second line").Count == 1,
                 "The old paragraph is gone from the file, only its block remains");
         }
-        var reopenedPage = reopened.Pages[0];
+        var reopenedPage = await CurrentPageAsync(reopened, "The saved form's page is current");
         await reopened.EnsureStoredTextBlocksAsync(reopenedPage);
         var newBlock = replacement!.NewBlock!;
         Require(await reopened.EditTextBlockAsync(reopenedPage, newBlock.XPt + 4, newBlock.YPt + 4),
@@ -581,6 +580,19 @@ internal static class Program
             "After saving, the paragraph is our block with the edited text");
         reopened.CommitTextBlock();
         if (reopened.IsTextTool) reopened.ToggleTextTool();
+    }
+
+    /// <summary>
+    /// Первая страница вкладки, когда она уже собрана из текущего основного
+    /// файла документа: после «Сохранить как» источник получает новый Id, и
+    /// страницы пересобираются не сразу.
+    /// </summary>
+    private static async Task<PageViewModel> CurrentPageAsync(DocumentViewModel doc, string description)
+    {
+        await WaitUntilAsync(() => doc.Pages.Count > 0 &&
+            doc.Pages[0].PageRef.SourceId == doc.Document.PrimarySourceId &&
+            doc.Document.Handles.ContainsKey(doc.Pages[0].PageRef.SourceId), description);
+        return doc.Pages[0];
     }
 
     /// <summary>Бланк: таблица 3 × 2 из линий, строка «Name: ____» линией и абзац из двух строк.</summary>
