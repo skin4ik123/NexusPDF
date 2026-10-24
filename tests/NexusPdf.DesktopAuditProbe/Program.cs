@@ -523,12 +523,15 @@ internal static class Program
 
         await WaitUntilAsync(() => doc.ArmTextMarkCommand.CanExecute("✓"), "A font for ✓ is found");
         doc.ArmTextMarkCommand.Execute("✓");
+        // Каждая правка заменяет модель страницы в списке — щелчки идут по текущей.
+        page = doc.Pages[0];
         await doc.TextToolClickAsync(page, 320, 102);
         Require(doc.Document.Session.Model.Pages[0].OverlayList.OfType<TextBlockOverlay>()
                 .Any(b => b.Paragraphs[0].Text == "✓" && b.VerticalAlign == TextVerticalAlign.Center),
             "The ✓ mark lands centred in the clicked cell");
 
         // Строка-подчёркивание y = 792 − 598 = 194: щелчок над ней.
+        page = doc.Pages[0];
         await doc.TextToolClickAsync(page, 150, 188);
         editor = await FindTextEditorAsync("A click above an underline line opens a block on the line");
         Type(editor, "Captain");
@@ -539,6 +542,7 @@ internal static class Program
         Capture(_main, "text-form-filled");
 
         // Абзац чужого текста: базовая линия 792 − 520 = 272.
+        page = doc.Pages[0];
         await doc.TextToolClickAsync(page, 100, 268);
         editor = await FindTextEditorAsync("A click on a paragraph opens it as a block");
         Require(doc.ActiveTextEdit?.ParagraphObjects is { Count: > 0 }, "The paragraph's objects are listed for removal");
