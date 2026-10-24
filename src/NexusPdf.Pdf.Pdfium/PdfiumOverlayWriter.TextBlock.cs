@@ -88,43 +88,61 @@ internal static partial class PdfiumOverlayWriter
         }
     }
 
-    /// <summary>Убирает со страницы все объекты блока (верхнего уровня — только так блок и пишется).</summary>
-    private static void RemoveTextBlock(FpdfPageT page, Guid blockId)
+    /// <summary>Все объекты блока на странице (верхнего уровня — только так блок и пишется).</summary>
+    private static List<FpdfPageobjectT> TextBlockObjects(FpdfPageT page, Guid blockId)
     {
         var id = blockId.ToString("N");
         var reader = new PdfiumTextBlockMarks.Reader();
+        var found = new List<FpdfPageobjectT>();
         for (var i = fpdf_edit.FPDFPageCountObjects(page) - 1; i >= 0; i--)
         {
             var obj = fpdf_edit.FPDFPageGetObject(page, i);
             if (obj == null || obj.__Instance == IntPtr.Zero || reader.Read(obj)?.Id != id)
                 continue;
-            if (fpdf_edit.FPDFPageRemoveObject(page, obj) != 0)
-                fpdf_edit.FPDFPageObjDestroy(obj); // владение вернулось нам
+            found.Add(obj);
         }
         // Метки дочитать не удалось — часть старых объектов могла остаться, и
         // новая версия легла бы поверх них. Лучше отказать, чем задвоить текст.
         if (reader.Exhausted)
             throw new PdfEngineException("Страница перегружена метками блоков: заменить блок на ней нельзя.");
+        return found;
+    }
+
+    /// <summary>Снять объекты со страницы (каждый один раз).</summary>
+    private static void RemoveObjects(FpdfPageT page, IEnumerable<FpdfPageobjectT> objects)
+    {
+        var seen = new HashSet<IntPtr>();
+        foreach (var obj in objects)
+        {
+            if (!seen.Add(obj.__Instance))
+                continue;
+            if (fpdf_edit.FPDFPageRemoveObject(page, obj) != 0)
+                fpdf_edit.FPDFPageObjDestroy(obj); // владение вернулось нам
+        }
     }
 
     private const int PageObjectText = 1;
     private const int PageObjectPath = 2;
+
+    private const string LineInReplacedParagraph =
+        "Строка правится отдельно, но она же входит в абзац, который заменяется блоком: " +
+        "такие правки противоречат друг другу. Отмените одну из них и сохраните снова.";
 
     private const string ParagraphChanged =
         "Текст страницы изменился после того, как абзац открыли для правки, — заменять его нельзя: " +
         "запись сняла бы чужие объекты. Откройте документ заново и повторите правку.";
 
     /// <summary>
-    /// Снять объекты заменяемых абзацев. Сначала проверяются ВСЕ: каждый путь
-    /// обязан вести к объекту с тем же отпечатком (текст, место, кегль или рамка
-    /// линии), иначе — отказ записи с объяснением, а не тихая порча страницы.
-    /// Снимаются только объекты верхнего уровня: формы общие для страниц.
+    /// Объекты заменяемых абзацев. Проверяются ВСЕ: каждый путь обязан вести к
+    /// объекту с тем же отпечатком (текст, место, кегль или рамка линии), иначе
+    /// — отказ записи с объяснением, а не тихая порча страницы. Берутся только
+    /// объекты верхнего уровня: формы общие для страниц.
     /// </summary>
-    private static void RemoveParagraphObjects(FpdfPageT page, IReadOnlyList<TextParagraphReplacement> paragraphs)
+    private static List<FpdfPageobjectT> ParagraphObjects(FpdfPageT page, IReadOnlyList<TextParagraphReplacement> paragraphs)
     {
         var refs = paragraphs.SelectMany(p => p.Objects).ToList();
         if (refs.Count == 0)
-            return;
+            return [];
         var found = new List<FpdfPageobjectT>();
         var textPage = fpdf_text.FPDFTextLoadPage(page);
         try
@@ -153,11 +171,7 @@ internal static partial class PdfiumOverlayWriter
             if (textPage != null && textPage.__Instance != IntPtr.Zero)
                 fpdf_text.FPDFTextClosePage(textPage);
         }
-        foreach (var obj in found)
-        {
-            if (fpdf_edit.FPDFPageRemoveObject(page, obj) != 0)
-                fpdf_edit.FPDFPageObjDestroy(obj); // владение вернулось нам
-        }
+        return found;
     }
 
     private static string PieceRef(int paragraph, int start) =>

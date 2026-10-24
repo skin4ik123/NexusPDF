@@ -519,6 +519,15 @@ public sealed partial class DocumentViewModel : ObservableObject, IDropTarget
         if (found == null)
             return null;
 
+        // Строка из абзаца, замена которого уже ждёт записи, отдельно не
+        // правится: запись сняла бы её вместе с абзацем.
+        if (page.PageRef.OverlayList.OfType<NexusPdf.Pdf.Abstractions.TextBlocks.TextParagraphReplacement>()
+            .Any(r => r.Objects.Any(o => o.Path.SequenceEqual(found.ObjectPath))))
+        {
+            StatusText = Loc.Get("TextLineInPendingParagraph");
+            return null;
+        }
+
         // Текст внутри вложенного объекта правится ДРУГИМ путём: строка
         // стирается растеризацией страницы, а новая пишется поверх настоящим
         // текстом. Цена — страница становится изображением, поэтому решение

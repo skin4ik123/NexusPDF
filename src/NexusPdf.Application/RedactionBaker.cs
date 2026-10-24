@@ -179,12 +179,13 @@ public static class RedactionBaker
     }
 
     /// <summary>
-    /// Правки страницы, добавленные ДО вымарки, — все, без расчёта рамок:
-    /// ошибка в оценке места оставила бы вымаранный текст в файле. До
-    /// стирания — только те, что оно задевает (с запасом в 1 пт; правка с
-    /// неизвестной рамкой — задевает). Добавленное после — остаётся поверх,
-    /// так человек его и видел. Слой OCR не запекается: его слова
-    /// отбрасываются по вымаркам.
+    /// Что уходит в растр вместе со страницей. До вымарки — все правки, без
+    /// расчёта рамок: ошибка в оценке места оставила бы вымаранный текст в
+    /// файле. После вымарки — замены абзацев и блоков, которые она задевает:
+    /// они рисуются в слое содержимого, под вымаркой. До стирания — только
+    /// задетые им правки (с запасом в 1 пт; неизвестная рамка — задета).
+    /// Остальное добавленное позже остаётся поверх, как его и видел человек.
+    /// Слой OCR не запекается: его слова отбрасываются по вымаркам.
     /// </summary>
     private static HashSet<PageOverlay> Burned(ComposedPage page)
     {
@@ -195,12 +196,22 @@ public static class RedactionBaker
         {
             if (overlays[i] is not (RedactionDraft or RegionEraseDraft))
                 continue;
-            var cut = overlays[i] is RegionEraseDraft ? Footprint(overlays[i], info) : null;
+            var cut = Footprint(overlays[i], info);
             for (var j = 0; j < i; j++)
             {
                 if (overlays[j] is RedactionDraft or RegionEraseDraft or OcrTextLayerOverlay) continue;
                 if (overlays[i] is RedactionDraft || cut is not { } area ||
                     Footprint(overlays[j], info) is not { } box || Overlap(box, area, margin: 1))
+                    burned.Add(overlays[j]);
+            }
+            // Замена абзаца или блока рисуется в слое содержимого — вымарка на
+            // экране лежит поверх неё, даже если добавлена раньше. Её текст
+            // (а в нём — вымаранные слова) тоже уходит под чёрное.
+            if (overlays[i] is not RedactionDraft) continue;
+            for (var j = i + 1; j < overlays.Count; j++)
+            {
+                if (overlays[j] is not (TextParagraphReplacement or TextBlockReplacement)) continue;
+                if (cut is not { } area || Footprint(overlays[j], info) is not { } box || Overlap(box, area, margin: 1))
                     burned.Add(overlays[j]);
             }
         }
@@ -213,6 +224,8 @@ public static class RedactionBaker
         var (mapped, _) = OverlayDisplayMapper.ToFrame(overlay, 0, size.WidthPoints, size.HeightPoints);
         if (mapped is RegionEraseDraft erase)
             return new OverlayBox(erase.XPt, erase.YPt, erase.WidthPt, erase.HeightPt);
+        if (mapped is RedactionDraft redaction)
+            return new OverlayBox(redaction.XPt, redaction.YPt, redaction.WidthPt, redaction.HeightPt);
         var block = mapped switch
         {
             TextBlockOverlay b => b,

@@ -246,4 +246,27 @@ public sealed class PageTextLayoutTests : IAsyncLifetime
         Assert.Equal(plain.Fingerprint, turned.Fingerprint);
         Assert.NotEqual(plain.Fingerprint, moved.Fingerprint);
     }
+
+    [Fact]
+    public async Task Kerning_Gap_Inside_One_Object_Is_A_Word_Space()
+    {
+        // pdfTeX пишет пробелы между словами сдвигом внутри одного TJ.
+        var layout = await LayoutOf("BT /F1 12 Tf 72 700 Td [(Hello) -600 (World)] TJ ET");
+
+        var text = Assert.Single(layout.Objects);
+        Assert.Equal("HelloWorld", text.Text);
+        Assert.Equal([4], text.SpaceAfter);
+        var paragraph = Assert.Single(ParagraphBuilder.Build(layout, FormTargetIndex.Build(layout, 11), FontCatalog.System));
+        Assert.Equal("Hello World", paragraph.Block!.Paragraphs[0].Text);
+    }
+
+    [Fact]
+    public async Task Clipped_Text_Is_Marked()
+    {
+        var clipped = await LayoutOf("q 72 690 30 20 re W n BT /F1 12 Tf 72 700 Td (Clipped long text) Tj ET Q");
+        var whole = await LayoutOf("q 0 0 612 792 re W n BT /F1 12 Tf 72 700 Td (Whole text) Tj ET Q");
+
+        Assert.True(Assert.Single(clipped.Objects).Clipped);
+        Assert.False(Assert.Single(whole.Objects).Clipped);
+    }
 }

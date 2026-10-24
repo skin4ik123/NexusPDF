@@ -275,6 +275,55 @@ public sealed class ParagraphReplacementTests : IAsyncLifetime
         Assert.DoesNotContain("Far away", Flat(await PageTextAsync(result)));
     }
 
+    [Fact]
+    public async Task Line_Edit_Below_A_Replaced_Paragraph_Still_Hits_Its_Own_Line()
+    {
+        // Снятие абзаца не должно сдвигать номера, по которым правятся строки.
+        var source = Source(ThreeParagraphs);
+        var middle = await MiddleAsync(source);
+        var last = (await LayoutAsync(source)).Objects.Single(o => o.Text.StartsWith("Last", StringComparison.Ordinal));
+
+        var saved = await ComposeAsync(source, Replace(middle, "Replaced middle text"),
+            new TextObjectReplacement(last.Path, "Last paragraph CHANGED"));
+
+        var text = Flat(await PageTextAsync(saved));
+        Assert.Contains("Last paragraph CHANGED", text);
+        Assert.Contains("First paragraph line one", text);
+        Assert.Contains("and line two of it", text);
+        Assert.Contains("Replaced middle text", text);
+    }
+
+    [Fact]
+    public async Task Line_Edit_Of_A_Line_Being_Replaced_As_A_Paragraph_Is_Refused()
+    {
+        var source = Source(ThreeParagraphs);
+        var middle = await MiddleAsync(source);
+
+        var error = await Assert.ThrowsAsync<PdfEngineException>(() => ComposeAsync(source,
+            Replace(middle, "Replaced middle text"), new TextObjectReplacement(middle.Objects[0].Path, "Other")));
+
+        Assert.Contains("абзац", error.Message);
+    }
+
+    [Fact]
+    public async Task Paragraph_Edited_After_A_Redaction_Over_It_Is_Burned_Too()
+    {
+        // Вымарка раньше правки, но новая версия абзаца лежит под ней: её текст
+        // (с вымаранными словами) не должен остаться в файле.
+        var source = Source(ThreeParagraphs);
+        var middle = await MiddleAsync(source);
+        var result = Path.Combine(_dir, "redacted-then-edited.pdf");
+
+        await using (var document = await OpenedDocument.OpenAsync(_pdfium, source, null, CancellationToken.None))
+        {
+            document.Session.Apply(new AddOverlayOperation(0, new RedactionDraft(60, 140, 300, 40)));
+            document.Session.Apply(new AddOverlayOperation(0, Replace(middle, "Middle paragraph with secret")));
+            await new SaveService(_pdfium).SaveAsAsync(document, result, keepBackup: false, CancellationToken.None);
+        }
+
+        Assert.DoesNotContain("secret", Flat(await PageTextAsync(result)));
+    }
+
     private static X509Certificate2 MakeSelfSigned()
     {
         using var rsa = RSA.Create(2048);

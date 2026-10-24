@@ -29,8 +29,12 @@ public sealed partial class DocumentViewModel
         IReadOnlyList<ParagraphObjectRef>? ParagraphObjects = null, string? FontNote = null,
         (double Width, double Height)? CoverPt = null);
 
-    /// <summary>Чем кончилась попытка открыть для правки то, что под точкой.</summary>
-    private enum EditResult { None, Started, Refused }
+    /// <summary>
+    /// Чем кончилась попытка открыть для правки то, что под точкой: Refused —
+    /// абзац не берётся, дальше правка строки; Blocked — не править ничем
+    /// (под вымаркой), причина в строке состояния.
+    /// </summary>
+    private enum EditResult { None, Started, Refused, Blocked }
 
     [ObservableProperty]
     private bool _isTextTool;
@@ -117,7 +121,7 @@ public sealed partial class DocumentViewModel
     /// объяснение уже в строке состояния).
     /// </summary>
     public async Task<bool> EditTextBlockAsync(PageViewModel page, double xPt, double yPt) =>
-        await EditAtAsync(page, xPt, yPt) == EditResult.Started;
+        await EditAtAsync(page, xPt, yPt) is EditResult.Started or EditResult.Blocked;
 
     /// <summary>
     /// Блок под точкой (черновик, замена, блок из файла), иначе абзац
@@ -139,10 +143,12 @@ public sealed partial class DocumentViewModel
                     StartTextEdit(page, draft, (TextBlockOverlay)overlays[i], null, coversOriginal: true, xPt, yPt);
                     return EditResult.Started;
                 case TextBlockReplacement { NewBlock: { } pending } replacement when FrameContains(pending, xPt, yPt, tolerance):
+                    if (Blocked(page, pending)) return EditResult.Blocked;
                     StartTextEdit(page, pending, null, replacement.BlockId, coversOriginal: true, xPt, yPt);
                     return EditResult.Started;
                 case TextParagraphReplacement { NewBlock: { } pendingParagraph } paragraphReplacement
                     when FrameContains(pendingParagraph, xPt, yPt, tolerance):
+                    if (Blocked(page, pendingParagraph)) return EditResult.Blocked;
                     StartTextEdit(page, pendingParagraph, null, null, coversOriginal: true, xPt, yPt,
                         paragraphReplacement.Objects);
                     return EditResult.Started;
@@ -163,6 +169,7 @@ public sealed partial class DocumentViewModel
             if (HasPendingReplacement(page, stored.Id)) continue;
             var displayed = (TextBlockOverlay)ToDisplayFrame(block, page);
             if (!FrameContains(displayed, xPt, yPt, tolerance)) continue;
+            if (Blocked(page, displayed)) return EditResult.Blocked;
             StartTextEdit(page, displayed, null, stored.Id, coversOriginal: true, xPt, yPt);
             return EditResult.Started;
         }
@@ -175,6 +182,8 @@ public sealed partial class DocumentViewModel
             StatusText = Loc.Get(paragraph.RefusedKey ?? "TextParagraphOverlap");
             return EditResult.Refused;
         }
+        if (UnderRedaction(page, paragraph.BoundsPt) || Blocked(page, paragraphBlock))
+            return EditResult.Blocked;
         // Абзац становится блоком в памяти; документ изменится, только если
         // что-то поменяли. Подложка закрывает прежний вид целиком.
         var taken = paragraphBlock with { PlacedRotation = page.PageRef.RotationOffset };
@@ -258,6 +267,14 @@ public sealed partial class DocumentViewModel
             _ = RefreshTextMarksAsync();
         StatusText = Loc.Get("TextBlockTyping");
         TextBlockEditStarted?.Invoke(this, edit);
+    }
+
+    /// <summary>Блок под вымаркой, ждущей записи, не открывается — почему, сказано в строке состояния.</summary>
+    private bool Blocked(PageViewModel page, TextBlockOverlay block)
+    {
+        if (!UnderRedaction(page, Footprint(block))) return false;
+        StatusText = Loc.Get("TextUnderRedaction");
+        return true;
     }
 
     private (TextStyle Style, TextAlign Align, double LineSpacing) Defaults() =>

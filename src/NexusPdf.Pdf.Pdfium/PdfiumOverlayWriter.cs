@@ -88,23 +88,56 @@ internal static partial class PdfiumOverlayWriter
         // Замена абзаца: его объекты снимаются по путям — раньше всего прочего,
         // пока номера объектов страницы те же, что видел пользователь. После
         // растровой замены снимать нечего: на странице уже только растр.
+        var removals = new List<FpdfPageobjectT>();
         var paragraphs = overlays.OfType<TextParagraphReplacement>().ToList();
         if (paragraphs.Count > 0 && !contentAdded)
         {
-            RemoveParagraphObjects(page, paragraphs);
+            removals.AddRange(ParagraphObjects(page, paragraphs));
             contentAdded = true;
         }
 
-        // Замена текстового блока: прежние объекты блока убираются до всего
+        // Замена текстового блока: прежние объекты блока уйдут до всего
         // остального, новая версия ляжет в общем порядке с тем же Id.
         foreach (var blockReplacement in overlays.OfType<TextBlockReplacement>())
         {
-            RemoveTextBlock(page, blockReplacement.BlockId);
+            removals.AddRange(TextBlockObjects(page, blockReplacement.BlockId));
             contentAdded = true;
+        }
+
+        // Правки строк и картинок адресуют объекты по номерам, какими их видел
+        // пользователь: они применяются до снятия, иначе номера сдвинулись бы
+        // и правка легла бы на чужой текст. Снимаются объекты по ссылкам.
+        var appliedInPlace = new HashSet<PageOverlay>(ReferenceEqualityComparer.Instance);
+        if (removals.Count > 0)
+        {
+            var removed = removals.Select(o => o.__Instance).ToHashSet();
+            foreach (var raw in overlays)
+            {
+                switch (raw)
+                {
+                    case TextObjectReplacement textReplacement:
+                        if (PdfObjectTree.Resolve(page, textReplacement.ObjectPath) is { } line && removed.Contains(line.__Instance))
+                            throw new PdfEngineException(LineInReplacedParagraph);
+                        ApplyTextObjectReplacement(document, page, fonts, textReplacement);
+                        appliedInPlace.Add(raw);
+                        break;
+                    case ImageObjectReplacement imageReplacement:
+                        if (imageReplacement.ObjectIndex >= 0 && imageReplacement.ObjectIndex < fpdf_edit.FPDFPageCountObjects(page) &&
+                            fpdf_edit.FPDFPageGetObject(page, imageReplacement.ObjectIndex) is { } picture &&
+                            removed.Contains(picture.__Instance))
+                            throw new PdfEngineException(LineInReplacedParagraph);
+                        ApplyImageObjectReplacement(document, page, imageReplacement);
+                        appliedInPlace.Add(raw);
+                        break;
+                }
+            }
+            RemoveObjects(page, removals);
         }
 
         foreach (var raw in overlays)
         {
+            if (appliedInPlace.Contains(raw))
+                continue;
             var (overlay, extraAngle) = OverlayDisplayMapper.ToFrame(
                 raw, extraQuarterTurns, displayWidth, displayHeight);
             switch (overlay)

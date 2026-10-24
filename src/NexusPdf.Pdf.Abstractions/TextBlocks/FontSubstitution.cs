@@ -11,17 +11,7 @@ public static partial class FontSubstitution
 {
     public static string? FamilyFor(string pdfFontName, IFontProvider fonts)
     {
-        if (string.IsNullOrWhiteSpace(pdfFontName)) return null;
-        var name = SubsetPrefix().Replace(pdfFontName.Trim(), "");
-        name = name.Split(',', '-')[0];
-        foreach (var suffix in new[] { "PSMT", "PS", "MT" })
-        {
-            if (name.Length > suffix.Length && name.EndsWith(suffix, StringComparison.Ordinal))
-            {
-                name = name[..^suffix.Length];
-                break;
-            }
-        }
+        var name = BaseName(pdfFontName);
         if (name.Length == 0) return null;
 
         // Стандартные шрифты PDF и их метрически совместимые замены Windows.
@@ -39,10 +29,19 @@ public static partial class FontSubstitution
     }
 
     /// <summary>Имя шрифта документа для человека: без приставки подмножества и начертания («ABCDEF+Calibri-Bold» → «Calibri»).</summary>
-    public static string DisplayName(string pdfFontName)
+    public static string DisplayName(string pdfFontName) => BaseName(pdfFontName);
+
+    /// <summary>Гарнитура из PostScript-имени: без подмножества, начертания и хвостов PS/MT.</summary>
+    private static string BaseName(string pdfFontName)
     {
         if (string.IsNullOrWhiteSpace(pdfFontName)) return "";
-        return SubsetPrefix().Replace(pdfFontName.Trim(), "").Split(',', '-')[0].Trim();
+        var name = SubsetPrefix().Replace(pdfFontName.Trim(), "").Split(',', '-')[0].Trim();
+        foreach (var suffix in new[] { "PSMT", "PS", "MT" })
+        {
+            if (name.Length > suffix.Length && name.EndsWith(suffix, StringComparison.Ordinal))
+                return name[..^suffix.Length];
+        }
+        return name;
     }
 
     private static string Compact(string name) =>

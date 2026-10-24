@@ -93,9 +93,11 @@ public sealed partial class DocumentViewModel
                 return new PageText(layout, forms, ParagraphBuilder.Build(foreign, forms, BlockFonts));
             });
         }
-        catch (Exception ex) when (ex is PdfEngineException or InvalidOperationException or ObjectDisposedException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            Serilog.Log.Debug(ex, "Описание страницы {Page} не прочиталось", page.LogicalIndex + 1);
+            // Без описания страницы остаются блоки и правка строки — а не
+            // страница, на которой не открывается ничего.
+            Serilog.Log.Warning(ex, "Описание страницы {Page} не прочиталось", page.LogicalIndex + 1);
             return null;
         }
     }
@@ -117,11 +119,38 @@ public sealed partial class DocumentViewModel
         if (PageTextOf(page) is not { } text) return null;
         var pending = page.PageRef.OverlayList.OfType<TextParagraphReplacement>()
             .SelectMany(r => r.Objects).Select(o => o.Fingerprint).ToHashSet(StringComparer.Ordinal);
+        // Строка, правка которой уже ждёт записи, абзацем не берётся: две правки
+        // одного объекта противоречили бы друг другу.
+        var lineEdits = page.PageRef.OverlayList.OfType<TextObjectReplacement>().Select(r => r.ObjectPath).ToList();
         return text.Paragraphs
             .Where(p => p.BoundsPt.Contains(xPt, yPt) || Near(p.BoundsPt, xPt, yPt, 1))
             .Where(p => !p.Objects.Any(o => pending.Contains(o.Fingerprint)))
+            .Where(p => !p.Objects.Any(o => lineEdits.Any(path => path.SequenceEqual(o.Path))))
             .OrderBy(p => p.BoundsPt.WidthPt * p.BoundsPt.HeightPt)
             .FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Лежит ли место под вымаркой, ждущей записи. Такой абзац или блок не
+    /// открывается: его текст содержит вымаранные слова, а после переноса строк
+    /// они вышли бы из-под чёрного.
+    /// </summary>
+    private bool UnderRedaction(PageViewModel page, OverlayBox box) =>
+        page.PageRef.OverlayList.OfType<RedactionDraft>()
+            .Select(r => (RedactionDraft)ToDisplayFrame(r, page))
+            .Any(r => r.XPt < box.XPt + box.WidthPt && box.XPt < r.XPt + r.WidthPt &&
+                      r.YPt < box.YPt + box.HeightPt && box.YPt < r.YPt + r.HeightPt);
+
+    /// <summary>Описанная рамка блока на странице (у повёрнутого — по углам).</summary>
+    private static OverlayBox Footprint(TextBlockOverlay block)
+    {
+        if (block.RotationDegrees == 0) return Frame(block);
+        var a = block.RotationDegrees * Math.PI / 180;
+        var (cx, cy) = (block.XPt + block.WidthPt / 2, block.YPt + block.HeightPt / 2);
+        var (hw, hh) = (block.WidthPt / 2, block.HeightPt / 2);
+        var xs = new[] { -1.0, 1.0 }.SelectMany(sx => new[] { -1.0, 1.0 }.Select(sy => cx + sx * hw * Math.Cos(a) - sy * hh * Math.Sin(a))).ToList();
+        var ys = new[] { -1.0, 1.0 }.SelectMany(sx => new[] { -1.0, 1.0 }.Select(sy => cy + sx * hw * Math.Sin(a) + sy * hh * Math.Cos(a))).ToList();
+        return new OverlayBox(xs.Min(), ys.Min(), xs.Max() - xs.Min(), ys.Max() - ys.Min());
     }
 
     private static bool Near(OverlayBox box, double x, double y, double margin) =>
@@ -232,6 +261,7 @@ public sealed partial class DocumentViewModel
             switch (await EditAtAsync(page, xPt, yPt))
             {
                 case EditResult.Started:
+                case EditResult.Blocked:
                     return;
                 case EditResult.Refused:
                     // Абзац взять нельзя — нынешняя правка строки; почему — в строке состояния.
