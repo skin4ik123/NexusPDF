@@ -296,10 +296,12 @@ public sealed class TextBlockWriteTests : IAsyncLifetime
         Assert.True(OverlayLayers.IsDrawnOnTop(block));
         Assert.False(OverlayLayers.IsDrawnOnTop(replacement));   // удаляет объекты страницы
 
-        // Страница с блоком уже с текстом: OCR не должен класть под него невидимый дубль.
+        // Свой блок на скане не делает скан текстовой страницей: распознавание
+        // его не пропускает, а дубль не возникает, потому что блок не попадает
+        // в распознаваемую картинку (OcrOwnTextTests).
         await using var document = await OpenedDocument.OpenAsync(_pdfium, Source(), null, CancellationToken.None);
         document.Session.Apply(new AddOverlayOperation(0, block));
-        Assert.True(await new OcrService(null!).PageAlreadyHasTextAsync(document, 0, CancellationToken.None));
+        Assert.False(await new OcrService(null!).PageAlreadyHasTextAsync(document, 0, CancellationToken.None));
     }
 
     private static int CountOf(string text, string needle)

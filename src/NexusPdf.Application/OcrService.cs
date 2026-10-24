@@ -88,7 +88,7 @@ public sealed class OcrService
         var pixelHeight = Math.Max(1, (int)Math.Round(size.HeightPoints * scale));
         var dpi = (int)Math.Round(scale * 72.0);
 
-        var image = await document.RenderLogicalPageContentOnlyAsync(
+        var image = await document.RenderLogicalPageForRecognitionAsync(
             logicalIndex, pixelWidth, pixelHeight, ct).ConfigureAwait(false);
         var result = await _ocr.RecognizeAsync(image, dpi, ct).ConfigureAwait(false);
 
@@ -141,7 +141,7 @@ public sealed class OcrService
                 var pixelHeight = Math.Max(1, (int)Math.Round(size.HeightPoints * scale));
                 var dpi = (int)Math.Round(scale * 72.0);
 
-                var image = await document.RenderLogicalPageContentOnlyAsync(logicalIndex, pixelWidth, pixelHeight, ct);
+                var image = await document.RenderLogicalPageForRecognitionAsync(logicalIndex, pixelWidth, pixelHeight, ct);
                 var result = await _ocr.RecognizeAsync(image, dpi, ct);
 
                 // Пиксели растра → отображаемые пункты текущей рамки страницы.
@@ -246,16 +246,15 @@ public sealed class OcrService
     /// <summary>
     /// Есть ли на странице текст — настоящий (любой длины) или уже добавленный
     /// слой OCR. Порога нет намеренно: даже короткий настоящий текст получил бы
-    /// невидимый дубль с двойным копированием/поиском.
+    /// невидимый дубль с двойным копированием/поиском. Свой текст — надписи и
+    /// блоки, написанные на скане в этой программе, — не в счёт: скан с ними
+    /// остаётся сканом, а в распознаваемую картинку они не попадают.
     /// </summary>
     public async Task<bool> PageAlreadyHasTextAsync(OpenedDocument document, int logicalIndex, CancellationToken ct)
     {
         var page = document.Session.Model.Pages[logicalIndex];
-        if (page.OverlayList is { } overlays &&
-            overlays.Any(o => o is OcrTextLayerOverlay or TextOverlay or Pdf.Abstractions.TextBlocks.TextBlockOverlay))
+        if (page.OverlayList is { } overlays && overlays.Any(o => o is OcrTextLayerOverlay))
             return true;
-        var text = await document.Handles[page.SourceId]
-            .GetPageTextAsync(page.SourcePageIndex, ct);
-        return text.Any(c => !char.IsWhiteSpace(c));
+        return await document.Handles[page.SourceId].HasTextBesidesBlocksAsync(page.SourcePageIndex, ct);
     }
 }

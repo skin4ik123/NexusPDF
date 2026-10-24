@@ -138,6 +138,70 @@ internal sealed partial class PdfiumDocumentHandle
         return new StoredTextBlock(id, block, bounds, block != null);
     }
 
+    /// <summary>Сделать объекты наших блоков неактивными (не рисуются); возвращает их, чтобы вернуть.</summary>
+    private static List<FpdfPageobjectT> HideTextBlocks(FpdfPageT page)
+    {
+        var hidden = new List<FpdfPageobjectT>();
+        var reader = new PdfiumTextBlockMarks.Reader();
+        var count = fpdf_edit.FPDFPageCountObjects(page);
+        for (var i = 0; i < count && !reader.Exhausted; i++)
+        {
+            var obj = fpdf_edit.FPDFPageGetObject(page, i);
+            if (obj == null || obj.__Instance == IntPtr.Zero || reader.Read(obj) == null)
+                continue;
+            fpdf_edit.FPDFPageObjSetIsActive(obj, 0);
+            hidden.Add(obj);
+        }
+        return hidden;
+    }
+
+    public Task<bool> HasTextBesidesBlocksAsync(int pageIndex, CancellationToken ct)
+    {
+        lock (_admissionGate)
+        {
+            ThrowIfDisposed();
+            return _thread.InvokeAsync(() =>
+            {
+                var page = fpdfview.FPDF_LoadPage(NativeDoc, pageIndex);
+                if (page == null || page.__Instance == IntPtr.Zero)
+                    return false;
+                var textPage = fpdf_text.FPDFTextLoadPage(page);
+                try
+                {
+                    if (textPage == null || textPage.__Instance == IntPtr.Zero)
+                        return false;
+                    var reader = new PdfiumTextBlockMarks.Reader();
+                    var ours = new Dictionary<IntPtr, bool>();
+                    var count = fpdf_text.FPDFTextCountChars(textPage);
+                    for (var i = 0; i < count; i++)
+                    {
+                        if (i % 4096 == 0)
+                            ct.ThrowIfCancellationRequested();
+                        if (fpdf_text.FPDFTextIsGenerated(textPage, i) != 0)
+                            continue;
+                        var code = fpdf_text.FPDFTextGetUnicode(textPage, i);
+                        if (code == 0 || (code <= 0xFFFF && char.IsWhiteSpace((char)code)))
+                            continue;
+                        var obj = fpdf_text.FPDFTextGetTextObject(textPage, i);
+                        if (obj == null || obj.__Instance == IntPtr.Zero)
+                            return true;
+                        if (!ours.TryGetValue(obj.__Instance, out var own))
+                            ours[obj.__Instance] = own = reader.Read(obj) != null;
+                        if (!own)
+                            return true;
+                    }
+                    return false;
+                }
+                finally
+                {
+                    if (textPage != null && textPage.__Instance != IntPtr.Zero)
+                        fpdf_text.FPDFTextClosePage(textPage);
+                    fpdfview.FPDF_ClosePage(page);
+                }
+            }, ct);
+        }
+    }
+
     /// <summary>
     /// Текст каждого объекта страницы — ровно записанные в нём буквы. Готовый
     /// текст объекта у PDFium содержит и «сгенерированные» пробелы — там, где
