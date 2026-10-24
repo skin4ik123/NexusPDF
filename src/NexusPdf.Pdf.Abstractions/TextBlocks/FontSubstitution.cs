@@ -38,6 +38,13 @@ public static partial class FontSubstitution
         return fonts.FallbackFamilies.FirstOrDefault(family => Compact(family) == compact);
     }
 
+    /// <summary>Имя шрифта документа для человека: без приставки подмножества и начертания («ABCDEF+Calibri-Bold» → «Calibri»).</summary>
+    public static string DisplayName(string pdfFontName)
+    {
+        if (string.IsNullOrWhiteSpace(pdfFontName)) return "";
+        return SubsetPrefix().Replace(pdfFontName.Trim(), "").Split(',', '-')[0].Trim();
+    }
+
     private static string Compact(string name) =>
         new string(name.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
 
