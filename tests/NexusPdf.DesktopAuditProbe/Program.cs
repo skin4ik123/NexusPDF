@@ -5,6 +5,7 @@ using System.Collections.Specialized;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -397,6 +398,8 @@ internal static class Program
         Require(summary.RecognizedPages == 1 && word.MainDocumentPart!.Document!.InnerText.Contains("NEXUS", StringComparison.OrdinalIgnoreCase),
             "Word export recognizes scans after switching the OCR engine");
         await InspectReaderToolsAsync();
+        await VerifyToolBarFitsNarrowWindowAsync();
+        await VerifyQuickPanelFitsAsync();
         await VerifyTextBlocksAsync();
         await VerifyTextEditingAsync();
     }
@@ -675,6 +678,103 @@ internal static class Program
         var value = (System.Windows.Automation.Provider.IValueProvider)peer.GetPattern(
             System.Windows.Automation.Peers.PatternInterface.Value);
         Require(value.Value.EndsWith(text, StringComparison.Ordinal), "Typed text reaches the block: " + text);
+    }
+
+    /// <summary>
+    /// Окно самой малой ширины (или маленький экран): все кнопки и поля каждой
+    /// группы инструментов видны целиком — ряд переносится, а не уходит за
+    /// правый край. Проверяется с самыми широкими наборами: рисование с
+    /// палитрой и толщинами, «Текст» с отметками ✓ ✗ ●.
+    /// </summary>
+    private static async Task VerifyToolBarFitsNarrowWindowAsync()
+    {
+        var (width, height, state) = (_main.Width, _main.Height, _main.WindowState);
+        _main.WindowState = WindowState.Normal;
+        _main.Width = _main.MinWidth;
+        _main.Height = _main.MinHeight;
+        var bar = (FrameworkElement)_main.FindName("ToolGroupBar");
+        var root = (FrameworkElement)_main.Content;
+        try
+        {
+            foreach (var group in new[] { "Pages", "Comment", "Edit", "Measure", "Protect" })
+            {
+                await _main.ViewModel.SelectToolGroupCommand.ExecuteAsync(group);
+                if (group == "Comment") _document.SelectDrawTool(DocumentViewModel.DrawTool.Pencil);
+                if (group == "Edit" && !_document.IsTextTool) _document.ToggleTextTool();
+                await Task.Delay(120);
+                _main.UpdateLayout();
+                await _main.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+
+                var outside = Descendants(bar).OfType<Control>()
+                    .Where(c => c.IsVisible && c is ButtonBase or ComboBox or TextBox or CheckBox or Slider)
+                    .Select(c => (Control: c, Bounds: c.TransformToAncestor(root).TransformBounds(new Rect(c.RenderSize))))
+                    .Where(x => x.Bounds.Left < -0.5 || x.Bounds.Right > root.ActualWidth + 0.5)
+                    .Select(x => System.Windows.Automation.AutomationProperties.GetName(x.Control) is { Length: > 0 } name
+                        ? name : x.Control.GetType().Name)
+                    .ToList();
+                Capture(_main, "narrow-" + group.ToLowerInvariant());
+                Require(outside.Count == 0, $"Every {group} tool fits a window of the smallest width" +
+                    (outside.Count == 0 ? "" : ": cut off — " + string.Join(", ", outside)));
+
+                if (group == "Comment") _document.SelectDrawTool(DocumentViewModel.DrawTool.None);
+                if (group == "Edit" && _document.IsTextTool) _document.ToggleTextTool();
+            }
+        }
+        finally
+        {
+            _main.ViewModel.ActiveToolGroup = MainViewModel.ToolGroup.None;
+            _main.Width = width;
+            _main.Height = height;
+            _main.WindowState = state;
+            await _main.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+        }
+    }
+
+    /// <summary>
+    /// Верхняя быстрая панель с подписями («Оптимизация документа…» и др.) не
+    /// уходит за край окна ни при какой ширине и ни при каком составе: где
+    /// подписи не помещаются, остаются значки. И подписи возвращаются, когда
+    /// места хватает. Проверяется перебором ширин с шагом в несколько точек —
+    /// прикидка ширины по тексту ошибалась именно у самой границы.
+    /// </summary>
+    private static async Task VerifyQuickPanelFitsAsync()
+    {
+        var scroll = (ScrollViewer)_main.FindName("QuickPanelScroll");
+        var items = _main.ViewModel.QuickPanel.Items;
+        var original = items.ToList();
+        var (width, height, state) = (_main.Width, _main.Height, _main.WindowState);
+        var widest = Math.Min(SystemParameters.WorkArea.Width, 1600);
+        var cut = new List<string>();
+        var labelled = false;
+        _main.WindowState = WindowState.Normal;
+        try
+        {
+            for (var keep = original.Count; keep >= 3; keep--)
+            {
+                while (items.Count > keep) items.RemoveAt(items.Count - 1);
+                for (var w = _main.MinWidth; w <= widest; w += 6)
+                {
+                    _main.Width = w;
+                    for (var pass = 0; pass < 3; pass++)
+                        await _main.Dispatcher.InvokeAsync(() => _main.UpdateLayout(), DispatcherPriority.Background);
+                    if (scroll.ScrollableWidth > 0.5)
+                        cut.Add($"{keep} items at {w:0} wide ({(_main.ShowResponsiveQuickPanelLabels ? "labels" : "icons")}, {scroll.ScrollableWidth:0} px hidden)");
+                    labelled |= _main.ShowResponsiveQuickPanelLabels;
+                }
+            }
+        }
+        finally
+        {
+            items.Clear();
+            foreach (var item in original) items.Add(item);
+            _main.Width = width;
+            _main.Height = height;
+            _main.WindowState = state;
+            await _main.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+        }
+        Require(cut.Count == 0, "Quick panel buttons never go past the window edge" +
+            (cut.Count == 0 ? "" : ": " + string.Join("; ", cut.Take(6))));
+        Require(labelled, "Quick panel labels come back where they fit");
     }
 
     private static async Task InspectReaderToolsAsync()
