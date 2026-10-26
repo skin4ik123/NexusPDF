@@ -126,9 +126,9 @@ public partial class App : System.Windows.Application
             {
                 var target = WindowManager.ActiveOrFirst();
                 if (target == null) return;
-                if (target.WindowState == WindowState.Minimized)
-                    target.WindowState = WindowState.Normal; // Activate сам не разворачивает
-                target.Activate();
+                // Activate сам не разворачивает; разрешение выйти вперёд прислал
+                // процесс, которому файл отдал Проводник.
+                WindowManager.BringToFront(target);
                 await target.ViewModel.OpenFilesAsync(received.Where(File.Exists));
             });
         });

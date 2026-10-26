@@ -400,6 +400,7 @@ internal static class Program
         await InspectReaderToolsAsync();
         await VerifyToolBarFitsNarrowWindowAsync();
         await VerifyQuickPanelFitsAsync();
+        await VerifyMinimizedWindowComesBackAsync();
         await VerifyTextBlocksAsync();
         await VerifyTextEditingAsync();
     }
@@ -775,6 +776,32 @@ internal static class Program
         Require(cut.Count == 0, "Quick panel buttons never go past the window edge" +
             (cut.Count == 0 ? "" : ": " + string.Join("; ", cut.Take(6))));
         Require(labelled, "Quick panel labels come back where they fit");
+    }
+
+    /// <summary>
+    /// Файл, открытый из Проводника, пока окно свёрнуто, разворачивает окно — в
+    /// прежнее состояние: развёрнутое на весь экран возвращается развёрнутым.
+    /// </summary>
+    private static async Task VerifyMinimizedWindowComesBackAsync()
+    {
+        var state = _main.WindowState;
+        try
+        {
+            _main.WindowState = WindowState.Maximized;
+            await _main.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+            _main.WindowState = WindowState.Minimized;
+            await WaitUntilAsync(() => _main.WindowState == WindowState.Minimized, "The window is minimized");
+
+            WindowManager.BringToFront(_main);
+
+            await WaitUntilAsync(() => _main.WindowState == WindowState.Maximized,
+                "A file handed over while minimized brings the window back maximized as it was");
+        }
+        finally
+        {
+            _main.WindowState = state;
+            await _main.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+        }
     }
 
     private static async Task InspectReaderToolsAsync()

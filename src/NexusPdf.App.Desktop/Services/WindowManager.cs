@@ -31,6 +31,34 @@ public static class WindowManager
         return window;
     }
 
+    /// <summary>
+    /// Показать окно, которому передали файл: развернуть из свёрнутого — в
+    /// прежнее состояние (развёрнутое на весь экран остаётся таким, а не
+    /// становится обычным, как при WindowState = Normal) — и вывести вперёд.
+    /// </summary>
+    public static void BringToFront(System.Windows.Window window)
+    {
+        var handle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        if (window.WindowState == System.Windows.WindowState.Minimized)
+        {
+            if (handle != IntPtr.Zero)
+                ShowWindow(handle, SwRestore);
+            else
+                window.WindowState = System.Windows.WindowState.Normal;
+        }
+        window.Activate();
+        if (handle != IntPtr.Zero)
+            SetForegroundWindow(handle);
+    }
+
+    private const int SwRestore = 9;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr window, int command);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr window);
+
     public static MainWindow? ActiveOrFirst() =>
         Windows.FirstOrDefault(w => w.IsActive) ?? Windows.FirstOrDefault();
 
