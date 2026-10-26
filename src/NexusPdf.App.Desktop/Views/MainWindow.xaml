@@ -75,6 +75,7 @@
         <ScrollViewer x:Name="QuickPanelScroll" Grid.Column="0" HorizontalScrollBarVisibility="Auto"
                       VerticalScrollBarVisibility="Disabled" Focusable="False"
                       SizeChanged="OnQuickPanelSizeChanged" PreviewMouseWheel="OnQuickPanelMouseWheel"
+                      ScrollChanged="OnQuickPanelScrollChanged"
                       Visibility="{Binding ShowQuickPanel, Converter={StaticResource BoolToVis}}">
         <ItemsControl ItemsSource="{Binding QuickPanel.Items}">
           <ItemsControl.ItemsPanel>
@@ -121,13 +122,15 @@
       </Grid>
     </Border>
 
-    <!-- Контекстная панель выбранной группы инструментов -->
-    <Border Grid.Row="1" Grid.ColumnSpan="2" Background="{DynamicResource PanelBg}"
+    <!-- Контекстная панель выбранной группы инструментов. Группы — переносимые
+         ряды: на узком окне или маленьком экране кнопки переходят на следующую
+         строку, а не уходят за правый край, где до них не добраться. -->
+    <Border x:Name="ToolGroupBar" Grid.Row="1" Grid.ColumnSpan="2" Background="{DynamicResource PanelBg}"
             BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,0,1"
             Visibility="{Binding HasToolGroup, Converter={StaticResource BoolToVis}}">
       <Grid Margin="10,4">
         <!-- Комментарии и рисование -->
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+        <WrapPanel Orientation="Horizontal" VerticalAlignment="Center"
                     Visibility="{Binding IsGroupComment, Converter={StaticResource BoolToVis}}">
           <Button Style="{StaticResource ToolButton}" Command="{Binding AddNoteCommand}"
                   IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc NoteTool}">
@@ -219,10 +222,10 @@
                         IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc CommentsPanel}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8BD;"/>
           </ToggleButton>
-        </StackPanel>
+        </WrapPanel>
 
         <!-- Правка содержимого -->
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+        <WrapPanel Orientation="Horizontal" VerticalAlignment="Center"
                     Visibility="{Binding IsGroupEdit, Converter={StaticResource BoolToVis}}">
           <Button Style="{StaticResource ToolButton}" Command="{Binding EditExistingTextCommand}"
                   IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc TextEditTool}">
@@ -276,12 +279,12 @@
               <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE7C4;"/>
             </Button>
           </StackPanel>
-        </StackPanel>
+        </WrapPanel>
 
         <!-- Формы -->
         <!-- Группа сама включает заполнение, поэтому вместо второго
              переключателя здесь подсказка и «Готово» — выход из заполнения. -->
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+        <WrapPanel Orientation="Horizontal" VerticalAlignment="Center"
                     Visibility="{Binding IsGroupForms, Converter={StaticResource BoolToVis}}">
           <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE762;" VerticalAlignment="Center"
                      Foreground="{DynamicResource Accent}"/>
@@ -295,10 +298,10 @@
               <TextBlock Text="{l:Loc FormDone}" Margin="6,0,0,0"/>
             </StackPanel>
           </Button>
-        </StackPanel>
+        </WrapPanel>
 
         <!-- Защита -->
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+        <WrapPanel Orientation="Horizontal" VerticalAlignment="Center"
                     Visibility="{Binding IsGroupProtect, Converter={StaticResource BoolToVis}}">
           <Button Style="{StaticResource ToolButton}" Command="{Binding AddRedactionCommand}"
                   IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc RedactTool}">
@@ -316,10 +319,10 @@
                   IsEnabled="{Binding HasDocuments}" ToolTip="{l:Loc SignMenu}">
             <TextBlock Style="{StaticResource ToolGlyph}" Text="&#xE8EC;"/>
           </Button>
-        </StackPanel>
+        </WrapPanel>
 
         <!-- Измерение: инструмент, масштаб, единицы, точность, привязка -->
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+        <WrapPanel Orientation="Horizontal" VerticalAlignment="Center"
                     Visibility="{Binding IsGroupMeasure, Converter={StaticResource BoolToVis}}">
           <ToggleButton Style="{StaticResource ToolButton}" Command="{Binding MeasureDistanceCommand}"
                         IsChecked="{Binding ActiveDocument.IsMeasureDistanceActive, Mode=OneWay, FallbackValue=False}"
@@ -411,10 +414,10 @@
           <TextBlock Text="{Binding ActiveDocument.LastMeasurementText, FallbackValue=''}"
                      VerticalAlignment="Center" Margin="14,0,0,0" FontSize="13" FontWeight="SemiBold"
                      Foreground="{DynamicResource TextBrush}"/>
-        </StackPanel>
+        </WrapPanel>
 
         <!-- Страницы: размер миниатюр и подсказка режима систематизации -->
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+        <WrapPanel Orientation="Horizontal" VerticalAlignment="Center"
                     Visibility="{Binding IsGroupPages, Converter={StaticResource BoolToVis}}">
           <TextBlock Text="{l:Loc OrganizeThumbSize}" VerticalAlignment="Center" Margin="0,0,6,0"
                      FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
@@ -425,9 +428,9 @@
                   IsEnabled="{Binding HasDocuments}"
                   Value="{Binding ActiveDocument.OrganizeThumbWidth, Mode=TwoWay, FallbackValue=150}"/>
           <Border Width="1" Background="{DynamicResource PanelBorder}" Margin="10,4"/>
-          <TextBlock Text="{l:Loc OrganizeHint}" VerticalAlignment="Center"
+          <TextBlock Text="{l:Loc OrganizeHint}" VerticalAlignment="Center" TextWrapping="Wrap"
                      FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
-        </StackPanel>
+        </WrapPanel>
       </Grid>
     </Border>
 
