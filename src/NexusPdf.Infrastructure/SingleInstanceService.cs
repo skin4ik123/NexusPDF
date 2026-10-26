@@ -129,7 +129,7 @@ public sealed class SingleInstanceService : IDisposable
             if (GetNamedPipeServerProcessId(client.SafePipeHandle, out var processId))
                 AllowSetForegroundWindow(processId);
         }
-        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException)
+        catch (Exception)
         {
             // Без разрешения окно лишь мигнёт на панели задач — файл всё равно откроется.
         }
