@@ -142,14 +142,20 @@ public partial class MainWindow : Window
         if (work.Width <= 0 || work.Height <= 0)
             return;
 
-        if (work.Width < Width + 40 || work.Height < Height + 40)
-        {
-            WindowState = WindowState.Maximized;
-            return;
-        }
+        var maximize = work.Width < Width + 40 || work.Height < Height + 40;
 
-        Width = Math.Min(Width, work.Width - 40);
-        Height = Math.Min(Height, work.Height - 40);
+        // Размер «после Восстановить» и минимум тоже вписываются в экран: иначе
+        // окно, развёрнутое на маленьком экране, восстанавливалось бы шире и
+        // выше его и уходило кнопками за края.
+        var width = Math.Max(NexusPdf.Ux.ScreenFit.FloorWidth, work.Width - 40);
+        var height = Math.Max(NexusPdf.Ux.ScreenFit.FloorHeight, work.Height - 40);
+        MinWidth = Math.Min(MinWidth, width);
+        MinHeight = Math.Min(MinHeight, height);
+        Width = Math.Min(Width, width);
+        Height = Math.Min(Height, height);
+
+        if (maximize)
+            WindowState = WindowState.Maximized;
     }
 
     public static readonly RoutedCommand ToggleFullScreenCommand = new();

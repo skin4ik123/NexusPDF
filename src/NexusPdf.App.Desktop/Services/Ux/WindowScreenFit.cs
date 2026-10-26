@@ -29,10 +29,18 @@ public static class WindowScreenFit
 
     public static void Apply(Window window)
     {
-        // Развёрнутое окно и так в границах экрана, а Left/Top у него
-        // относятся к прежнему положению.
-        if (window.WindowState != WindowState.Normal) return;
         if (WorkAreaOf(window) is not { } work) return;
+        // Развёрнутое окно и так в границах экрана, а Left/Top у него
+        // относятся к прежнему положению. Но минимумы вписываются и ему: главное
+        // окно на маленьком экране открывается развёрнутым и после
+        // «Восстановить» иначе не ужалось бы меньше экрана.
+        if (window.WindowState != WindowState.Normal)
+        {
+            var screen = ScreenFit.Fit(work, work, window.MinWidth, window.MinHeight);
+            if (screen.MinWidth < window.MinWidth) window.MinWidth = screen.MinWidth;
+            if (screen.MinHeight < window.MinHeight) window.MinHeight = screen.MinHeight;
+            return;
+        }
         if (double.IsNaN(window.Left) || double.IsNaN(window.Top)) return;
         if (window.ActualWidth <= 0 || window.ActualHeight <= 0) return;
 
