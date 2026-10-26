@@ -401,10 +401,12 @@ internal static class Program
         await InspectReaderToolsAsync();
         await VerifyToolBarFitsNarrowWindowAsync();
         await VerifyQuickPanelFitsAsync();
-        await VerifyMinimizedWindowComesBackAsync();
-        await VerifyMaximizedWindowMinimumsFitAsync();
         await VerifyTextBlocksAsync();
         await VerifyTextEditingAsync();
+        // Сворачивание и чужое окно — последними: окно, вернувшееся без
+        // клавиатурного фокуса, не должно ронять проверки набора текста.
+        await VerifyMinimizedWindowComesBackAsync();
+        await VerifyMaximizedWindowMinimumsFitAsync();
     }
 
     /// <summary>
@@ -707,6 +709,7 @@ internal static class Program
                 await Task.Delay(120);
                 _main.UpdateLayout();
                 await _main.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+                Require(Descendants(bar).OfType<ButtonBase>().Any(b => b.IsVisible), $"The {group} tools are shown");
 
                 var outside = Descendants(bar).OfType<Control>()
                     .Where(c => c.IsVisible && c is ButtonBase or ComboBox or TextBox or CheckBox or Slider)
