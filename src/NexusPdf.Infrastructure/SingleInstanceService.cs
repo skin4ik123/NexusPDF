@@ -101,6 +101,7 @@ public sealed class SingleInstanceService : IDisposable
         {
             using var client = new NamedPipeClientStream(".", BaseName + ".pipe", PipeDirection.Out);
             client.Connect(4000);
+            AllowPrimaryToComeForward(client);
             using var writer = new StreamWriter(client, Encoding.UTF8);
             writer.Write(JsonSerializer.Serialize(files));
             writer.Flush();
@@ -111,6 +112,34 @@ public sealed class SingleInstanceService : IDisposable
             return false;
         }
     }
+
+    /// <summary>
+    /// Выйти на передний план Windows разрешает только процессу, который
+    /// запустил пользователь (этому — его запустил Проводник), а свёрнутое
+    /// первичное окно работает в фоне: без разрешения оно не выходило вперёд, а
+    /// лишь мигало на панели задач. Разрешение передаётся первичному процессу
+    /// до отправки файлов.
+    /// </summary>
+    private static void AllowPrimaryToComeForward(NamedPipeClientStream client)
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+        try
+        {
+            if (GetNamedPipeServerProcessId(client.SafePipeHandle, out var processId))
+                AllowSetForegroundWindow(processId);
+        }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException)
+        {
+            // Без разрешения окно лишь мигнёт на панели задач — файл всё равно откроется.
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetNamedPipeServerProcessId(Microsoft.Win32.SafeHandles.SafePipeHandle pipe, out uint serverProcessId);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern bool AllowSetForegroundWindow(uint processId);
 
     public void Dispose()
     {
