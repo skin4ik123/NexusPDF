@@ -828,12 +828,16 @@ internal static class Program
             WindowState = WindowState.Maximized,
             ShowInTaskbar = false,
         };
+        // WPF поднимает Loaded только там, где на него подписан хоть один
+        // экземпляр; окна программы с содержимым его получают (большие диалоги
+        // вписываются), а у пустого окна не сработал бы и обработчик класса —
+        // при том что IsLoaded у него сразу true.
+        var loaded = false;
+        window.Loaded += (_, _) => loaded = true;
         try
         {
             window.Show();
-            // Минимум вписывается по Loaded, а оно приходит с отрисовкой кадра —
-            // бывает и позже фоновых операций диспетчера.
-            await WaitUntilAsync(() => window.IsLoaded, "The maximized test window loads");
+            await WaitUntilAsync(() => loaded, "The maximized test window raises Loaded");
             Require(window.MinWidth <= work.Width && window.MinHeight <= work.Height,
                 $"A maximized window's minimum size fits the screen ({window.MinWidth:0}x{window.MinHeight:0} vs {work.Width:0}x{work.Height:0})");
         }
