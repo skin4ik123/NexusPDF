@@ -831,7 +831,9 @@ internal static class Program
         try
         {
             window.Show();
-            await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+            // Минимум вписывается по Loaded, а оно приходит с отрисовкой кадра —
+            // бывает и позже фоновых операций диспетчера.
+            await WaitUntilAsync(() => window.IsLoaded, "The maximized test window loads");
             Require(window.MinWidth <= work.Width && window.MinHeight <= work.Height,
                 $"A maximized window's minimum size fits the screen ({window.MinWidth:0}x{window.MinHeight:0} vs {work.Width:0}x{work.Height:0})");
         }
