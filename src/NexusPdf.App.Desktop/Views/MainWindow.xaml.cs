@@ -39,37 +39,88 @@ public partial class MainWindow : Window
         _ = ViewModel.Ux;
         ViewModel.QuickPanel.Items.CollectionChanged += OnQuickPanelItemsChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        NexusPdf.App.Desktop.Services.Ux.DensityManager.Changed += OnDensityChanged;
         Closed += (_, _) =>
         {
             ViewModel.QuickPanel.Items.CollectionChanged -= OnQuickPanelItemsChanged;
             ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            NexusPdf.App.Desktop.Services.Ux.DensityManager.Changed -= OnDensityChanged;
         };
         UpdateQuickPanelLabels();
     }
 
-    private void OnQuickPanelItemsChanged(object? sender, NotifyCollectionChangedEventArgs e) => UpdateQuickPanelLabels();
+    /// <summary>
+    /// Ширина быстрой панели с подписями, какой её увидела раскладка (NaN — ещё
+    /// не видели). Прикидка по тексту не знает округления букв до пикселей
+    /// (на экранах до 125 % текст рисуется «чётко») и округления раскладки — и
+    /// занижала ширину: подписи оставались, а кнопки уходили за край окна.
+    /// </summary>
+    private double _labelledWidth = double.NaN;
+
+    private void OnQuickPanelItemsChanged(object? sender, NotifyCollectionChangedEventArgs e) => RemeasureQuickPanel();
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(MainViewModel.ShowQuickPanelLabels)) UpdateQuickPanelLabels();
+        if (e.PropertyName == nameof(MainViewModel.ShowQuickPanelLabels)) RemeasureQuickPanel();
+    }
+
+    private void OnDensityChanged(object? sender, EventArgs e) => Dispatcher.BeginInvoke(new Action(RemeasureQuickPanel));
+
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+        RemeasureQuickPanel();
     }
 
     private void OnQuickPanelSizeChanged(object sender, SizeChangedEventArgs e) => UpdateQuickPanelLabels();
 
+    /// <summary>Состав, шрифт или плотность поменялись — прежняя ширина с подписями уже не та.</summary>
+    private void RemeasureQuickPanel()
+    {
+        _labelledWidth = double.NaN;
+        UpdateQuickPanelLabels();
+    }
+
     private void UpdateQuickPanelLabels()
     {
         if (QuickPanelScroll == null || QuickPanelScroll.ActualWidth <= 0) return;
+        if (!ViewModel.ShowQuickPanelLabels)
+        {
+            ShowResponsiveQuickPanelLabels = false;
+            return;
+        }
+        var needed = double.IsNaN(_labelledWidth) ? EstimateLabelledWidth() : _labelledWidth;
+        ShowResponsiveQuickPanelLabels = needed <= QuickPanelScroll.ActualWidth;
+    }
+
+    /// <summary>
+    /// Подписи показаны — раскладка знает настоящую ширину панели. Не влезла —
+    /// подписи убираются (остаются значки), а ширина запоминается: панель
+    /// снова получит подписи, только когда для них действительно хватит места.
+    /// </summary>
+    private void OnQuickPanelScrollChanged(object sender, System.Windows.Controls.ScrollChangedEventArgs e)
+    {
+        if (!ShowResponsiveQuickPanelLabels || (e.ExtentWidthChange == 0 && e.ViewportWidthChange == 0))
+            return;
+        _labelledWidth = QuickPanelScroll.ExtentWidth;
+        if (QuickPanelScroll.ExtentWidth > QuickPanelScroll.ViewportWidth + 0.5)
+            ShowResponsiveQuickPanelLabels = false;
+    }
+
+    /// <summary>Ширина панели с подписями до первой раскладки — тем же режимом текста, что на экране.</summary>
+    private double EstimateLabelledWidth()
+    {
         var padding = (Thickness)FindResource("UxToolPadding");
         var margin = (Thickness)FindResource("UxToolMargin");
         var glyphWidth = (double)FindResource("UxGlyphSize");
         var targetWidth = (double)FindResource("UxTouchTarget");
         var typeface = new Typeface(FontFamily, FontStyle, FontWeight, FontStretch);
         var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        var fullWidth = ViewModel.QuickPanel.Items.Sum(item => item.IsSeparator ? 13 :
-            Math.Max(targetWidth, padding.Left + padding.Right + margin.Left + margin.Right + 4 + glyphWidth + 6 +
+        var mode = TextOptions.GetTextFormattingMode(this);
+        return ViewModel.QuickPanel.Items.Sum(item => item.IsSeparator ? 13 :
+            Math.Ceiling(Math.Max(targetWidth, padding.Left + padding.Right + margin.Left + margin.Right + 4 + glyphWidth + 6 +
                 new FormattedText(item.Title, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
-                    typeface, FontSize, Brushes.Black, dpi).WidthIncludingTrailingWhitespace));
-        ShowResponsiveQuickPanelLabels = ViewModel.ShowQuickPanelLabels && fullWidth <= QuickPanelScroll.ActualWidth;
+                    typeface, FontSize, Brushes.Black, null, mode, dpi).WidthIncludingTrailingWhitespace)) + 1);
     }
 
     private void OnQuickPanelMouseWheel(object sender, MouseWheelEventArgs e)
