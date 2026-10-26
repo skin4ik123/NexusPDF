@@ -89,6 +89,7 @@ internal static class Program
         _main = WindowManager.OpenWindow(_services, null);
         await Task.Delay(350);
         Capture(_main, "main-empty");
+        VerifyMainWindowFitsScreen();
 
         const int width = 600, height = 800;
         _pixels = Enumerable.Repeat((byte)255, width * height * 4).ToArray();
@@ -401,6 +402,7 @@ internal static class Program
         await VerifyToolBarFitsNarrowWindowAsync();
         await VerifyQuickPanelFitsAsync();
         await VerifyMinimizedWindowComesBackAsync();
+        await VerifyMaximizedWindowMinimumsFitAsync();
         await VerifyTextBlocksAsync();
         await VerifyTextEditingAsync();
     }
@@ -802,6 +804,55 @@ internal static class Program
             _main.WindowState = state;
             await _main.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
         }
+    }
+
+    /// <summary>
+    /// Окно, открытое развёрнутым на маленьком экране (главное окно так
+    /// открывается, если не помещается), после «Восстановить» обязано
+    /// ужиматься до экрана: минимум больше рабочей области оставил бы кнопки
+    /// за краем.
+    /// </summary>
+    private static async Task VerifyMaximizedWindowMinimumsFitAsync()
+    {
+        var work = SystemParameters.WorkArea;
+        var window = new Window
+        {
+            Owner = _main,
+            Width = 400,
+            Height = 300,
+            MinWidth = work.Width + 500,
+            MinHeight = work.Height + 500,
+            WindowState = WindowState.Maximized,
+            ShowInTaskbar = false,
+        };
+        try
+        {
+            window.Show();
+            await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+            Require(window.MinWidth <= work.Width && window.MinHeight <= work.Height,
+                $"A maximized window's minimum size fits the screen ({window.MinWidth:0}x{window.MinHeight:0} vs {work.Width:0}x{work.Height:0})");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    /// <summary>
+    /// Главное окно сразу после запуска: на маленьком экране оно открывается
+    /// развёрнутым, и размер «после Восстановить» обязан помещаться на экран,
+    /// как и минимум, — иначе восстановленное окно уходит за края.
+    /// </summary>
+    private static void VerifyMainWindowFitsScreen()
+    {
+        var work = SystemParameters.WorkArea;
+        var bounds = _main.WindowState == WindowState.Normal
+            ? new Rect(_main.Left, _main.Top, _main.ActualWidth, _main.ActualHeight)
+            : _main.RestoreBounds;
+        Require(bounds.Width <= work.Width + 0.5 && bounds.Height <= work.Height + 0.5,
+            $"The main window's restored size fits the screen ({bounds.Width:0}x{bounds.Height:0} vs {work.Width:0}x{work.Height:0})");
+        Require(_main.MinWidth <= work.Width && _main.MinHeight <= work.Height,
+            $"The main window's minimum size fits the screen ({_main.MinWidth:0}x{_main.MinHeight:0})");
     }
 
     private static async Task InspectReaderToolsAsync()
